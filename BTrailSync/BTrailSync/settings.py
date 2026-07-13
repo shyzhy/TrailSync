@@ -76,10 +76,15 @@ WSGI_APPLICATION = 'BTrailSync.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'TrailSync',
+        'USER': 'postgres',
+        'PASSWORD': 'shuri',
+        'HOST': 'localhost',  # Or your cloud database host
+        'PORT': '5432',       # Default PostgreSQL port
     }
 }
+
 
 
 # Password validation
@@ -100,7 +105,7 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
+AUTH_USER_MODEL = "TrailSync.User"
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
