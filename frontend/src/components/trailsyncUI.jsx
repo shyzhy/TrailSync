@@ -368,7 +368,16 @@ export function GlassScene({ children, maxWidth = '420px' }) {
 export const APP_CSS = `
   ${COLOR_UTIL_CSS}
 
-  .ts-app-shell { background: #FAF8F3; min-height: 100vh; }
+  /* Extremely subtle warm/sage glow behind everything — just enough that the
+     glass cards have something to visibly float over. Kept at ~5% opacity
+     specifically so it never competes with content. */
+  .ts-app-shell {
+    min-height: 100vh;
+    background:
+      radial-gradient(1100px 550px at 12% -8%, rgba(184,135,43,0.06), transparent 60%),
+      radial-gradient(950px 650px at 100% 105%, rgba(79,122,106,0.06), transparent 55%),
+      #FAF8F3;
+  }
 
   .ts-app-header {
     background: rgba(250,248,243,0.92);
@@ -377,11 +386,72 @@ export const APP_CSS = `
     border-bottom: 1px solid #E3DFD2;
   }
 
+  /* ---- Sidebar: institutional-blue frosted glass, not a flat fill ---- */
+  .ts-sidebar {
+    background: linear-gradient(180deg, #35548F 0%, #24406B 45%, #17294A 100%);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.16),
+      6px 0 28px -14px rgba(15,23,42,0.4);
+  }
+  .ts-nav-item {
+    position: relative;
+    color: rgba(250,248,243,0.72);
+    border-radius: 10px;
+    transition: color 150ms ease, background 150ms ease;
+  }
+  .ts-nav-item:hover { color: #FAF8F3; background: rgba(255,255,255,0.06); }
+  .ts-nav-item:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
+  /* Active = looks lit from within, not just a translucent rectangle: soft
+     inset glow + top highlight + a thin gold accent bar (used sparingly,
+     echoing the checkbox/focus-ring gold elsewhere in the app). */
+  .ts-nav-item-active {
+    color: #FAF8F3;
+    background: linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.04) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.35),
+      inset 0 0 0 1px rgba(255,255,255,0.08),
+      0 2px 10px rgba(15,23,42,0.28);
+  }
+  .ts-nav-item-active::before {
+    content: '';
+    position: absolute;
+    left: -3px; top: 20%; bottom: 20%;
+    width: 3px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, #E4B45C, #B8872B);
+  }
+
+  /* ---- Liquid glass cards: translucent paper over the shell's own subtle
+     texture, not opaque white boxes. ---- */
   .ts-card {
-    background: #FFFFFF;
-    border: 1px solid #E3DFD2;
+    position: relative;
+    background: linear-gradient(165deg, rgba(255,255,255,0.86) 0%, rgba(250,248,243,0.70) 100%);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid rgba(255,255,255,0.65);
     border-radius: 14px;
-    box-shadow: 0 1px 2px rgba(31,41,55,0.04), 0 10px 24px -16px rgba(31,41,55,0.16);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.8),
+      0 16px 32px -20px rgba(31,41,55,0.28),
+      0 2px 6px rgba(31,41,55,0.05);
+    transition: transform 200ms ease, box-shadow 200ms ease;
+  }
+  /* Only the stat cards lift on hover — they're informational, not pressable. */
+  .ts-card-hoverable:hover {
+    transform: translateY(-3px);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.9),
+      0 26px 46px -22px rgba(31,41,55,0.34),
+      0 4px 10px rgba(31,41,55,0.08);
+  }
+
+  /* Embossed/glowing number: a soft dark lift plus a faint institutional-blue
+     halo, rather than flat serif text sitting on the glass. */
+  .ts-stat-number {
+    color: #1F2937;
+    text-shadow: 0 1px 1px rgba(255,255,255,0.7), 0 2px 6px rgba(31,41,55,0.14), 0 0 22px rgba(36,64,107,0.10);
   }
 
   .ts-stat-icon {
@@ -394,24 +464,64 @@ export const APP_CSS = `
   .ts-stat-icon-gold { background: linear-gradient(180deg, rgba(184,135,43,0.20), rgba(184,135,43,0.06)); color: #B8872B; }
   .ts-stat-icon-sage { background: linear-gradient(180deg, rgba(79,122,106,0.20), rgba(79,122,106,0.06)); color: #4F7A6A; }
 
+  /* ---- Quick action cards: same glass, but built to look pressable — they
+     depress on hover already, and depress further on click, rather than
+     lifting like the stat cards. ---- */
   .ts-quick-card {
-    border: 1px solid #E3DFD2;
+    position: relative;
+    background: linear-gradient(165deg, rgba(255,255,255,0.86) 0%, rgba(250,248,243,0.70) 100%);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid rgba(255,255,255,0.65);
     border-radius: 14px;
-    background: #FFFFFF;
-    transition: box-shadow 150ms ease, transform 80ms ease, border-color 150ms ease;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.8),
+      0 16px 32px -20px rgba(31,41,55,0.28),
+      0 2px 6px rgba(31,41,55,0.05);
+    transition: box-shadow 150ms ease, transform 100ms ease, background 150ms ease;
   }
-  .ts-quick-card:hover { border-color: rgba(36,64,107,0.35); box-shadow: 0 14px 28px -18px rgba(31,41,55,0.3); }
-  .ts-quick-card:active { transform: translateY(1px); }
+  .ts-quick-card:hover {
+    background: linear-gradient(165deg, rgba(248,246,240,0.9) 0%, rgba(240,236,226,0.78) 100%);
+    box-shadow: inset 0 2px 6px rgba(31,41,55,0.10), 0 8px 18px -14px rgba(31,41,55,0.2);
+    transform: translateY(1px);
+  }
+  .ts-quick-card:active {
+    background: linear-gradient(165deg, rgba(242,238,229,0.94) 0%, rgba(231,226,212,0.86) 100%);
+    box-shadow: inset 0 3px 10px rgba(31,41,55,0.16), inset 0 -1px 0 rgba(255,255,255,0.4);
+    transform: translateY(2px) scale(0.99);
+  }
   .ts-quick-card:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
 
-  /* Pill labels/colors per spec: Ready for pickup = sage, Processing (the
-     Submitted+Verified bucket) = gold/amber, Released = gray. */
-  .ts-pill { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 500; white-space: nowrap; }
-  .ts-pill-processing { background: rgba(184,135,43,0.14); color: #8A6620; border: 1px solid rgba(184,135,43,0.32); }
-  .ts-pill-ready { background: rgba(79,122,106,0.14); color: #33574A; border: 1px solid rgba(79,122,106,0.34); }
-  .ts-pill-released { background: rgba(91,100,116,0.12); color: #5B6474; border: 1px solid rgba(91,100,116,0.28); }
+  /* ---- Status pills: small glossy enamel badges — a top-lit gradient +
+     inner highlight instead of a flat fill. Colors per spec: Ready for
+     pickup = sage, Processing (Submitted+Verified) = gold, Released = gray. ---- */
+  .ts-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    border-radius: 999px; padding: 3px 10px;
+    font-size: 12px; font-weight: 600; white-space: nowrap;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.6), inset 0 -1px 2px rgba(31,41,55,0.05), 0 1px 2px rgba(31,41,55,0.06);
+  }
+  .ts-pill-processing {
+    background: linear-gradient(180deg, rgba(226,180,97,0.34) 0%, rgba(184,135,43,0.18) 100%);
+    color: #7A5A17;
+    border: 1px solid rgba(184,135,43,0.4);
+  }
+  .ts-pill-ready {
+    background: linear-gradient(180deg, rgba(122,173,153,0.34) 0%, rgba(79,122,106,0.18) 100%);
+    color: #2C4B3F;
+    border: 1px solid rgba(79,122,106,0.42);
+  }
+  .ts-pill-released {
+    background: linear-gradient(180deg, rgba(156,163,174,0.30) 0%, rgba(91,100,116,0.16) 100%);
+    color: #4A5262;
+    border: 1px solid rgba(91,100,116,0.32);
+  }
 
   .ts-row-hover:hover { background: rgba(36,64,107,0.03); }
+
+  /* Soft inset line instead of a flat 1px border between rows. */
+  .ts-row-divider { box-shadow: inset 0 1px 0 rgba(31,41,55,0.07); }
+  .ts-row-divider:first-child { box-shadow: none; }
 
   .ts-skeleton {
     background: linear-gradient(90deg, #ECE8DD 25%, #F5F3EC 37%, #ECE8DD 63%);
@@ -478,6 +588,43 @@ export function InboxIcon() {
       <rect x="5" y="12" width="30" height="22" rx="3" stroke="#E3DFD2" strokeWidth="1.75" fill="rgba(250,248,243,0.6)" />
       <path d="M5 22h9l2.2 4h7.6l2.2-4h9" stroke="#E3DFD2" strokeWidth="1.75" strokeLinejoin="round" />
       <path d="M13 12l3-6h8l3 6" stroke="#E3DFD2" strokeWidth="1.75" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function HomeIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M3 9.5 10 3l7 6.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5 8.5V16a.5.5 0 0 0 .5.5H8V13a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v3.5h2.5a.5.5 0 0 0 .5-.5V8.5" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function ChatIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M3 5.5A1.5 1.5 0 0 1 4.5 4h11A1.5 1.5 0 0 1 17 5.5v6A1.5 1.5 0 0 1 15.5 13H8l-3.5 3v-3H4.5A1.5 1.5 0 0 1 3 11.5v-6Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M6.5 8h7M6.5 10.2h4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function UserCircleIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <circle cx="10" cy="10" r="7.25" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="10" cy="8.3" r="2.3" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M4.8 15.2a5.6 5.6 0 0 1 10.4 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function LogoutIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M8 3.5H5.5A1.5 1.5 0 0 0 4 5v10a1.5 1.5 0 0 0 1.5 1.5H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M13 13.5 17 10l-4-3.5M17 10H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

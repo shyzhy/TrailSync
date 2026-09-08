@@ -3,12 +3,16 @@ import {
   APP_CSS,
   ArchiveIcon,
   BellIcon,
+  ChatIcon,
   DocumentIcon,
   FONT_SANS,
   FONT_SERIF,
+  HomeIcon,
   InboxIcon,
+  LogoutIcon,
   PlusCircleIcon,
   SearchIcon,
+  UserCircleIcon,
 } from './trailsyncUI.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 
@@ -123,11 +127,56 @@ export default function StudentDashboard() {
   );
 
   return (
-    <div className="ts-app-shell" style={FONT_SANS}>
+    <div className="ts-app-shell lg:flex" style={FONT_SANS}>
       <style>{APP_CSS}</style>
 
-      <header className="ts-app-header sticky top-0 z-10">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
+      {/* Desktop sidebar. Nav items besides Home are placeholders, matching
+          the quick-action cards below — no routes exist for them yet. */}
+      <aside className="ts-sidebar hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-64 lg:flex-none lg:flex-col">
+        <div className="flex items-center gap-2 px-6 pb-8 pt-7">
+          <img
+            src="/trailsync-logo.png"
+            alt=""
+            aria-hidden="true"
+            style={{ height: '30px', width: 'auto', margin: '-6px 0' }}
+          />
+          <span className="text-lg font-semibold" style={{ ...FONT_SERIF, color: '#FAF8F3' }}>TrailSync</span>
+        </div>
+
+        <nav className="flex-1 space-y-1 px-3">
+          <a href="/portal" className="ts-nav-item ts-nav-item-active flex items-center gap-3 px-3 py-2.5 text-sm font-medium">
+            <HomeIcon />
+            Home
+          </a>
+          <a href="#" className="ts-nav-item flex items-center gap-3 px-3 py-2.5 text-sm font-medium">
+            <DocumentIcon />
+            My Requests
+          </a>
+          <a href="#" className="ts-nav-item flex items-center gap-3 px-3 py-2.5 text-sm font-medium">
+            <ChatIcon />
+            Ask TrailSync
+          </a>
+          <a href="#" className="ts-nav-item flex items-center gap-3 px-3 py-2.5 text-sm font-medium">
+            <UserCircleIcon />
+            Profile
+          </a>
+        </nav>
+
+        <div className="px-3 pb-6">
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="ts-nav-item flex w-full items-center gap-3 px-3 py-2.5 text-sm font-medium"
+          >
+            <LogoutIcon />
+            Log out
+          </button>
+        </div>
+      </aside>
+
+      {/* Narrow viewports: sidebar collapses to a slim top bar. */}
+      <header className="ts-app-header sticky top-0 z-10 lg:hidden">
+        <div className="flex items-center justify-between px-6 py-3.5">
           <div className="flex items-center gap-2">
             <img
               src="/trailsync-logo.png"
@@ -143,7 +192,7 @@ export default function StudentDashboard() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-8 sm:py-10">
+      <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8 sm:py-10 lg:px-10">
         {/* Greeting */}
         <div className="mb-8">
           {status === 'loading' && !me ? (
@@ -182,31 +231,31 @@ export default function StudentDashboard() {
             </>
           ) : (
             <>
-              <div className="ts-card p-5">
+              <div className="ts-card ts-card-hoverable p-5">
                 <div className="ts-stat-icon ts-stat-icon-blue">
                   <DocumentIcon />
                 </div>
-                <p className="ts-ink mt-4 text-3xl font-semibold" style={FONT_SERIF}>
+                <p className="ts-stat-number mt-4 text-3xl font-semibold" style={FONT_SERIF}>
                   {summary?.active_requests_count ?? 0}
                 </p>
                 <p className="ts-soft mt-1 text-sm">Active requests</p>
               </div>
 
-              <div className="ts-card p-5">
+              <div className="ts-card ts-card-hoverable p-5">
                 <div className="ts-stat-icon ts-stat-icon-gold">
                   <BellIcon />
                 </div>
-                <p className="ts-ink mt-4 text-3xl font-semibold" style={FONT_SERIF}>
+                <p className="ts-stat-number mt-4 text-3xl font-semibold" style={FONT_SERIF}>
                   {summary?.ready_for_pickup_count ?? 0}
                 </p>
                 <p className="ts-soft mt-1 text-sm">Ready at Window 6</p>
               </div>
 
-              <div className="ts-card p-5">
+              <div className="ts-card ts-card-hoverable p-5">
                 <div className="ts-stat-icon ts-stat-icon-sage">
                   <ArchiveIcon />
                 </div>
-                <p className="ts-ink mt-4 text-3xl font-semibold" style={FONT_SERIF}>
+                <p className="ts-stat-number mt-4 text-3xl font-semibold" style={FONT_SERIF}>
                   {summary?.released_this_year_count ?? 0}
                 </p>
                 <p className="ts-soft mt-1 text-sm">Released this year</p>
@@ -216,7 +265,7 @@ export default function StudentDashboard() {
         </div>
 
         {/* Quick actions — placeholders; wired up in a later step */}
-        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <button type="button" className="ts-quick-card flex items-center gap-4 p-5 text-left">
             <div className="ts-stat-icon ts-stat-icon-blue shrink-0">
               <PlusCircleIcon />
@@ -236,19 +285,29 @@ export default function StudentDashboard() {
               <p className="ts-soft mt-0.5 text-xs">See the full status of every request</p>
             </div>
           </button>
+
+          <button type="button" className="ts-quick-card flex items-center gap-4 p-5 text-left">
+            <div className="ts-stat-icon ts-stat-icon-gold shrink-0">
+              <ChatIcon />
+            </div>
+            <div>
+              <p className="ts-ink text-sm font-semibold">Ask TrailSync</p>
+              <p className="ts-soft mt-0.5 text-xs">Get help from the AI assistant</p>
+            </div>
+          </button>
         </div>
 
         {/* Recent requests */}
         <div className="mt-8">
           <h2 className="ts-ink text-lg font-semibold" style={FONT_SERIF}>Recent requests</h2>
 
-          <div className="ts-card mt-4 divide-y overflow-hidden" style={{ borderColor: '#E3DFD2' }}>
+          <div className="ts-card mt-4 overflow-hidden">
             {status === 'loading' && (
               <>
                 <RowSkeleton />
-                <div className="ts-hairline h-px" />
+                <div className="ts-row-divider" />
                 <RowSkeleton />
-                <div className="ts-hairline h-px" />
+                <div className="ts-row-divider" />
                 <RowSkeleton />
               </>
             )}
@@ -272,8 +331,7 @@ export default function StudentDashboard() {
                   return (
                     <li
                       key={r.request_code}
-                      className="ts-row-hover flex items-center justify-between gap-4 border-t px-5 py-4 first:border-t-0"
-                      style={{ borderColor: '#E3DFD2' }}
+                      className="ts-row-hover ts-row-divider flex items-center justify-between gap-4 px-5 py-4"
                     >
                       <div className="min-w-0">
                         <p className="ts-ink truncate text-sm font-medium">{r.transaction_type}</p>
