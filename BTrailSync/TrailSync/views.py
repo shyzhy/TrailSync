@@ -1,11 +1,46 @@
 from django.contrib.auth import authenticate
-from rest_framework import status
-from rest_framework.permissions import AllowAny
+from django.utils import timezone
+from rest_framework import generics, status
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Role, StaffProfile, User
+from .models import FormRequest, Role, StaffProfile, User
+from .serializers import (
+    MeSerializer,
+    RecentFormRequestSerializer,
+    RegisterSerializer,
+    build_profile_payload,
+)
+
+
+class RegisterView(APIView):
+    """POST /api/auth/register/ - student & alumni self-registration."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        # raise_exception=True turns serializer errors into a 400 whose body is
+        # {"field": ["message"]}, which is what the React form maps to its
+        # per-field inline errors.
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+
+        return Response(
+            {
+                "detail": "Account created successfully.",
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "role": user.role.role_name if user.role_id else None,
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class LoginView(APIView):
@@ -57,22 +92,7 @@ class LoginView(APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-        profile_data = None
-        if hasattr(user, "user_profile"):
-            p = user.user_profile
-            profile_data = {
-                "school_id_number": p.school_id_number,
-                "course": p.course,
-                "year_level": p.year_level,
-                "user_category": p.user_category,
-            }
-        elif hasattr(user, "staff_profile"):
-            s = user.staff_profile
-            profile_data = {
-                "employee_id": s.employee_id,
-                "assigned_window": s.assigned_window,
-                "position": s.position,
-            }
+        profile_data = build_profile_payload(user)
 
         refresh = RefreshToken.for_user(user)
 
@@ -90,4 +110,66 @@ class LoginView(APIView):
                 },
             },
             status=status.HTTP_200_OK,
+        )
+
+
+class MeView(APIView):
+    """GET /api/me/ - who the current token belongs to.
+
+    Exists so the dashboard can refresh identity/profile on a page load
+    without re-running login (e.g. after a hard refresh, or once the access
+    token has outlived whatever was cached client-side from login).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(MeSerializer(request.user).data)
+
+
+class DashboardSummaryView(APIView):
+    """GET /api/dashboard/summary/ - the three student home-screen stat cards.
+
+    Every count is filtered by user=request.user first — the request never
+    chooses whose data it sees, so one student can't page through another's
+    counts by any parameter tampering.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        base = FormRequest.objects.filter(user=request.user)
+        current_year = timezone.now().year
+
+        active_requests_count = base.filter(
+            request_status__in=[FormRequest.RequestStatus.SUBMITTED, FormRequest.RequestStatus.VERIFIED]
+        ).count()
+        ready_for_pickup_count = base.filter(request_status=FormRequest.RequestStatus.READY).count()
+        released_this_year_count = base.filter(
+            request_status=FormRequest.RequestStatus.RELEASED,
+            created_at__year=current_year,
+        ).count()
+
+        return Response(
+            {
+                "active_requests_count": active_requests_count,
+                "ready_for_pickup_count": ready_for_pickup_count,
+                "released_this_year_count": released_this_year_count,
+            }
+        )
+
+
+class RecentFormRequestsView(generics.ListAPIView):
+    """GET /api/dashboard/recent-requests/ - the student's latest 5 requests."""
+
+    serializer_class = RecentFormRequestSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+
+    def get_queryset(self):
+        # select_related avoids an N+1 for transaction_type.name on each row.
+        return (
+            FormRequest.objects.filter(user=self.request.user)
+            .select_related("transaction_type")
+            .order_by("-created_at")[:5]
         )

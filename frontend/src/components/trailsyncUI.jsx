@@ -52,6 +52,27 @@ export function CheckSealIcon() {
   );
 }
 
+// Text-color/link utilities used on both the glass auth pages and the plain
+// paper app-shell pages (dashboard etc.) — defined once so the two contexts
+// can't drift to slightly different shades of "ink".
+const COLOR_UTIL_CSS = `
+  .ts-ink { color: #1F2937; }
+  .ts-soft { color: #5B6474; }
+  .ts-sage { color: #4F7A6A; }
+  .ts-gold { color: #B8872B; }
+  .ts-rule { height: 2px; width: 46px; border-radius: 2px; background: linear-gradient(90deg, #B8872B, rgba(184,135,43,0.12)); }
+  .ts-link { color: #24406B; text-decoration: none; border-radius: 4px; }
+  .ts-link:hover { text-decoration: underline; }
+  .ts-link:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.6); }
+  .ts-error-text { color: #B91C1C; }
+  .ts-hairline { background: #E3DFD2; }
+
+  .ts-banner { border-radius: 10px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.7); }
+  .ts-banner-error { background: rgba(220,38,38,0.10); border: 1px solid rgba(220,38,38,0.35); color: #991B1B; }
+  .ts-banner-pending { background: rgba(184,135,43,0.14); border: 1px solid rgba(184,135,43,0.45); color: #6B4E17; }
+  .ts-banner-success { background: rgba(79,122,106,0.12); border: 1px solid rgba(79,122,106,0.42); color: #33574A; }
+`;
+
 export const SHARED_CSS = `
   .ts-page { position: relative; overflow-x: hidden; background: #24406B; }
 
@@ -168,16 +189,7 @@ export const SHARED_CSS = `
     }
   }
 
-  .ts-ink { color: #1F2937; }
-  .ts-soft { color: #5B6474; }
-  .ts-sage { color: #4F7A6A; }
-  .ts-gold { color: #B8872B; }
-  .ts-rule { height: 2px; width: 46px; border-radius: 2px; background: linear-gradient(90deg, #B8872B, rgba(184,135,43,0.12)); }
-  .ts-link { color: #24406B; text-decoration: none; border-radius: 4px; }
-  .ts-link:hover { text-decoration: underline; }
-  .ts-link:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.6); }
-  .ts-error-text { color: #B91C1C; }
-  .ts-hairline { background: #E3DFD2; }
+  ${COLOR_UTIL_CSS}
 
   /* Carved into the glass: inner shadow from the top, bright lip. */
   .ts-input {
@@ -213,11 +225,6 @@ export const SHARED_CSS = `
   .ts-icon-btn:hover { color: #1F2937; }
   .ts-icon-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
   .ts-icon-svg { filter: drop-shadow(0 1px 0 rgba(255,255,255,0.9)); }
-
-  .ts-banner { border-radius: 10px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.7); }
-  .ts-banner-error { background: rgba(220,38,38,0.10); border: 1px solid rgba(220,38,38,0.35); color: #991B1B; }
-  .ts-banner-pending { background: rgba(184,135,43,0.14); border: 1px solid rgba(184,135,43,0.45); color: #6B4E17; }
-  .ts-banner-success { background: rgba(79,122,106,0.12); border: 1px solid rgba(79,122,106,0.42); color: #33574A; }
 
   .ts-checkbox-wrap { position: relative; display: inline-flex; width: 20px; height: 20px; flex-shrink: 0; }
   .ts-checkbox-input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
@@ -348,5 +355,129 @@ export function GlassScene({ children, maxWidth = '420px' }) {
 
       <div className="hidden lg:block lg:flex-1" aria-hidden="true" />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// App-shell pieces: for logged-in screens (dashboard, etc.), which live on
+// the plain paper background rather than the auth pages' glass-over-photo
+// treatment. Additive to SHARED_CSS above — GlassScene/login/signup don't
+// use any of this.
+// ---------------------------------------------------------------------------
+
+export const APP_CSS = `
+  ${COLOR_UTIL_CSS}
+
+  .ts-app-shell { background: #FAF8F3; min-height: 100vh; }
+
+  .ts-app-header {
+    background: rgba(250,248,243,0.92);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-bottom: 1px solid #E3DFD2;
+  }
+
+  .ts-card {
+    background: #FFFFFF;
+    border: 1px solid #E3DFD2;
+    border-radius: 14px;
+    box-shadow: 0 1px 2px rgba(31,41,55,0.04), 0 10px 24px -16px rgba(31,41,55,0.16);
+  }
+
+  .ts-stat-icon {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), inset 0 -1px 2px rgba(31,41,55,0.05);
+  }
+  .ts-stat-icon-blue { background: linear-gradient(180deg, rgba(36,64,107,0.15), rgba(36,64,107,0.05)); color: #24406B; }
+  .ts-stat-icon-gold { background: linear-gradient(180deg, rgba(184,135,43,0.20), rgba(184,135,43,0.06)); color: #B8872B; }
+  .ts-stat-icon-sage { background: linear-gradient(180deg, rgba(79,122,106,0.20), rgba(79,122,106,0.06)); color: #4F7A6A; }
+
+  .ts-quick-card {
+    border: 1px solid #E3DFD2;
+    border-radius: 14px;
+    background: #FFFFFF;
+    transition: box-shadow 150ms ease, transform 80ms ease, border-color 150ms ease;
+  }
+  .ts-quick-card:hover { border-color: rgba(36,64,107,0.35); box-shadow: 0 14px 28px -18px rgba(31,41,55,0.3); }
+  .ts-quick-card:active { transform: translateY(1px); }
+  .ts-quick-card:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
+
+  /* Pill labels/colors per spec: Ready for pickup = sage, Processing (the
+     Submitted+Verified bucket) = gold/amber, Released = gray. */
+  .ts-pill { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+  .ts-pill-processing { background: rgba(184,135,43,0.14); color: #8A6620; border: 1px solid rgba(184,135,43,0.32); }
+  .ts-pill-ready { background: rgba(79,122,106,0.14); color: #33574A; border: 1px solid rgba(79,122,106,0.34); }
+  .ts-pill-released { background: rgba(91,100,116,0.12); color: #5B6474; border: 1px solid rgba(91,100,116,0.28); }
+
+  .ts-row-hover:hover { background: rgba(36,64,107,0.03); }
+
+  .ts-skeleton {
+    background: linear-gradient(90deg, #ECE8DD 25%, #F5F3EC 37%, #ECE8DD 63%);
+    background-size: 400% 100%;
+    animation: ts-shimmer 1.4s ease infinite;
+    border-radius: 8px;
+  }
+  @keyframes ts-shimmer {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+  }
+`;
+
+export function DocumentIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M5 2.5h6.5L15 6v11a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-14a.5.5 0 0 1 .5-.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M11.5 2.5V6H15" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M6.5 10h5M6.5 12.5h5M6.5 15h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function BellIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M5 8a5 5 0 0 1 10 0c0 3.5 1.2 4.5 1.2 4.5H3.8S5 11.5 5 8Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M8 15.5a2 2 0 0 0 4 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function ArchiveIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <rect x="2.5" y="3" width="15" height="3.5" rx="0.75" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M3.5 6.5V16a.5.5 0 0 0 .5.5h12a.5.5 0 0 0 .5-.5V6.5" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M8 9.75h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function PlusCircleIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <circle cx="10" cy="10" r="7.25" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M10 6.75v6.5M6.75 10h6.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function SearchIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <circle cx="8.75" cy="8.75" r="5.25" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M16 16l-3.2-3.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function InboxIcon() {
+  return (
+    <svg viewBox="0 0 40 40" fill="none" className="h-10 w-10" aria-hidden="true">
+      <rect x="5" y="12" width="30" height="22" rx="3" stroke="#E3DFD2" strokeWidth="1.75" fill="rgba(250,248,243,0.6)" />
+      <path d="M5 22h9l2.2 4h7.6l2.2-4h9" stroke="#E3DFD2" strokeWidth="1.75" strokeLinejoin="round" />
+      <path d="M13 12l3-6h8l3 6" stroke="#E3DFD2" strokeWidth="1.75" strokeLinejoin="round" />
+    </svg>
   );
 }

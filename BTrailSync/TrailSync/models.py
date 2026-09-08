@@ -82,6 +82,10 @@ class UserProfile(models.Model):
 
     school_id_number = models.CharField(max_length=50, unique=True)
 
+    # first_name / last_name live on User (AbstractUser); only the middle name
+    # is profile-side, so registration has somewhere to put it.
+    middle_name = models.CharField(max_length=150, blank=True, null=True)
+
     course = models.CharField(max_length=150, blank=True, null=True)
     college = models.CharField(max_length=150, blank=True, null=True)
     year_level = models.CharField(max_length=50, blank=True, null=True)
@@ -146,4 +150,58 @@ class StaffProfile(models.Model):
         return f"{self.employee_id} - {self.user.get_full_name()}"
 
 
+class TransactionType(models.Model):
+    """A requestable document, e.g. Transcript of Records, Certificate of Enrollment."""
 
+    name = models.CharField(max_length=150, unique=True)
+    description = models.TextField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
+class FormRequest(models.Model):
+    """A student/alumni's request for one document, tracked through to release.
+
+    This is the minimal shape the Step 4 dashboard endpoints need
+    (request_code, transaction_type, request_status, created_at, scoped to
+    the requesting user). FORM_SUBMISSIONS, RELEASE_SLOTS, RELEASE_SCHEDULES
+    and NOTIFICATIONS from the fuller ERD are intentionally not built yet —
+    add them, and any extra columns here, when that work starts; nothing in
+    Step 4 assumes this is the final schema.
+    """
+
+    class RequestStatus(models.TextChoices):
+        SUBMITTED = "Submitted", "Submitted"
+        VERIFIED = "Verified", "Verified"
+        READY = "Ready", "Ready for Pickup"
+        RELEASED = "Released", "Released"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="form_requests",
+    )
+    transaction_type = models.ForeignKey(
+        TransactionType,
+        on_delete=models.PROTECT,
+        related_name="form_requests",
+    )
+    request_code = models.CharField(max_length=30, unique=True)
+    request_status = models.CharField(
+        max_length=20,
+        choices=RequestStatus.choices,
+        default=RequestStatus.SUBMITTED,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.request_code} - {self.user.email}"

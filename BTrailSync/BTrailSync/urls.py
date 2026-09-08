@@ -17,7 +17,12 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+from TrailSync.views import DashboardSummaryView, MeView, RecentFormRequestsView
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/auth/', include('TrailSync.urls')),
+    path('api/me/', MeView.as_view(), name='me'),
+    path('api/dashboard/summary/', DashboardSummaryView.as_view(), name='dashboard-summary'),
+    path('api/dashboard/recent-requests/', RecentFormRequestsView.as_view(), name='dashboard-recent-requests'),
 ]

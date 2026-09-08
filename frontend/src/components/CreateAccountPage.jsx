@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   API_BASE_URL,
   CheckSealIcon,
@@ -32,6 +32,49 @@ const YEAR_LEVELS = ['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year']
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USTP_DOMAIN_RE = /@ustp\.edu\.ph$/i;
+
+// Redirect delay after a successful signup, long enough to read the message.
+const REDIRECT_DELAY_MS = 2500;
+const LOGIN_PATH = '/';
+
+// DRF replies with {"<model_field>": ["message"]}. Translate those field names
+// into this form's state keys so each message lands on its own input instead
+// of in a generic alert.
+const SERVER_FIELD_MAP = {
+  email: 'email',
+  password: 'password',
+  confirm_password: 'confirmPassword',
+  school_id_number: 'schoolId',
+  first_name: 'firstName',
+  last_name: 'lastName',
+  course: 'course',
+  year_level: 'yearLevel',
+};
+
+function mapServerErrors(data) {
+  const fallback = { general: 'Could not create your account. Please try again.' };
+  if (!data || typeof data !== 'object') return fallback;
+
+  const mapped = {};
+  const unattached = [];
+
+  Object.entries(data).forEach(([key, value]) => {
+    const message = Array.isArray(value)
+      ? value.filter(Boolean).join(' ')
+      : typeof value === 'string'
+        ? value
+        : null;
+    if (!message) return;
+
+    const target = SERVER_FIELD_MAP[key];
+    if (target) mapped[target] = message;
+    // detail, non_field_errors, user_category, middle_name: no inline slot
+    else unattached.push(message);
+  });
+
+  if (unattached.length) mapped.general = unattached.join(' ');
+  return Object.keys(mapped).length ? mapped : fallback;
+}
 
 function passwordStrength(pw) {
   if (!pw) return null;
@@ -67,6 +110,15 @@ export default function CreateAccountPage() {
   const [success, setSuccess] = useState(false);
 
   const strength = passwordStrength(password);
+
+  // Let the confirmation actually be read, then hand off to the login page.
+  useEffect(() => {
+    if (!success) return undefined;
+    const timer = setTimeout(() => {
+      window.location.href = LOGIN_PATH;
+    }, REDIRECT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [success]);
 
   // Drop a field's error as soon as the user starts fixing it — otherwise a
   // stale error lingers (and, on the password field, hides the strength hint).
@@ -134,31 +186,24 @@ export default function CreateAccountPage() {
       const response = await fetch(`${API_BASE_URL}/api/auth/register/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // Flat payload matching RegisterSerializer's fields exactly.
         body: JSON.stringify({
           email: email.trim(),
           password,
+          confirm_password: confirmPassword,
+          school_id_number: schoolId.trim(),
           first_name: firstName.trim(),
+          middle_name: middleName.trim(),
           last_name: lastName.trim(),
-          profile: {
-            school_id_number: schoolId.trim(),
-            middle_name: middleName.trim(),
-            course,
-            year_level: userCategory === 'Student' ? yearLevel : '',
-            user_category: userCategory,
-          },
+          course,
+          year_level: userCategory === 'Student' ? yearLevel : '',
+          user_category: userCategory,
         }),
       });
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        // Surface per-field messages when the API returns them.
-        setErrors({
-          email: Array.isArray(data.email) ? data.email[0] : undefined,
-          schoolId: Array.isArray(data.school_id_number) ? data.school_id_number[0] : undefined,
-          general:
-            data.detail ||
-            (data.email || data.school_id_number ? undefined : 'Could not create your account. Please try again.'),
-        });
+        setErrors(mapServerErrors(data));
         return;
       }
 
@@ -191,11 +236,12 @@ export default function CreateAccountPage() {
           </div>
 
           <a
-            href="/"
+            href={LOGIN_PATH}
             className="ts-btn-primary mt-7 flex w-full items-center justify-center py-2.5 text-sm font-medium"
           >
             Go to log in
           </a>
+          <p className="ts-soft mt-3 text-center text-xs">Taking you there automatically…</p>
         </div>
 
         <p className="ts-soft mt-10 text-xs">

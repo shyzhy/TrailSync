@@ -7,6 +7,7 @@ import {
   GlassScene,
   Spinner,
 } from './trailsyncUI.jsx';
+import { saveSession } from '../lib/auth.js';
 
 const STUDENT_ROLES = ['Student', 'Alumni'];
 const ROLE_ROUTES = { Student: '/portal', Alumni: '/portal', 'Registrar Staff': '/staff/queue' };
@@ -75,10 +76,7 @@ export default function LoginPage() {
       }
 
       // "Remember me" controls whether the session survives closing the tab.
-      const storage = remember ? window.localStorage : window.sessionStorage;
-      storage.setItem('trailsync_access_token', data.access);
-      storage.setItem('trailsync_refresh_token', data.refresh);
-      storage.setItem('trailsync_user', JSON.stringify(data.user));
+      saveSession(data, remember);
 
       window.location.href = ROLE_ROUTES[userRole] || '/portal';
     } catch (networkError) {
