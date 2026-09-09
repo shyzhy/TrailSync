@@ -27,6 +27,9 @@ from TrailSync.views import (
     FormRequestListCreateView,
     MeView,
     RecentFormRequestsView,
+    RegistrarDashboardSummaryView,
+    RegistrarRecentSubmissionsView,
+    RegistrarTodaysReleaseSlotsView,
     ReleaseSlotListView,
     TransactionTypeListView,
     UpcomingReleaseDatesView,
@@ -45,6 +48,9 @@ urlpatterns = [
     path('api/transaction-types/', TransactionTypeListView.as_view(), name='transaction-types'),
     path('api/release-slots/', ReleaseSlotListView.as_view(), name='release-slots'),
     path('api/form-requests/', FormRequestListCreateView.as_view(), name='form-requests'),
+    path('api/registrar/dashboard/summary/', RegistrarDashboardSummaryView.as_view(), name='registrar-dashboard-summary'),
+    path('api/registrar/dashboard/recent-submissions/', RegistrarRecentSubmissionsView.as_view(), name='registrar-recent-submissions'),
+    path('api/registrar/dashboard/todays-release-slots/', RegistrarTodaysReleaseSlotsView.as_view(), name='registrar-todays-release-slots'),
 ]
 
 if settings.DEBUG:

@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.core.mail import send_mail
@@ -5,7 +7,7 @@ from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -20,12 +22,36 @@ from .serializers import (
     MeSerializer,
     RecentFormRequestSerializer,
     RegisterSerializer,
+    RegistrarRecentSubmissionSerializer,
+    RegistrarReleaseSlotRowSerializer,
     ReleaseSlotSerializer,
     TrackedFormRequestSerializer,
     TransactionTypeSerializer,
     UpdateProfileSerializer,
     build_profile_payload,
 )
+
+
+class IsApprovedRegistrarStaff(BasePermission):
+    """Gate for every registrar-facing endpoint below.
+
+    Mirrors the exact check LoginView already does at login time — role is
+    Registrar Staff AND staff_profile.approval_status is Approved — so a
+    pending or rejected staff account (or a student token, or a Registrar
+    Staff account that was later un-approved) gets a 403 here even if it
+    somehow still holds a valid JWT.
+    """
+
+    message = "Only approved registrar staff may access this."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if not user.role_id or user.role.role_name != Role.RoleName.REGISTRAR:
+            return False
+        staff_profile = getattr(user, "staff_profile", None)
+        return bool(staff_profile and staff_profile.approval_status == StaffProfile.ApprovalStatus.APPROVED)
 
 
 class RegisterView(APIView):
@@ -399,3 +425,90 @@ class FormRequestListCreateView(generics.ListCreateAPIView):
         serializer.is_valid(raise_exception=True)
         form_request = serializer.save()
         return Response(FormRequestResultSerializer(form_request).data, status=status.HTTP_201_CREATED)
+
+
+class RegistrarDashboardSummaryView(APIView):
+    """GET /api/registrar/dashboard/summary/ - the four Registrar Dashboard
+    stat cards.
+
+    There is no per-request "window" column anywhere in FormRequest — every
+    request in this system is already implicitly Window 6 (there's only one
+    window, per every page's own copy) — so these counts are NOT scoped by
+    staff_profile.assigned_window; there's no real per-request data to scope
+    by. If multi-window support is added later, this is the place a
+    `.filter(window=...)` would go in.
+
+    Two of the four counts lean on updated_at as a stand-in for a dedicated
+    timestamp that doesn't exist yet (no verified_at/released_at columns,
+    no REQUIREMENT_VERIFICATIONS table) — see the per-field comments below.
+    """
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    def get(self, request):
+        today = timezone.localdate()
+        week_start = today - timedelta(days=today.weekday())  # Monday
+
+        pending_review_count = FormRequest.objects.filter(
+            request_status=FormRequest.RequestStatus.SUBMITTED
+        ).count()
+
+        # Proxy for "verified today": no REQUIREMENT_VERIFICATIONS table or
+        # verified_at column exists, so this is "currently Verified AND last
+        # touched today" rather than a true verification-event count.
+        verified_today_count = FormRequest.objects.filter(
+            request_status=FormRequest.RequestStatus.VERIFIED,
+            updated_at__date=today,
+        ).count()
+
+        # "For release today" = booked into a slot dated today, not a
+        # RELEASE_SCHEDULES query — that table only records the claim event
+        # after the fact, it has no date/status of its own to query against.
+        for_release_today_count = FormRequest.objects.filter(release_slot__slot_date=today).count()
+
+        completed_this_week_count = FormRequest.objects.filter(
+            request_status=FormRequest.RequestStatus.RELEASED,
+            updated_at__date__gte=week_start,
+        ).count()
+
+        return Response(
+            {
+                "pending_review_count": pending_review_count,
+                "verified_today_count": verified_today_count,
+                "for_release_today_count": for_release_today_count,
+                "completed_this_week_count": completed_this_week_count,
+            }
+        )
+
+
+class RegistrarRecentSubmissionsView(generics.ListAPIView):
+    """GET /api/registrar/dashboard/recent-submissions/ - latest 5 requests
+    across the (single) queue, for the Dashboard's "Recent Submissions" card."""
+
+    serializer_class = RegistrarRecentSubmissionSerializer
+    permission_classes = [IsApprovedRegistrarStaff]
+    pagination_class = None
+
+    def get_queryset(self):
+        return (
+            FormRequest.objects.select_related("transaction_type", "user")
+            .order_by("-created_at")[:5]
+        )
+
+
+class RegistrarTodaysReleaseSlotsView(generics.ListAPIView):
+    """GET /api/registrar/dashboard/todays-release-slots/ - requests booked
+    into a ReleaseSlot dated today, for the Dashboard's "Today's Release
+    Slots" card."""
+
+    serializer_class = RegistrarReleaseSlotRowSerializer
+    permission_classes = [IsApprovedRegistrarStaff]
+    pagination_class = None
+
+    def get_queryset(self):
+        today = timezone.localdate()
+        return (
+            FormRequest.objects.filter(release_slot__slot_date=today)
+            .select_related("transaction_type", "user", "release_slot")
+            .order_by("release_slot__start_time")
+        )

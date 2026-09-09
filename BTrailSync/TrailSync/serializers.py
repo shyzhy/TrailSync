@@ -274,6 +274,64 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
         return data
 
 
+class RegistrarRecentSubmissionSerializer(serializers.ModelSerializer):
+    """GET /api/registrar/dashboard/recent-submissions/ row shape.
+
+    student_first_name/student_last_name come from User, not UserProfile —
+    same convention as everywhere else in this codebase (names live on the
+    auth user, only middle_name lives on the profile). The frontend derives
+    the avatar initial from these itself, the same way it already does for
+    the sidebar footer, rather than duplicating that logic server-side.
+    """
+
+    transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
+    student_first_name = serializers.CharField(source="user.first_name", read_only=True)
+    student_last_name = serializers.CharField(source="user.last_name", read_only=True)
+
+    class Meta:
+        model = FormRequest
+        fields = [
+            "id",
+            "request_code",
+            "request_status",
+            "transaction_type",
+            "created_at",
+            "student_first_name",
+            "student_last_name",
+        ]
+
+
+class RegistrarReleaseSlotRowSerializer(serializers.ModelSerializer):
+    """GET /api/registrar/dashboard/todays-release-slots/ row shape.
+
+    No dedicated release_status field exists (RELEASE_SCHEDULES, as actually
+    built, is a post-hoc claim record with no status of its own) — the
+    frontend derives Waiting/Claimed from request_status the same way
+    TicketCard already derives its progress-dot state from it, rather than
+    this serializer inventing a second status vocabulary.
+    """
+
+    transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
+    student_first_name = serializers.CharField(source="user.first_name", read_only=True)
+    student_last_name = serializers.CharField(source="user.last_name", read_only=True)
+    start_time = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FormRequest
+        fields = [
+            "id",
+            "request_code",
+            "request_status",
+            "transaction_type",
+            "student_first_name",
+            "student_last_name",
+            "start_time",
+        ]
+
+    def get_start_time(self, obj):
+        return obj.release_slot.start_time.isoformat(timespec="minutes") if obj.release_slot else None
+
+
 class RecentFormRequestSerializer(serializers.ModelSerializer):
     transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
 

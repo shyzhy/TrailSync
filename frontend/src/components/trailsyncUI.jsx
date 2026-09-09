@@ -912,6 +912,97 @@ export const APP_CSS = `
   }
   .ts-modal-close:hover { color: #1F2937; background: rgba(91,100,116,0.16); }
   .ts-modal-close:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
+
+  /* ---- More neutral tag variants (Credential Guide introduced .ts-tag /
+     .ts-tag-sage; the Registrar Dashboard's stat-card labels need gold and
+     muted too). ---- */
+  .ts-tag-gold { color: #6B4E17; background: rgba(184,135,43,0.12); border-color: rgba(184,135,43,0.28); }
+  .ts-tag-muted { color: #5B6474; background: rgba(91,100,116,0.08); border-color: rgba(91,100,116,0.18); }
+
+  /* ---- Small gold "today" pill — same gold-glass language as
+     .ts-cal-day-today's circle, just a text pill instead of a day number. ---- */
+  .ts-date-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #6B4E17;
+    background: linear-gradient(180deg, rgba(220,169,72,0.28) 0%, rgba(184,135,43,0.14) 100%);
+    border: 1px solid rgba(184,135,43,0.35);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
+    white-space: nowrap;
+  }
+
+  /* ---- Small list-row avatar (Recent Submissions) — same gold-gradient
+     glossy circle as the sidebar footer avatar, just sized for a row. ---- */
+  .ts-avatar-sm {
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: #FAF8F3;
+    background: linear-gradient(180deg, #DCA948 0%, #B8872B 100%);
+    box-shadow: 0 1px 3px rgba(31,41,55,0.3), inset 0 1px 0 rgba(255,255,255,0.4);
+    flex-shrink: 0;
+  }
+
+  /* ================================================================
+     REGISTRAR (staff) SIDEBAR — deliberately charcoal + gold rather than
+     the student side's institutional blue, so the two roles are
+     unmistakable at a glance. Structurally identical to .ts-sidebar/
+     .ts-nav-item (same card/pill/button primitives throughout the app),
+     only the base gradient and accent treatment differ.
+     ================================================================ */
+  .ts-staff-sidebar {
+    background: linear-gradient(180deg, #3A3A3E 0%, #232326 55%, #17171A 100%);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 6px 0 28px -14px rgba(0,0,0,0.5);
+  }
+  .ts-staff-nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: rgba(250,248,243,0.55);
+    border-radius: 10px;
+    transition: color 150ms ease, background 150ms ease;
+  }
+  .ts-staff-nav-item:hover { color: #FAF8F3; background: rgba(255,255,255,0.07); }
+  .ts-staff-nav-item:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.6); }
+  .ts-staff-nav-item-active {
+    color: #FAF8F3;
+    background: linear-gradient(180deg, rgba(184,135,43,0.22) 0%, rgba(184,135,43,0.05) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.18),
+      inset 0 0 0 1px rgba(184,135,43,0.28),
+      0 2px 10px rgba(0,0,0,0.35);
+  }
+  .ts-staff-nav-item-active::before {
+    content: '';
+    position: absolute;
+    left: -3px;
+    top: 20%;
+    bottom: 20%;
+    width: 3px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, #E4B45C, #B8872B);
+  }
+  .ts-staff-sidebar-footer { border-top: 1px solid rgba(255,255,255,0.10); }
+
+  .ts-staff-mobile-header {
+    background: rgba(35,35,38,0.94);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
 `;
 
 export function DocumentIcon() {
@@ -1095,6 +1186,35 @@ export function WarningIcon() {
   );
 }
 
+export function GridIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1.2" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="11" y="2.5" width="6.5" height="6.5" rx="1.2" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="2.5" y="11" width="6.5" height="6.5" rx="1.2" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="11" y="11" width="6.5" height="6.5" rx="1.2" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+export function CalendarIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <rect x="2.5" y="4" width="15" height="13.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2.5 8h15M6.5 2.5v3M13.5 2.5v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// Shared by both dashboards so "Good morning/afternoon/evening" logic lives
+// in exactly one place rather than being copy-pasted per page.
+export function greetingForNow() {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
 export function CloseIcon() {
   return (
     <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
@@ -1129,7 +1249,7 @@ const NAV_ITEMS = [
   { key: 'ask', href: '#', label: 'Ask TrailSync', Icon: ChatIcon },
 ];
 
-function initialsFor(me) {
+export function initialsFor(me) {
   const a = (me?.first_name || '').charAt(0);
   const b = (me?.last_name || '').charAt(0);
   return (a + b).toUpperCase() || '?';
@@ -1217,6 +1337,105 @@ export function AppMobileHeader({ onLogout }) {
           <span className="ts-ink text-lg font-semibold" style={FONT_SERIF}>TrailSync</span>
         </div>
         <button type="button" onClick={onLogout} className="ts-link text-sm font-medium">
+          Log out
+        </button>
+      </div>
+    </header>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Registrar (staff) shell — same structure as AppSidebar/AppMobileHeader
+// above, deliberately charcoal + gold instead of institutional blue so a
+// staff member can never mistake which side of the app they're on. Only
+// "Dashboard" is wired to a real page today; Processing Queue, Release
+// Slots, and Notifications are placeholders until those pages exist.
+// ---------------------------------------------------------------------------
+
+const STAFF_NAV_ITEMS = [
+  { key: 'dashboard', href: '/registrar/dashboard', label: 'Dashboard', Icon: GridIcon },
+  { key: 'queue', href: '#', label: 'Processing Queue', Icon: DocumentIcon },
+  { key: 'slots', href: '#', label: 'Release Slots', Icon: CalendarIcon },
+  { key: 'notifications', href: '#', label: 'Notifications', Icon: BellIcon },
+];
+
+export function RegistrarSidebar({ active, onLogout, me }) {
+  const profile = me?.profile;
+  const idLine = [profile?.employee_id, profile?.assigned_window ? `Window ${profile.assigned_window}` : null]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <aside className="ts-staff-sidebar hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-64 lg:flex-none lg:flex-col">
+      <div className="flex items-center gap-2 px-6 pb-8 pt-7">
+        <img
+          src="/trailsync-logo.png"
+          alt=""
+          aria-hidden="true"
+          style={{ height: '30px', width: 'auto', margin: '-6px 0' }}
+        />
+        <span className="text-lg font-semibold" style={{ ...FONT_SERIF, color: '#FAF8F3' }}>TrailSync</span>
+      </div>
+
+      <nav className="flex-1 space-y-2.5 px-3">
+        {STAFF_NAV_ITEMS.map(({ key, href, label, Icon }) => (
+          <a
+            key={key}
+            href={href}
+            aria-current={key === active ? 'page' : undefined}
+            className={`ts-staff-nav-item px-3 py-2.5 text-sm font-medium ${key === active ? 'ts-staff-nav-item-active' : ''}`}
+          >
+            <Icon />
+            {label}
+          </a>
+        ))}
+      </nav>
+
+      {me && (
+        <div className="ts-staff-sidebar-footer flex items-center gap-2.5 px-4 py-4">
+          <span className="ts-sidebar-avatar">{initialsFor(me)}</span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium" style={{ color: '#FAF8F3' }}>
+              {me.first_name} {me.last_name}
+            </p>
+            {idLine && (
+              <p className="truncate text-xs" style={{ color: 'rgba(250,248,243,0.55)' }}>
+                {idLine}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="px-3 pb-6">
+        <button type="button" onClick={onLogout} className="ts-staff-nav-item w-full px-3 py-2.5 text-sm font-medium">
+          <LogoutIcon />
+          Log out
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+export function RegistrarMobileHeader({ onLogout }) {
+  return (
+    <header className="ts-staff-mobile-header sticky top-0 z-10 lg:hidden">
+      <div className="flex items-center justify-between px-6 py-3.5">
+        <div className="flex items-center gap-2">
+          <img
+            src="/trailsync-logo.png"
+            alt=""
+            aria-hidden="true"
+            style={{ height: '34px', width: 'auto', margin: '-7px 0' }}
+          />
+          <span className="text-lg font-semibold" style={{ ...FONT_SERIF, color: '#FAF8F3' }}>TrailSync</span>
+        </div>
+        <button
+          type="button"
+          onClick={onLogout}
+          className="text-sm font-medium"
+          style={{ color: '#E4B45C' }}
+        >
           Log out
         </button>
       </div>

@@ -10,7 +10,7 @@ import {
 import { saveSession } from '../lib/auth.js';
 
 const STUDENT_ROLES = ['Student', 'Alumni'];
-const ROLE_ROUTES = { Student: '/portal', Alumni: '/portal', 'Registrar Staff': '/staff/queue' };
+const ROLE_ROUTES = { Student: '/portal', Alumni: '/portal', 'Registrar Staff': '/registrar/dashboard' };
 
 export default function LoginPage() {
   const [role, setRole] = useState('student');

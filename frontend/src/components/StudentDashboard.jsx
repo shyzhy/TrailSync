@@ -9,6 +9,7 @@ import {
   DocumentIcon,
   FONT_SANS,
   FONT_SERIF,
+  greetingForNow,
   InboxIcon,
   PlusCircleIcon,
   SearchIcon,
@@ -28,13 +29,6 @@ const STATUS_PILL = {
   Ready: { label: 'Ready for pickup', className: 'ts-pill-ready' },
   Released: { label: 'Released', className: 'ts-pill-released' },
 };
-
-function greetingForNow() {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 18) return 'Good afternoon';
-  return 'Good evening';
-}
 
 function formatDate(iso) {
   try {
