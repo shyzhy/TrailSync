@@ -1003,6 +1003,86 @@ export const APP_CSS = `
     -webkit-backdrop-filter: blur(6px);
     border-bottom: 1px solid rgba(255,255,255,0.08);
   }
+
+  /* ---- Release Slots: interactive calendar day buttons ---- */
+  .ts-cal-day-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background 150ms ease, color 150ms ease;
+  }
+  .ts-cal-day-btn:hover:not(.ts-cal-day-today):not(.ts-cal-day-selected) { background: rgba(36,64,107,0.08); }
+  .ts-cal-day-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
+  .ts-cal-day-selected {
+    color: #fff;
+    font-weight: 600;
+    background: linear-gradient(180deg, #3E5D8F 0%, #24406B 100%);
+    box-shadow: 0 2px 6px rgba(23,41,74,0.4), inset 0 1px 0 rgba(255,255,255,0.35);
+  }
+  .ts-cal-nav-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    color: #5B6474;
+    background: rgba(91,100,116,0.08);
+    transition: color 150ms ease, background 150ms ease;
+  }
+  .ts-cal-nav-btn:hover { color: #1F2937; background: rgba(91,100,116,0.16); }
+  .ts-cal-nav-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
+
+  /* ---- Release Slots: one card per slot within the day panel ---- */
+  .ts-slot-card {
+    border-radius: 12px;
+    background: rgba(255,255,255,0.55);
+    border: 1px solid #E3DFD2;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+  }
+  .ts-icon-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    color: #5B6474;
+    background: rgba(91,100,116,0.08);
+    transition: color 150ms ease, background 150ms ease;
+  }
+  .ts-icon-chip:hover { color: #1F2937; background: rgba(91,100,116,0.16); }
+  .ts-icon-chip:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
+
+  /* ---- Processing Queue: Verify & Approve (sage) / Reject (outline danger) —
+     same glossy-button construction as .ts-btn-primary, different palette. ---- */
+  .ts-btn-sage {
+    color: #fff;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #6FA08C 0%, #4F7A6A 55%, #395C4E 100%);
+    border: 1px solid rgba(57,92,78,0.6);
+    border-top-color: rgba(255,255,255,0.45);
+    box-shadow: 0 8px 18px rgba(57,92,78,0.32), 0 2px 4px rgba(57,92,78,0.24), inset 0 1px 0 rgba(255,255,255,0.35);
+    text-shadow: 0 1px 1px rgba(0,0,0,0.28);
+    transition: box-shadow 150ms ease, transform 80ms ease, filter 150ms ease;
+  }
+  .ts-btn-sage:hover:not(:disabled) { filter: brightness(1.07); }
+  .ts-btn-sage:active:not(:disabled) { transform: translateY(1px); box-shadow: inset 0 3px 8px rgba(0,0,0,0.35); }
+  .ts-btn-sage:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.65), 0 8px 18px rgba(57,92,78,0.32); }
+  .ts-btn-sage:disabled { opacity: 0.6; cursor: not-allowed; filter: saturate(0.85); }
+
+  .ts-btn-outline-danger {
+    color: #B91C1C;
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.62) 100%);
+    border: 1px solid rgba(185,28,28,0.4);
+    box-shadow: 0 2px 5px rgba(31,41,55,0.1), inset 0 1px 0 rgba(255,255,255,0.9);
+    transition: background 150ms ease, box-shadow 150ms ease, transform 80ms ease;
+  }
+  .ts-btn-outline-danger:hover:not(:disabled) { background: rgba(185,28,28,0.07); }
+  .ts-btn-outline-danger:active:not(:disabled) { transform: translateY(1px); }
+  .ts-btn-outline-danger:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.6); }
+  .ts-btn-outline-danger:disabled { opacity: 0.45; cursor: not-allowed; }
 `;
 
 export function DocumentIcon() {
@@ -1215,6 +1295,24 @@ export function greetingForNow() {
   return 'Good evening';
 }
 
+export function PencilIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+      <path d="M13.5 3.5 16.5 6.5 6.5 16.5H3.5V13.5L13.5 3.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M11.5 5.5 14.5 8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function DownloadIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+      <path d="M10 3v9M10 12l-3.5-3.5M10 12l3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3.5 14v1.5A1.5 1.5 0 0 0 5 17h10a1.5 1.5 0 0 0 1.5-1.5V14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function CloseIcon() {
   return (
     <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
@@ -1354,8 +1452,8 @@ export function AppMobileHeader({ onLogout }) {
 
 const STAFF_NAV_ITEMS = [
   { key: 'dashboard', href: '/registrar/dashboard', label: 'Dashboard', Icon: GridIcon },
-  { key: 'queue', href: '#', label: 'Processing Queue', Icon: DocumentIcon },
-  { key: 'slots', href: '#', label: 'Release Slots', Icon: CalendarIcon },
+  { key: 'queue', href: '/registrar/queue', label: 'Processing Queue', Icon: DocumentIcon },
+  { key: 'slots', href: '/registrar/release-slots', label: 'Release Slots', Icon: CalendarIcon },
   { key: 'notifications', href: '#', label: 'Notifications', Icon: BellIcon },
 ];
 

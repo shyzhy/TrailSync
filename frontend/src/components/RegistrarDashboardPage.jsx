@@ -215,7 +215,7 @@ export default function RegistrarDashboardPage() {
               <h2 className="ts-ink text-lg font-semibold" style={FONT_SERIF}>
                 Recent Submissions
               </h2>
-              <a href="#" className="ts-link text-sm font-medium">
+              <a href="/registrar/queue" className="ts-link text-sm font-medium">
                 View Queue
               </a>
             </div>
@@ -257,7 +257,7 @@ export default function RegistrarDashboardPage() {
                         </p>
                       </div>
                       <a
-                        href="#"
+                        href="/registrar/queue"
                         className="ts-btn-primary shrink-0 px-4 py-1.5 text-xs font-medium"
                       >
                         Review
@@ -280,7 +280,7 @@ export default function RegistrarDashboardPage() {
               <h2 className="ts-ink text-lg font-semibold" style={FONT_SERIF}>
                 Today's Release Slots
               </h2>
-              <a href="#" className="ts-link text-sm font-medium">
+              <a href="/registrar/release-slots" className="ts-link text-sm font-medium">
                 Manage Slots
               </a>
             </div>

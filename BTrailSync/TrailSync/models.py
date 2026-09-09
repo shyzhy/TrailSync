@@ -2,6 +2,7 @@ from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 class Role(models.Model):
     class RoleName(models.TextChoices):
@@ -190,14 +191,23 @@ class TransactionType(models.Model):
 
 
 class ReleaseSlot(models.Model):
-    """A bookable release-day window at Window 6, with a fixed remaining
-    capacity — students choose one of these rather than an arbitrary date.
+    """A bookable release-day window at Window 6.
+
+    available_slots was originally meant as a live "remaining" counter,
+    decremented as students booked a slot at submission time. The Request
+    Form wizard no longer offers slot selection at submission (dropped when
+    it was rebuilt into its current 4 steps), so nothing decrements this
+    field anymore — it would silently go stale as a remaining-capacity
+    counter. It's now treated as TOTAL CAPACITY instead: "assigned" and
+    "remaining" are computed live from FormRequest.release_slot wherever
+    they're needed (see ReleaseSlotDetailSerializer), rather than trusted
+    from this column.
     """
 
     slot_date = models.DateField()
     start_time = models.TimeField()
     end_time = models.TimeField()
-    available_slots = models.PositiveIntegerField(help_text="Remaining capacity for this window.")
+    available_slots = models.PositiveIntegerField(help_text="Total capacity for this window (see class docstring).")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -459,3 +469,46 @@ class FaqEntry(models.Model):
 
     def __str__(self):
         return self.question[:80]
+
+
+class RequirementVerification(models.Model):
+    """One staff verify/reject decision on a FormRequest's submitted
+    requirements. Did not exist before this table — the Processing Queue
+    explicitly needs verified_by/verified_at/remarks and nothing earlier
+    captured this.
+
+    A ForeignKey (not OneToOne) to FormRequest on purpose: a request can be
+    rejected, revised by the student, and re-verified later, so this is a
+    history of verification EVENTS, not a single current record. "The"
+    current verification is whichever row is most recent (default ordering
+    below), which is how TrackedFormRequestSerializer's verification_remarks
+    reads it.
+    """
+
+    class VerificationStatus(models.TextChoices):
+        VERIFIED = "Verified", "Verified"
+        REJECTED = "Rejected", "Rejected"
+
+    form_request = models.ForeignKey(
+        FormRequest,
+        on_delete=models.CASCADE,
+        related_name="verifications",
+    )
+    verification_status = models.CharField(max_length=20, choices=VerificationStatus.choices)
+    verified_by = models.ForeignKey(
+        StaffProfile,
+        on_delete=models.SET_NULL,
+        related_name="verifications_made",
+        null=True,
+        blank=True,
+    )
+    verified_at = models.DateTimeField(default=timezone.now)
+    remarks = models.TextField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-verified_at"]
+
+    def __str__(self):
+        return f"{self.verification_status} - {self.form_request.request_code}"

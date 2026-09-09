@@ -4,6 +4,8 @@ from django.conf import settings
 from django.contrib.auth import authenticate
 from django.core.mail import send_mail
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
+from django.db import models
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.pagination import PageNumberPagination
@@ -12,22 +14,37 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import FormRequest, ReleaseSlot, Role, StaffProfile, TransactionType, User
+from .models import (
+    FormRequest,
+    ReleaseSlot,
+    RequirementVerification,
+    Role,
+    StaffProfile,
+    TransactionType,
+    User,
+)
 from .serializers import (
+    AssignableRequestSerializer,
+    AssignSlotSerializer,
     ChangeEmailConfirmSerializer,
     ChangeEmailRequestSerializer,
     ChangePasswordSerializer,
     CreateFormRequestSerializer,
+    CreateReleaseSlotSerializer,
     FormRequestResultSerializer,
     MeSerializer,
     RecentFormRequestSerializer,
     RegisterSerializer,
+    RegistrarQueueRowSerializer,
     RegistrarRecentSubmissionSerializer,
     RegistrarReleaseSlotRowSerializer,
+    RejectRequestSerializer,
+    ReleaseSlotDetailSerializer,
     ReleaseSlotSerializer,
     TrackedFormRequestSerializer,
     TransactionTypeSerializer,
     UpdateProfileSerializer,
+    VerifyRequestSerializer,
     build_profile_payload,
 )
 
@@ -512,3 +529,205 @@ class RegistrarTodaysReleaseSlotsView(generics.ListAPIView):
             .select_related("transaction_type", "user", "release_slot")
             .order_by("release_slot__start_time")
         )
+
+
+class RegistrarQueueListView(generics.ListAPIView):
+    """GET /api/registrar/queue/ - Processing Queue's left-hand list.
+
+    Filterable by ?status= (defaults to Submitted — the UI's "Pending"),
+    ?date_from=/?date_to= (against created_at), and ?search= (student name
+    or request code). Not scoped by assigned_window: there's no per-request
+    window column, same reality noted on the Dashboard endpoints — every
+    request is already implicitly Window 6.
+    """
+
+    serializer_class = RegistrarQueueRowSerializer
+    permission_classes = [IsApprovedRegistrarStaff]
+    pagination_class = FormRequestPagination
+
+    def get_queryset(self):
+        qs = (
+            FormRequest.objects.select_related("transaction_type", "user", "user__user_profile", "submission", "proxy")
+            .order_by("-created_at")
+        )
+
+        status_param = (self.request.query_params.get("status") or "Submitted").strip()
+        if status_param.lower() != "all":
+            qs = qs.filter(request_status__iexact=status_param)
+
+        date_from = (self.request.query_params.get("date_from") or "").strip()
+        if date_from:
+            qs = qs.filter(created_at__date__gte=date_from)
+        date_to = (self.request.query_params.get("date_to") or "").strip()
+        if date_to:
+            qs = qs.filter(created_at__date__lte=date_to)
+
+        search = (self.request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                models.Q(request_code__icontains=search)
+                | models.Q(user__first_name__icontains=search)
+                | models.Q(user__last_name__icontains=search)
+            )
+
+        return qs
+
+
+class RegistrarQueueVerifyView(APIView):
+    """POST /api/registrar/queue/<id>/verify/ - creates a Verified
+    RequirementVerification row and advances request_status.
+
+    Advances to "Verified" — the next stage in the CURRENT 5-value
+    RequestStatus enum (Submitted/Verified/Ready/Released/Rejected). The
+    real 9-stage flow from the feature docs is still unresolved (only 7 of
+    9 stages were ever named), so this uses what actually exists today
+    rather than guessing at "Approved (Ready to Print)" as a distinct stage.
+    """
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    def post(self, request, pk):
+        form_request = get_object_or_404(FormRequest, pk=pk)
+        serializer = VerifyRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        staff_profile = getattr(request.user, "staff_profile", None)
+        RequirementVerification.objects.create(
+            form_request=form_request,
+            verification_status=RequirementVerification.VerificationStatus.VERIFIED,
+            verified_by=staff_profile,
+            remarks=serializer.validated_data.get("remarks") or None,
+        )
+        form_request.request_status = FormRequest.RequestStatus.VERIFIED
+        form_request.save(update_fields=["request_status", "updated_at"])
+
+        return Response(RegistrarQueueRowSerializer(form_request).data)
+
+
+class RegistrarQueueRejectView(APIView):
+    """POST /api/registrar/queue/<id>/reject/ - creates a Rejected
+    RequirementVerification row (remarks required) and sets request_status.
+
+    Sets status to "Rejected" — the closest existing analog to the feature
+    docs' "Needs Revision / blocked" state; that distinct stage doesn't
+    exist in the current 5-value enum either (same 9-stage gap as above).
+    """
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    def post(self, request, pk):
+        form_request = get_object_or_404(FormRequest, pk=pk)
+        serializer = RejectRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        staff_profile = getattr(request.user, "staff_profile", None)
+        RequirementVerification.objects.create(
+            form_request=form_request,
+            verification_status=RequirementVerification.VerificationStatus.REJECTED,
+            verified_by=staff_profile,
+            remarks=serializer.validated_data["remarks"],
+        )
+        form_request.request_status = FormRequest.RequestStatus.REJECTED
+        form_request.save(update_fields=["request_status", "updated_at"])
+
+        return Response(RegistrarQueueRowSerializer(form_request).data)
+
+
+class RegistrarReleaseSlotCalendarView(APIView):
+    """GET /api/registrar/release-slots/calendar/?year=&month= - lightweight
+    dates+counts for the visible month, so the calendar doesn't have to pull
+    full slot detail (assignments, etc.) just to draw dots."""
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    def get(self, request):
+        try:
+            year = int(request.query_params.get("year"))
+            month = int(request.query_params.get("month"))
+        except (TypeError, ValueError):
+            return Response({"detail": "year and month query params are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        rows = (
+            ReleaseSlot.objects.filter(slot_date__year=year, slot_date__month=month)
+            .values("slot_date")
+            .annotate(slot_count=models.Count("id"))
+            .order_by("slot_date")
+        )
+        return Response([{"date": r["slot_date"].isoformat(), "slot_count": r["slot_count"]} for r in rows])
+
+
+class RegistrarReleaseSlotsForDateView(generics.ListAPIView):
+    """GET /api/registrar/release-slots/?date=YYYY-MM-DD - full detail
+    (including assigned students) for one date only."""
+
+    serializer_class = ReleaseSlotDetailSerializer
+    permission_classes = [IsApprovedRegistrarStaff]
+    pagination_class = None
+
+    def get_queryset(self):
+        date_param = (self.request.query_params.get("date") or "").strip()
+        qs = ReleaseSlot.objects.all()
+        if date_param:
+            qs = qs.filter(slot_date=date_param)
+        return qs.order_by("start_time")
+
+
+class RegistrarCreateReleaseSlotView(generics.CreateAPIView):
+    """POST /api/registrar/release-slots/ - "+ Create New Slot" (any date)
+    and "+ Add Time Slot" (pre-filled date) both post here; the only
+    difference is what date the frontend pre-fills in the form."""
+
+    serializer_class = CreateReleaseSlotSerializer
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        slot = serializer.save()
+        return Response(ReleaseSlotDetailSerializer(slot).data, status=status.HTTP_201_CREATED)
+
+
+class RegistrarAssignableRequestsView(generics.ListAPIView):
+    """GET /api/registrar/release-slots/assignable-requests/ - the Assign
+    picker's options: every Ready-status request, whichever slot (if any)
+    it's currently attached to. Not restricted to "not yet in a slot" —
+    picking an already-assigned one from a different slot's Assign button
+    is how reassignment works, since students currently have no path of
+    their own to pick a slot (that step was dropped from the Request Form
+    wizard), so every assignment today originates from this endpoint or an
+    earlier one via this same flow.
+    """
+
+    serializer_class = AssignableRequestSerializer
+    permission_classes = [IsApprovedRegistrarStaff]
+    pagination_class = None
+
+    def get_queryset(self):
+        return (
+            FormRequest.objects.filter(request_status=FormRequest.RequestStatus.READY)
+            .select_related("transaction_type", "user")
+            .order_by("-created_at")
+        )
+
+
+class RegistrarAssignSlotView(APIView):
+    """POST /api/registrar/release-slots/<slot_id>/assign/ {form_request} -
+    points a FormRequest at this ReleaseSlot. No ReleaseSchedule row is
+    created here — that model is reserved for the actual claim event (see
+    its docstring); "Scheduled" vs "Claimed" in the UI is derived from
+    whether release_slot is set vs whether a ReleaseSchedule with
+    claimed_at exists, not from a stored status column.
+    """
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    def post(self, request, pk):
+        slot = get_object_or_404(ReleaseSlot, pk=pk)
+        serializer = AssignSlotSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        form_request = serializer.validated_data["form_request"]
+        form_request.release_slot = slot
+        form_request.save(update_fields=["release_slot", "updated_at"])
+
+        return Response(ReleaseSlotDetailSerializer(slot).data)

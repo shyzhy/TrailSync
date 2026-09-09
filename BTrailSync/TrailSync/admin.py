@@ -10,6 +10,7 @@ from TrailSync.models import (
     ReleaseSchedule,
     ReleaseSlot,
     RequestProxy,
+    RequirementVerification,
     Role,
     StaffProfile,
     TransactionType,
@@ -105,3 +106,4 @@ admin.site.register(ReleaseSlot)
 admin.site.register(RequestProxy)
 admin.site.register(ReleaseSchedule)
 admin.site.register(FaqEntry)
+admin.site.register(RequirementVerification)

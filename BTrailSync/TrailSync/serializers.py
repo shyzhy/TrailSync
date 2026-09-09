@@ -10,9 +10,12 @@ from rest_framework import serializers
 from .models import (
     FormRequest,
     FormSubmission,
+    ReleaseSchedule,
     ReleaseSlot,
     RequestProxy,
+    RequirementVerification,
     Role,
+    StaffProfile,
     TransactionType,
     User,
     UserProfile,
@@ -246,8 +249,11 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
         }
 
     def get_verification_remarks(self, obj):
-        # No REQUIREMENT_VERIFICATIONS table yet — always null until one exists.
-        return None
+        # RequirementVerification is a history of events (a request can be
+        # rejected, revised, and re-verified) — the most recent one is "the"
+        # current verification, per the model's default ordering.
+        latest = obj.verifications.first()
+        return latest.remarks if latest else None
 
     def get_release_schedule(self, obj):
         slot = obj.release_slot
@@ -330,6 +336,222 @@ class RegistrarReleaseSlotRowSerializer(serializers.ModelSerializer):
 
     def get_start_time(self, obj):
         return obj.release_slot.start_time.isoformat(timespec="minutes") if obj.release_slot else None
+
+
+class RegistrarQueueRowSerializer(serializers.ModelSerializer):
+    """GET /api/registrar/queue/ row shape — doubles as the Request Details
+    panel's data too, since the frontend already has this row in memory the
+    moment a request is selected and a second detail fetch would just be a
+    round trip for data it's already holding.
+
+    requirements_status ("Complete"/"Incomplete") is a narrow, honest proxy:
+    the ERD has no per-document checklist (no SUBMISSION_ATTACHMENTS table),
+    so the only thing actually verifiable is whether the one real upload
+    this system has — board_exam_photo — is present when the purpose
+    requires it. Every other purpose has nothing to check against and reads
+    as Complete. See chat for the SUBMISSION_ATTACHMENTS question.
+    """
+
+    transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
+    student_first_name = serializers.CharField(source="user.first_name", read_only=True)
+    student_last_name = serializers.CharField(source="user.last_name", read_only=True)
+    student_school_id_number = serializers.SerializerMethodField()
+    student_course = serializers.SerializerMethodField()
+    student_year_level = serializers.SerializerMethodField()
+    purpose = serializers.SerializerMethodField()
+    purpose_other = serializers.SerializerMethodField()
+    number_of_copies = serializers.SerializerMethodField()
+    semester = serializers.SerializerMethodField()
+    additional_notes = serializers.SerializerMethodField()
+    requirements_status = serializers.SerializerMethodField()
+    uploaded_files = serializers.SerializerMethodField()
+    verification_remarks = serializers.SerializerMethodField()
+    proxy = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FormRequest
+        fields = [
+            "id",
+            "request_code",
+            "request_status",
+            "transaction_type",
+            "created_at",
+            "student_first_name",
+            "student_last_name",
+            "student_school_id_number",
+            "student_course",
+            "student_year_level",
+            "purpose",
+            "purpose_other",
+            "number_of_copies",
+            "semester",
+            "additional_notes",
+            "requirements_status",
+            "uploaded_files",
+            "verification_remarks",
+            "proxy",
+        ]
+
+    def _profile(self, obj):
+        return getattr(obj.user, "user_profile", None)
+
+    def get_student_school_id_number(self, obj):
+        p = self._profile(obj)
+        return p.school_id_number if p else None
+
+    def get_student_course(self, obj):
+        p = self._profile(obj)
+        return p.course if p else None
+
+    def get_student_year_level(self, obj):
+        p = self._profile(obj)
+        return p.year_level if p else None
+
+    def _form_data(self, obj):
+        submission = getattr(obj, "submission", None)
+        return (submission.form_data if submission else None) or {}
+
+    def get_purpose(self, obj):
+        return self._form_data(obj).get("purpose")
+
+    def get_purpose_other(self, obj):
+        return self._form_data(obj).get("purpose_other") or None
+
+    def get_number_of_copies(self, obj):
+        return self._form_data(obj).get("number_of_copies")
+
+    def get_semester(self, obj):
+        return self._form_data(obj).get("semester")
+
+    def get_additional_notes(self, obj):
+        return self._form_data(obj).get("additional_notes") or ""
+
+    def get_requirements_status(self, obj):
+        submission = getattr(obj, "submission", None)
+        if self._form_data(obj).get("purpose") == FormSubmission.Purpose.BOARD_EXAM:
+            has_photo = bool(submission and submission.board_exam_photo)
+            return "Complete" if has_photo else "Incomplete"
+        return "Complete"
+
+    def get_uploaded_files(self, obj):
+        """The one real uploaded file this system tracks. Not a general
+        attachment list — see the class docstring and the chat note about
+        SUBMISSION_ATTACHMENTS not existing yet."""
+        submission = getattr(obj, "submission", None)
+        if not (submission and submission.board_exam_photo):
+            return []
+        f = submission.board_exam_photo
+        try:
+            size = f.size
+        except (FileNotFoundError, ValueError):
+            size = None
+        return [
+            {
+                "file_name": f.name.rsplit("/", 1)[-1],
+                "file_url": f.url,
+                "file_size": size,
+                "kind": "board_exam_photo",
+            }
+        ]
+
+    def get_verification_remarks(self, obj):
+        latest = obj.verifications.first()
+        return latest.remarks if latest else None
+
+    def get_proxy(self, obj):
+        proxy = getattr(obj, "proxy", None)
+        if proxy is None:
+            return None
+        return {
+            "proxy_full_name": proxy.proxy_full_name,
+            "relationship": proxy.relationship,
+            "contact_number": proxy.contact_number,
+        }
+
+
+class VerifyRequestSerializer(serializers.Serializer):
+    remarks = serializers.CharField(required=False, allow_blank=True)
+
+
+class RejectRequestSerializer(serializers.Serializer):
+    # Reject explicitly requires remarks — the button is disabled client-side
+    # until this is filled in, but the API enforces it too rather than
+    # trusting the frontend.
+    remarks = serializers.CharField(allow_blank=False, error_messages={"blank": "Review remarks are required to reject a request."})
+
+
+class ReleaseSlotDetailSerializer(serializers.ModelSerializer):
+    """GET /api/registrar/release-slots/?date=... row shape.
+
+    available_slots practically means "total capacity" now, not "remaining"
+    — see the model docstring update. assigned/remaining are computed live
+    from FormRequest.release_slot here rather than trusted from a
+    decrementing counter, since nothing has decremented this field since the
+    Request Form wizard stopped asking students to pick a slot at submission.
+    """
+
+    assigned_count = serializers.SerializerMethodField()
+    remaining = serializers.SerializerMethodField()
+    assignments = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReleaseSlot
+        fields = ["id", "slot_date", "start_time", "end_time", "available_slots", "assigned_count", "remaining", "assignments"]
+
+    def get_assigned_count(self, obj):
+        return obj.form_requests.count()
+
+    def get_remaining(self, obj):
+        return max(obj.available_slots - obj.form_requests.count(), 0)
+
+    def get_assignments(self, obj):
+        rows = []
+        for fr in obj.form_requests.select_related("transaction_type", "user", "release_schedule"):
+            schedule = getattr(fr, "release_schedule", None)
+            claimed = bool(schedule and schedule.claimed_at)
+            rows.append(
+                {
+                    "form_request_id": fr.id,
+                    "request_code": fr.request_code,
+                    "student_first_name": fr.user.first_name,
+                    "student_last_name": fr.user.last_name,
+                    "transaction_type": fr.transaction_type.name,
+                    # Derived, not stored: "Claimed" once an actual claim
+                    # event exists, "Scheduled" otherwise. No new
+                    # ReleaseSchedule row is created just to hold this —
+                    # that model stays reserved for the real claim event.
+                    "status": "Claimed" if claimed else "Scheduled",
+                }
+            )
+        return rows
+
+
+class CreateReleaseSlotSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReleaseSlot
+        fields = ["slot_date", "start_time", "end_time", "available_slots"]
+
+
+class AssignableRequestSerializer(serializers.ModelSerializer):
+    """GET /api/registrar/release-slots/assignable-requests/ — the picker's
+    options. Includes requests already assigned to A slot (with which one
+    flagged), not just unassigned ones, so reassigning a request from one
+    slot to another is just picking it again from a different slot's
+    Assign button — no separate "reassign" flow needed.
+    """
+
+    transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
+    student_first_name = serializers.CharField(source="user.first_name", read_only=True)
+    student_last_name = serializers.CharField(source="user.last_name", read_only=True)
+    current_slot_id = serializers.IntegerField(source="release_slot_id", read_only=True)
+
+    class Meta:
+        model = FormRequest
+        fields = ["id", "request_code", "transaction_type", "student_first_name", "student_last_name", "current_slot_id"]
+
+
+class AssignSlotSerializer(serializers.Serializer):
+    form_request = serializers.PrimaryKeyRelatedField(queryset=FormRequest.objects.filter(request_status="Ready"))
 
 
 class RecentFormRequestSerializer(serializers.ModelSerializer):

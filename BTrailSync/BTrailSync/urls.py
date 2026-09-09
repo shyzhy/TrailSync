@@ -27,8 +27,16 @@ from TrailSync.views import (
     FormRequestListCreateView,
     MeView,
     RecentFormRequestsView,
+    RegistrarAssignableRequestsView,
+    RegistrarAssignSlotView,
+    RegistrarCreateReleaseSlotView,
     RegistrarDashboardSummaryView,
+    RegistrarQueueListView,
+    RegistrarQueueRejectView,
+    RegistrarQueueVerifyView,
     RegistrarRecentSubmissionsView,
+    RegistrarReleaseSlotCalendarView,
+    RegistrarReleaseSlotsForDateView,
     RegistrarTodaysReleaseSlotsView,
     ReleaseSlotListView,
     TransactionTypeListView,
@@ -51,6 +59,17 @@ urlpatterns = [
     path('api/registrar/dashboard/summary/', RegistrarDashboardSummaryView.as_view(), name='registrar-dashboard-summary'),
     path('api/registrar/dashboard/recent-submissions/', RegistrarRecentSubmissionsView.as_view(), name='registrar-recent-submissions'),
     path('api/registrar/dashboard/todays-release-slots/', RegistrarTodaysReleaseSlotsView.as_view(), name='registrar-todays-release-slots'),
+    # Processing Queue
+    path('api/registrar/queue/', RegistrarQueueListView.as_view(), name='registrar-queue'),
+    path('api/registrar/queue/<int:pk>/verify/', RegistrarQueueVerifyView.as_view(), name='registrar-queue-verify'),
+    path('api/registrar/queue/<int:pk>/reject/', RegistrarQueueRejectView.as_view(), name='registrar-queue-reject'),
+    # Release Slots — literal paths (calendar/, assignable-requests/, create/)
+    # registered before the <int:pk> pattern so they aren't swallowed by it.
+    path('api/registrar/release-slots/calendar/', RegistrarReleaseSlotCalendarView.as_view(), name='registrar-release-slots-calendar'),
+    path('api/registrar/release-slots/assignable-requests/', RegistrarAssignableRequestsView.as_view(), name='registrar-assignable-requests'),
+    path('api/registrar/release-slots/create/', RegistrarCreateReleaseSlotView.as_view(), name='registrar-release-slots-create'),
+    path('api/registrar/release-slots/<int:pk>/assign/', RegistrarAssignSlotView.as_view(), name='registrar-release-slots-assign'),
+    path('api/registrar/release-slots/', RegistrarReleaseSlotsForDateView.as_view(), name='registrar-release-slots-for-date'),
 ]
 
 if settings.DEBUG:
