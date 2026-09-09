@@ -26,6 +26,9 @@ def build_profile_payload(user):
         p = user.user_profile
         return {
             "school_id_number": p.school_id_number,
+            "first_name": user.first_name,
+            "middle_name": p.middle_name,
+            "last_name": user.last_name,
             "course": p.course,
             "year_level": p.year_level,
             "user_category": p.user_category,
@@ -47,6 +50,7 @@ class MeSerializer(serializers.Serializer):
     email = serializers.EmailField()
     first_name = serializers.CharField()
     last_name = serializers.CharField()
+    contact_number = serializers.CharField(allow_null=True)
     role = serializers.SerializerMethodField()
     profile = serializers.SerializerMethodField()
 
@@ -55,6 +59,190 @@ class MeSerializer(serializers.Serializer):
 
     def get_profile(self, user):
         return build_profile_payload(user)
+
+
+class UpdateProfileSerializer(serializers.Serializer):
+    """PATCH /api/me/ body. Only the four fields a student can legitimately
+    self-edit: everything else in USER_PROFILES (school ID, course, year
+    level, category) is an official record that should change through the
+    registrar, not a self-service form — see the Profile page's Account
+    card, which renders those read-only.
+
+    first_name/last_name live on User; middle_name lives on UserProfile;
+    contact_number lives on User (not UserProfile — that's where it was
+    actually modeled back when registration was built).
+    """
+
+    first_name = serializers.CharField(max_length=150)
+    middle_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=150)
+    contact_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+
+    @transaction.atomic
+    def save(self, **kwargs):
+        user = self.context["request"].user
+        data = self.validated_data
+
+        user.first_name = data["first_name"].strip()
+        user.last_name = data["last_name"].strip()
+        user.contact_number = (data.get("contact_number") or "").strip() or None
+        user.save(update_fields=["first_name", "last_name", "contact_number"])
+
+        profile = getattr(user, "user_profile", None)
+        if profile is not None:
+            profile.middle_name = (data.get("middle_name") or "").strip() or None
+            profile.save(update_fields=["middle_name"])
+
+        return user
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """POST /api/me/change-password/ body. Touches USERS.password only —
+    never USER_PROFILES."""
+
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+    confirm_new_password = serializers.CharField(write_only=True)
+
+    def validate_current_password(self, value):
+        user = self.context["request"].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Your current password is incorrect.")
+        return value
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["confirm_new_password"]:
+            raise serializers.ValidationError({"confirm_new_password": "Passwords don't match."})
+
+        user = self.context["request"].user
+        try:
+            validate_password(attrs["new_password"], user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"new_password": list(exc.messages)})
+
+        return attrs
+
+    def save(self, **kwargs):
+        user = self.context["request"].user
+        user.set_password(self.validated_data["new_password"])
+        user.save(update_fields=["password"])
+        return user
+
+
+class ChangeEmailRequestSerializer(serializers.Serializer):
+    """POST /api/me/change-email/request/ body. Doesn't touch USERS.email
+    directly — see ChangeEmailConfirmSerializer, which does, once the link
+    sent here is actually clicked."""
+
+    new_email = serializers.EmailField()
+
+    def validate_new_email(self, value):
+        value = value.strip().lower()
+        user = self.context["request"].user
+        if User.objects.exclude(pk=user.pk).filter(email__iexact=value).exists():
+            raise serializers.ValidationError("That email is already in use by another account.")
+        if value == user.email.lower():
+            raise serializers.ValidationError("That's already your current email.")
+        return value
+
+
+class ChangeEmailConfirmSerializer(serializers.Serializer):
+    """POST /api/me/change-email/confirm/ body — the link from the
+    verification email lands here with its token."""
+
+    token = serializers.CharField()
+
+
+class TrackedFormRequestSerializer(serializers.ModelSerializer):
+    """GET /api/form-requests/ row shape — everything the Track Requests
+    ticket card and its detail expansion need. purpose/number_of_copies/
+    semester/additional_notes/graduation_date all live inside
+    FormSubmission.form_data (see that model's docstring), so they're pulled
+    out here rather than being real columns.
+
+    verification/release-schedule data would come from REQUIREMENT_
+    VERIFICATIONS / RELEASE_SCHEDULES tables per the original ERD — neither
+    exists yet, so verification_remarks stays null and release_schedule
+    falls back to the closest thing that does exist (release_slot, if one
+    happens to be set) rather than being fabricated.
+    """
+
+    transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
+    purpose = serializers.SerializerMethodField()
+    purpose_other = serializers.SerializerMethodField()
+    number_of_copies = serializers.SerializerMethodField()
+    semester = serializers.SerializerMethodField()
+    additional_notes = serializers.SerializerMethodField()
+    graduation_date = serializers.SerializerMethodField()
+    proxy = serializers.SerializerMethodField()
+    verification_remarks = serializers.SerializerMethodField()
+    release_schedule = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FormRequest
+        fields = [
+            "id",
+            "request_code",
+            "request_status",
+            "transaction_type",
+            "created_at",
+            "requires_archive_retrieval",
+            "purpose",
+            "purpose_other",
+            "number_of_copies",
+            "semester",
+            "additional_notes",
+            "graduation_date",
+            "proxy",
+            "verification_remarks",
+            "release_schedule",
+        ]
+
+    def _form_data(self, obj):
+        submission = getattr(obj, "submission", None)
+        return (submission.form_data if submission else None) or {}
+
+    def get_purpose(self, obj):
+        return self._form_data(obj).get("purpose")
+
+    def get_purpose_other(self, obj):
+        return self._form_data(obj).get("purpose_other") or None
+
+    def get_number_of_copies(self, obj):
+        return self._form_data(obj).get("number_of_copies")
+
+    def get_semester(self, obj):
+        return self._form_data(obj).get("semester")
+
+    def get_additional_notes(self, obj):
+        return self._form_data(obj).get("additional_notes") or ""
+
+    def get_graduation_date(self, obj):
+        return self._form_data(obj).get("graduation_date") or None
+
+    def get_proxy(self, obj):
+        proxy = getattr(obj, "proxy", None)
+        if proxy is None:
+            return None
+        return {
+            "proxy_full_name": proxy.proxy_full_name,
+            "relationship": proxy.relationship,
+            "contact_number": proxy.contact_number,
+        }
+
+    def get_verification_remarks(self, obj):
+        # No REQUIREMENT_VERIFICATIONS table yet — always null until one exists.
+        return None
+
+    def get_release_schedule(self, obj):
+        slot = obj.release_slot
+        if slot is None:
+            return None
+        return {
+            "slot_date": slot.slot_date.isoformat(),
+            "start_time": slot.start_time.isoformat(timespec="minutes"),
+            "end_time": slot.end_time.isoformat(timespec="minutes"),
+        }
 
 
 class RecentFormRequestSerializer(serializers.ModelSerializer):

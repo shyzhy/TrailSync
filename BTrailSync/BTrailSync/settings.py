@@ -160,3 +160,15 @@ STATIC_URL = 'static/'
 # needs a proper file store (S3, etc.) in front of MEDIA_URL instead.
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# Email — change-email verification links get "sent" through here. Console
+# backend prints the message to the runserver log instead of actually
+# delivering it, so the flow is real and testable without SMTP credentials.
+# Swap for a real backend (SMTP, SES, etc.) before this goes to production.
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+DEFAULT_FROM_EMAIL = 'TrailSync Registrar <no-reply@trailsync.local>'
+
+# The React app's own origin — verification links (change-email) point here,
+# not at this API server, since clicking a link is a browser GET and the
+# confirmation should render as a page, not raw JSON.
+FRONTEND_BASE_URL = config('FRONTEND_BASE_URL', default='http://localhost:5173')

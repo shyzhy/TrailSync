@@ -199,6 +199,7 @@ class FormRequest(models.Model):
         VERIFIED = "Verified", "Verified"
         READY = "Ready", "Ready for Pickup"
         RELEASED = "Released", "Released"
+        REJECTED = "Rejected", "Rejected"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

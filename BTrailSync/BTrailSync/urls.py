@@ -20,8 +20,11 @@ from django.contrib import admin
 from django.urls import include, path
 
 from TrailSync.views import (
-    CreateFormRequestView,
+    ChangeEmailConfirmView,
+    ChangeEmailRequestView,
+    ChangePasswordView,
     DashboardSummaryView,
+    FormRequestListCreateView,
     MeView,
     RecentFormRequestsView,
     ReleaseSlotListView,
@@ -33,12 +36,15 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/auth/', include('TrailSync.urls')),
     path('api/me/', MeView.as_view(), name='me'),
+    path('api/me/change-password/', ChangePasswordView.as_view(), name='change-password'),
+    path('api/me/change-email/request/', ChangeEmailRequestView.as_view(), name='change-email-request'),
+    path('api/me/change-email/confirm/', ChangeEmailConfirmView.as_view(), name='change-email-confirm'),
     path('api/dashboard/summary/', DashboardSummaryView.as_view(), name='dashboard-summary'),
     path('api/dashboard/recent-requests/', RecentFormRequestsView.as_view(), name='dashboard-recent-requests'),
     path('api/dashboard/upcoming-release-dates/', UpcomingReleaseDatesView.as_view(), name='dashboard-upcoming-release-dates'),
     path('api/transaction-types/', TransactionTypeListView.as_view(), name='transaction-types'),
     path('api/release-slots/', ReleaseSlotListView.as_view(), name='release-slots'),
-    path('api/form-requests/', CreateFormRequestView.as_view(), name='form-requests'),
+    path('api/form-requests/', FormRequestListCreateView.as_view(), name='form-requests'),
 ]
 
 if settings.DEBUG:

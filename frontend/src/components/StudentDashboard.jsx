@@ -218,9 +218,9 @@ export default function StudentDashboard() {
               )}
             </div>
 
-            {/* Quick actions — placeholders; wired up in a later step */}
+            {/* Quick actions — Ask TrailSync stays a placeholder until that page exists. */}
             <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <button type="button" className="ts-quick-card flex items-center gap-4 p-5 text-left">
+              <a href="/request-form" className="ts-quick-card flex items-center gap-4 p-5 text-left">
                 <div className="ts-stat-icon ts-stat-icon-blue shrink-0">
                   <PlusCircleIcon />
                 </div>
@@ -228,9 +228,9 @@ export default function StudentDashboard() {
                   <p className="ts-ink text-sm font-semibold">Request a form</p>
                   <p className="ts-soft mt-0.5 text-xs">Start a new document request</p>
                 </div>
-              </button>
+              </a>
 
-              <button type="button" className="ts-quick-card flex items-center gap-4 p-5 text-left">
+              <a href="/track-requests" className="ts-quick-card flex items-center gap-4 p-5 text-left">
                 <div className="ts-stat-icon ts-stat-icon-blue shrink-0">
                   <SearchIcon />
                 </div>
@@ -238,7 +238,7 @@ export default function StudentDashboard() {
                   <p className="ts-ink text-sm font-semibold">Track requests</p>
                   <p className="ts-soft mt-0.5 text-xs">See the full status of every request</p>
                 </div>
-              </button>
+              </a>
 
               <button type="button" className="ts-quick-card flex items-center gap-4 p-5 text-left">
                 <div className="ts-stat-icon ts-stat-icon-gold shrink-0">

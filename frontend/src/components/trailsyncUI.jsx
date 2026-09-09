@@ -716,6 +716,124 @@ export const APP_CSS = `
   }
   .ts-file-drop:hover { border-color: rgba(36,64,107,0.55); background: rgba(255,255,255,0.7); }
   .ts-file-drop-filled { border-style: solid; border-color: rgba(79,122,106,0.5); background: rgba(79,122,106,0.06); }
+
+  /* ---- Track Requests: filter tabs ---- */
+  .ts-filter-tab {
+    border-radius: 999px;
+    padding: 0.45rem 0.95rem;
+    font-size: 13px;
+    font-weight: 500;
+    color: #5B6474;
+    background: rgba(91,100,116,0.08);
+    border: 1px solid rgba(91,100,116,0.12);
+    box-shadow: inset 0 1px 2px rgba(31,41,55,0.05);
+    transition: color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+    white-space: nowrap;
+  }
+  .ts-filter-tab:hover { color: #1F2937; background: rgba(91,100,116,0.15); }
+  .ts-filter-tab:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
+  .ts-filter-tab-active {
+    color: #fff;
+    background: linear-gradient(180deg, #3E5D8F 0%, #24406B 60%, #17294A 100%);
+    border-color: rgba(23,41,74,0.5);
+    box-shadow: 0 3px 8px rgba(23,41,74,0.3), inset 0 1px 0 rgba(255,255,255,0.3);
+  }
+  .ts-filter-tab-active:hover { color: #fff; background: linear-gradient(180deg, #3E5D8F 0%, #24406B 60%, #17294A 100%); }
+
+  /* ---- Track Requests: ticket-card (perforated stub, not a table row) ----
+     Stub = colored block carrying the serif ticket code, separated from the
+     body by a dashed seam with two circular "punch" notches at the top and
+     bottom edges (background-colored circles clipped by the card's own
+     overflow:hidden, so only the inward half of each shows). ---- */
+  .ts-ticket {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    text-align: left;
+    border-radius: 14px;
+    overflow: hidden;
+    background: linear-gradient(165deg, rgba(255,255,255,0.86) 0%, rgba(250,248,243,0.70) 100%);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid rgba(255,255,255,0.65);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), 0 14px 30px -18px rgba(31,41,55,0.26);
+    transition: transform 150ms ease, box-shadow 150ms ease;
+  }
+  .ts-ticket-clickable { cursor: pointer; }
+  .ts-ticket-clickable:hover { transform: translateY(-2px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.85), 0 20px 38px -18px rgba(31,41,55,0.3); }
+  .ts-ticket-clickable:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
+
+  .ts-ticket-stub {
+    flex-shrink: 0;
+    width: 104px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem 0.5rem;
+    text-align: center;
+    background: linear-gradient(180deg, #3E5D8F 0%, #24406B 60%, #17294A 100%);
+    color: #fff;
+  }
+  .ts-ticket-stub-code { font-weight: 600; font-size: 1rem; line-height: 1.2; }
+  .ts-ticket-stub-label {
+    margin-top: 5px;
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.6);
+  }
+
+  .ts-ticket-body {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    padding: 1rem 1.25rem 1rem 1.5rem;
+    border-left: 2px dashed rgba(31,41,55,0.18);
+  }
+  .ts-ticket-body::before,
+  .ts-ticket-body::after {
+    content: '';
+    position: absolute;
+    left: -9px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #FAF8F3;
+  }
+  .ts-ticket-body::before { top: -9px; }
+  .ts-ticket-body::after { bottom: -9px; }
+
+  .ts-ticket-steps { display: flex; align-items: center; margin-top: 0.85rem; }
+  .ts-ticket-step-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    flex-shrink: 0;
+    background: rgba(91,100,116,0.22);
+    box-shadow: inset 0 1px 1px rgba(31,41,55,0.1);
+  }
+  .ts-ticket-step-dot-done { background: linear-gradient(180deg, #6FA08C, #4F7A6A); box-shadow: 0 1px 2px rgba(79,122,106,0.4); }
+  .ts-ticket-step-dot-current {
+    width: 12px;
+    height: 12px;
+    background: linear-gradient(180deg, #3E5D8F, #24406B);
+    box-shadow: 0 0 0 3px rgba(36,64,107,0.16), 0 1px 3px rgba(23,41,74,0.4);
+  }
+  .ts-ticket-step-line { flex: 1; height: 2px; background: #E3DFD2; margin: 0 3px; border-radius: 2px; }
+  .ts-ticket-step-line-done { background: linear-gradient(90deg, #4F7A6A, rgba(79,122,106,0.45)); }
+
+  .ts-ticket-rejected-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #E0685A, #B91C1C);
+    box-shadow: 0 1px 2px rgba(185,28,28,0.4);
+    flex-shrink: 0;
+  }
+
+  .ts-ticket-detail { border-top: 1px solid #E3DFD2; padding: 1.1rem 1.5rem 1.25rem; }
 `;
 
 export function DocumentIcon() {
@@ -911,15 +1029,16 @@ export function UploadIcon() {
 // ---------------------------------------------------------------------------
 // Shared app shell: sidebar (desktop) + slim top bar (mobile), used by every
 // logged-in screen so the nav is identical wherever it appears. `active`
-// picks which item gets the raised-glass highlight; only Home and the
-// logout button do anything real right now — Track requests and Ask
-// TrailSync are placeholders until those pages exist.
+// picks which item gets the raised-glass highlight. Home, Request a form,
+// Track requests, Log out, and the avatar/name footer (which links to
+// Profile) are all real; only Ask TrailSync remains a placeholder until
+// that page exists.
 // ---------------------------------------------------------------------------
 
 const NAV_ITEMS = [
   { key: 'home', href: '/portal', label: 'Home', Icon: HomeIcon },
   { key: 'request', href: '/request-form', label: 'Request a form', Icon: PlusCircleIcon },
-  { key: 'track', href: '#', label: 'Track requests', Icon: TicketIcon },
+  { key: 'track', href: '/track-requests', label: 'Track requests', Icon: TicketIcon },
   { key: 'ask', href: '#', label: 'Ask TrailSync', Icon: ChatIcon },
 ];
 
@@ -965,7 +1084,14 @@ export function AppSidebar({ active, onLogout, me }) {
       </nav>
 
       {me && (
-        <div className="ts-sidebar-footer flex items-center gap-2.5 px-4 py-4">
+        // Doubles as the sidebar's entry point to the Profile page — fits
+        // the existing design better than a fifth nav-list item for
+        // something that's about the account, not a section of the app.
+        <a
+          href="/profile"
+          aria-current={active === 'profile' ? 'page' : undefined}
+          className={`ts-sidebar-footer ts-nav-item px-4 py-4 ${active === 'profile' ? 'ts-nav-item-active' : ''}`}
+        >
           <span className="ts-sidebar-avatar">{initialsFor(me)}</span>
           <div className="min-w-0">
             <p className="truncate text-sm font-medium" style={{ color: '#FAF8F3' }}>
@@ -977,7 +1103,7 @@ export function AppSidebar({ active, onLogout, me }) {
               </p>
             )}
           </div>
-        </div>
+        </a>
       )}
 
       <div className="px-3 pb-6">
