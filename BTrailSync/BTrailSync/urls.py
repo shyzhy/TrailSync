@@ -17,7 +17,15 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
-from TrailSync.views import DashboardSummaryView, MeView, RecentFormRequestsView
+from TrailSync.views import (
+    CreateFormRequestView,
+    DashboardSummaryView,
+    MeView,
+    RecentFormRequestsView,
+    ReleaseSlotListView,
+    TransactionTypeListView,
+    UpcomingReleaseDatesView,
+)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -25,4 +33,8 @@ urlpatterns = [
     path('api/me/', MeView.as_view(), name='me'),
     path('api/dashboard/summary/', DashboardSummaryView.as_view(), name='dashboard-summary'),
     path('api/dashboard/recent-requests/', RecentFormRequestsView.as_view(), name='dashboard-recent-requests'),
+    path('api/dashboard/upcoming-release-dates/', UpcomingReleaseDatesView.as_view(), name='dashboard-upcoming-release-dates'),
+    path('api/transaction-types/', TransactionTypeListView.as_view(), name='transaction-types'),
+    path('api/release-slots/', ReleaseSlotListView.as_view(), name='release-slots'),
+    path('api/form-requests/', CreateFormRequestView.as_view(), name='form-requests'),
 ]

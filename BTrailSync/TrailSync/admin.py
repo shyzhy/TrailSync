@@ -1,5 +1,14 @@
 from django.contrib import admin
-from TrailSync.models import Role, User, UserProfile, StaffProfile, TransactionType, FormRequest
+from TrailSync.models import (
+    FormRequest,
+    FormSubmission,
+    ReleaseSlot,
+    Role,
+    StaffProfile,
+    TransactionType,
+    User,
+    UserProfile,
+)
 
 # Register your models here.
 
@@ -9,5 +18,7 @@ admin.site.register(UserProfile)
 admin.site.register(StaffProfile)
 admin.site.register(TransactionType)
 admin.site.register(FormRequest)
+admin.site.register(FormSubmission)
+admin.site.register(ReleaseSlot)
 
 

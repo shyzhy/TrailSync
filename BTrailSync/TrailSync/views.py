@@ -6,11 +6,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import FormRequest, Role, StaffProfile, User
+from .models import FormRequest, ReleaseSlot, Role, StaffProfile, TransactionType, User
 from .serializers import (
+    CreateFormRequestSerializer,
+    FormRequestResultSerializer,
     MeSerializer,
     RecentFormRequestSerializer,
     RegisterSerializer,
+    ReleaseSlotSerializer,
+    TransactionTypeSerializer,
     build_profile_payload,
 )
 
@@ -173,3 +177,74 @@ class RecentFormRequestsView(generics.ListAPIView):
             .select_related("transaction_type")
             .order_by("-created_at")[:5]
         )
+
+
+class UpcomingReleaseDatesView(APIView):
+    """GET /api/dashboard/upcoming-release-dates/ - ISO dates (deduped) the
+    logged-in student has a request booked against, today or later. Powers
+    the dashboard calendar's "something's scheduled" dots — purely additive,
+    a student with none just gets an empty list.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        dates = FormRequest.objects.filter(
+            user=request.user,
+            release_slot__isnull=False,
+            release_slot__slot_date__gte=timezone.localdate(),
+        ).values_list("release_slot__slot_date", flat=True)
+
+        # Deduping in Python rather than via .distinct(): FormRequest's
+        # default ordering (-created_at) gets pulled into the query when you
+        # chain .distinct() after .values_list(), which makes DISTINCT
+        # compare on created_at too and silently defeats it — every row has
+        # a different created_at, so nothing gets collapsed.
+        unique_dates = sorted(set(dates))
+        return Response({"dates": [d.isoformat() for d in unique_dates]})
+
+
+class TransactionTypeListView(generics.ListAPIView):
+    """GET /api/transaction-types/ - the Request a Form document dropdown."""
+
+    serializer_class = TransactionTypeSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+    queryset = TransactionType.objects.all().order_by("name")
+
+
+class ReleaseSlotListView(generics.ListAPIView):
+    """GET /api/release-slots/ - only slots that are actually bookable.
+
+    Fully booked or past-dated slots are simply absent from this list, so
+    the frontend never has to reimplement "is this slot pickable" itself —
+    whatever comes back is a valid choice.
+    """
+
+    serializer_class = ReleaseSlotSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+
+    def get_queryset(self):
+        return ReleaseSlot.objects.filter(
+            available_slots__gt=0,
+            slot_date__gte=timezone.localdate(),
+        ).order_by("slot_date", "start_time")
+
+
+class CreateFormRequestView(APIView):
+    """POST /api/form-requests/ - submit a new document request.
+
+    request_status, request_code, and the owning user are all set server-side
+    (see CreateFormRequestSerializer) — none of them are accepted from the
+    client, so a request can't be filed under someone else's account or
+    created in a status other than Submitted.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CreateFormRequestSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        form_request = serializer.save()
+        return Response(FormRequestResultSerializer(form_request).data, status=status.HTTP_201_CREATED)

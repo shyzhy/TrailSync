@@ -1,9 +1,19 @@
+import uuid
+
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import FormRequest, Role, User, UserProfile
+from .models import (
+    FormRequest,
+    FormSubmission,
+    ReleaseSlot,
+    Role,
+    TransactionType,
+    User,
+    UserProfile,
+)
 
 
 def build_profile_payload(user):
@@ -50,6 +60,105 @@ class RecentFormRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = FormRequest
         fields = ["request_code", "transaction_type", "request_status", "created_at"]
+
+
+class TransactionTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TransactionType
+        fields = ["id", "name", "description", "required_documents", "processing_time", "fee_amount"]
+
+
+class ReleaseSlotSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReleaseSlot
+        fields = ["id", "slot_date", "start_time", "end_time", "available_slots"]
+
+
+class FormRequestResultSerializer(serializers.ModelSerializer):
+    """The response shape after a successful submission — just enough for
+    the confirmation screen ("Your request W6-0XX has been submitted!")."""
+
+    transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
+
+    class Meta:
+        model = FormRequest
+        fields = ["id", "request_code", "request_status", "transaction_type", "created_at"]
+
+
+def _generate_request_code():
+    """W6-0XX, unique. Collisions are only realistically possible under
+    concurrent submissions at the same instant, which a single registrar
+    window won't see in practice — the retry loop exists as a safety net,
+    not because this is expected to fire."""
+    for _ in range(5):
+        candidate = f"W6-{FormRequest.objects.count() + 1:03d}"
+        if not FormRequest.objects.filter(request_code=candidate).exists():
+            return candidate
+    return f"W6-{uuid.uuid4().hex[:8].upper()}"
+
+
+class CreateFormRequestSerializer(serializers.Serializer):
+    """POST /api/form-requests/ body. user is deliberately not a field here —
+    it always comes from request.user in the view/create(), never the
+    payload, so a request can only ever be filed under the account making it.
+    """
+
+    transaction_type = serializers.PrimaryKeyRelatedField(queryset=TransactionType.objects.all())
+    release_slot = serializers.PrimaryKeyRelatedField(queryset=ReleaseSlot.objects.all())
+    number_of_copies = serializers.IntegerField(min_value=1, default=1)
+    purpose = serializers.ChoiceField(choices=FormSubmission.Purpose.choices)
+    purpose_other = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    # Only ever honored for alumni (see create()) — a current student can't
+    # legitimately answer "yes" to a pre-2018-graduation question.
+    requires_archive_retrieval = serializers.BooleanField(required=False, default=False)
+
+    def validate_release_slot(self, slot):
+        if slot.available_slots <= 0:
+            raise serializers.ValidationError("This release slot is fully booked. Please choose another.")
+        return slot
+
+    def validate(self, attrs):
+        if attrs.get("purpose") == FormSubmission.Purpose.OTHER and not (attrs.get("purpose_other") or "").strip():
+            raise serializers.ValidationError({"purpose_other": "Please specify your purpose."})
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        user = self.context["request"].user
+
+        # Lock the row and re-check capacity inside the transaction — the
+        # validate_release_slot check above ran against a possibly-stale
+        # read, so this is the check that actually prevents overbooking
+        # under concurrent submissions for the same slot.
+        slot = ReleaseSlot.objects.select_for_update().get(pk=validated_data["release_slot"].pk)
+        if slot.available_slots <= 0:
+            raise serializers.ValidationError(
+                {"release_slot": "This release slot was just filled. Please choose another."}
+            )
+        slot.available_slots -= 1
+        slot.save(update_fields=["available_slots"])
+
+        profile = getattr(user, "user_profile", None)
+        requires_archive = (
+            bool(validated_data.get("requires_archive_retrieval"))
+            if profile and profile.user_category == "Alumni"
+            else False
+        )
+
+        form_request = FormRequest.objects.create(
+            user=user,
+            transaction_type=validated_data["transaction_type"],
+            release_slot=slot,
+            request_code=_generate_request_code(),
+            requires_archive_retrieval=requires_archive,
+        )
+        FormSubmission.objects.create(
+            form_request=form_request,
+            number_of_copies=validated_data.get("number_of_copies", 1),
+            purpose=validated_data["purpose"],
+            purpose_other=(validated_data.get("purpose_other") or "").strip() or None,
+        )
+        return form_request
 
 
 class RegisterSerializer(serializers.Serializer):

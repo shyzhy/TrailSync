@@ -156,6 +156,14 @@ class TransactionType(models.Model):
     name = models.CharField(max_length=150, unique=True)
     description = models.TextField(blank=True, null=True)
 
+    # Shown on the Request a Form page as "You'll need: ..." once a document
+    # type is picked, so students know what to prepare before they submit.
+    required_documents = models.TextField(blank=True, null=True)
+    # Both optional/informational — left blank where a document type has no
+    # fixed fee or published turnaround.
+    processing_time = models.CharField(max_length=100, blank=True, null=True)
+    fee_amount = models.DecimalField(max_digits=8, decimal_places=2, blank=True, null=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -163,16 +171,28 @@ class TransactionType(models.Model):
         return self.name
 
 
-class FormRequest(models.Model):
-    """A student/alumni's request for one document, tracked through to release.
-
-    This is the minimal shape the Step 4 dashboard endpoints need
-    (request_code, transaction_type, request_status, created_at, scoped to
-    the requesting user). FORM_SUBMISSIONS, RELEASE_SLOTS, RELEASE_SCHEDULES
-    and NOTIFICATIONS from the fuller ERD are intentionally not built yet —
-    add them, and any extra columns here, when that work starts; nothing in
-    Step 4 assumes this is the final schema.
+class ReleaseSlot(models.Model):
+    """A bookable release-day window at Window 6, with a fixed remaining
+    capacity — students choose one of these rather than an arbitrary date.
     """
+
+    slot_date = models.DateField()
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    available_slots = models.PositiveIntegerField(help_text="Remaining capacity for this window.")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["slot_date", "start_time"]
+
+    def __str__(self):
+        return f"{self.slot_date} {self.start_time}–{self.end_time} ({self.available_slots} left)"
+
+
+class FormRequest(models.Model):
+    """A student/alumni's request for one document, tracked through to release."""
 
     class RequestStatus(models.TextChoices):
         SUBMITTED = "Submitted", "Submitted"
@@ -190,12 +210,25 @@ class FormRequest(models.Model):
         on_delete=models.PROTECT,
         related_name="form_requests",
     )
+    # Which release window this request is booked against. PROTECT: a slot
+    # that already has requests against it shouldn't be deletable out from
+    # under them.
+    release_slot = models.ForeignKey(
+        ReleaseSlot,
+        on_delete=models.PROTECT,
+        related_name="form_requests",
+        null=True,
+        blank=True,
+    )
     request_code = models.CharField(max_length=30, unique=True)
     request_status = models.CharField(
         max_length=20,
         choices=RequestStatus.choices,
         default=RequestStatus.SUBMITTED,
     )
+    # Only meaningful for alumni requesting a pre-2018 record; the form only
+    # asks the question for that audience and defaults it False otherwise.
+    requires_archive_retrieval = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -205,3 +238,33 @@ class FormRequest(models.Model):
 
     def __str__(self):
         return f"{self.request_code} - {self.user.email}"
+
+
+class FormSubmission(models.Model):
+    """The student-supplied details for one FormRequest: copies + purpose.
+
+    One-to-one because this is the *content* of a single request, not a
+    repeatable line item — a student wanting two different purposes files
+    two separate FormRequests.
+    """
+
+    class Purpose(models.TextChoices):
+        EMPLOYMENT = "Employment", "Employment"
+        FURTHER_STUDIES = "Further studies", "Further studies"
+        SCHOLARSHIP = "Scholarship", "Scholarship"
+        OTHER = "Other", "Other"
+
+    form_request = models.OneToOneField(
+        FormRequest,
+        on_delete=models.CASCADE,
+        related_name="submission",
+    )
+    number_of_copies = models.PositiveIntegerField(default=1)
+    purpose = models.CharField(max_length=30, choices=Purpose.choices)
+    # Required (validated at the serializer level) only when purpose="Other".
+    purpose_other = models.CharField(max_length=255, blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Submission for {self.form_request.request_code}"

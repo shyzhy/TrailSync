@@ -73,124 +73,13 @@ const COLOR_UTIL_CSS = `
   .ts-banner-success { background: rgba(79,122,106,0.12); border: 1px solid rgba(79,122,106,0.42); color: #33574A; }
 `;
 
-export const SHARED_CSS = `
-  .ts-page { position: relative; overflow-x: hidden; background: #24406B; }
-
-  /* ONE sharp photo layer for the whole viewport. Nothing pre-blurs it —
-     the glass layers below blur whatever sits behind them, so the image
-     genuinely continues under the glass.
-     FRAMING KNOB: background-position picks which part of the photo lands in
-     the open area. Lower X% pushes a centred building rightward into the
-     clear zone. Tune once the real photo is dropped in. */
-  .ts-photo {
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    background-image: url('/ustp-cdo-campus.jpg'),
-      linear-gradient(180deg, #A9C2DC 0%, #D8E1E8 40%, #93AC8E 66%, #4F7A6A 100%);
-    background-size: cover;
-    background-position: 38% center;
-  }
-  .ts-photo-tint {
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    background: linear-gradient(90deg, rgba(36,64,107,0.16) 0%, rgba(36,64,107,0.05) 55%, rgba(36,64,107,0.10) 100%);
-  }
-
-  /* PROGRESSIVE GLASS — the reason there is no seam.
-     backdrop-filter can't be varied across an element, so three layers of
-     increasing blur are stacked, each with its own mask gradient. The
-     heaviest blur fades out earliest (nearest the form) and the lightest
-     reaches furthest toward the photo, so blur and tint ramp up gradually
-     instead of switching on at a boundary. */
-  .ts-glass {
-    position: absolute;
-    z-index: 1;
-    pointer-events: none;
-    -webkit-mask-repeat: no-repeat;
-    mask-repeat: no-repeat;
-  }
-
-  @media (min-width: 1024px) {
-    /* FADE KNOB: this width plus the mask stops below decide how much of the
-       photo the glass eats. Solid paper must reach ~40% (past the form text);
-       everything right of ~56% should read as open photo. */
-    .ts-glass { top: 0; bottom: 0; left: 0; width: 64%; }
-
-    /* lightest blur, travels furthest right — softens only, never whitens */
-    .ts-glass-a {
-      backdrop-filter: blur(7px);
-      -webkit-backdrop-filter: blur(7px);
-      -webkit-mask-image: linear-gradient(to right, #000 0%, #000 48%, rgba(0,0,0,0) 100%);
-      mask-image: linear-gradient(to right, #000 0%, #000 48%, rgba(0,0,0,0) 100%);
-    }
-    /* mid blur, carries the institutional-blue tint through the fade zone */
-    .ts-glass-b {
-      background: linear-gradient(to right,
-        rgba(250,248,243,0.28) 0%,
-        rgba(250,248,243,0.20) 45%,
-        rgba(36,64,107,0.10) 74%,
-        rgba(36,64,107,0.02) 100%);
-      backdrop-filter: blur(15px) saturate(190%);
-      -webkit-backdrop-filter: blur(15px) saturate(190%);
-      -webkit-mask-image: linear-gradient(to right, #000 0%, #000 42%, rgba(0,0,0,0) 78%);
-      mask-image: linear-gradient(to right, #000 0%, #000 42%, rgba(0,0,0,0) 78%);
-    }
-    /* heaviest blur + the paper frost the form actually sits on */
-    .ts-glass-c {
-      background: linear-gradient(to right,
-        rgba(250,248,243,0.82) 0%,
-        rgba(250,248,243,0.76) 45%,
-        rgba(250,248,243,0.42) 74%,
-        rgba(250,248,243,0) 100%);
-      backdrop-filter: blur(26px) saturate(170%) brightness(1.03);
-      -webkit-backdrop-filter: blur(26px) saturate(170%) brightness(1.03);
-      -webkit-mask-image: linear-gradient(to right, #000 0%, #000 63%, rgba(0,0,0,0) 88%);
-      mask-image: linear-gradient(to right, #000 0%, #000 63%, rgba(0,0,0,0) 88%);
-    }
-  }
-
-  /* Narrow screens: the photo reads as a banner and the glass rises into it
-     from below, fading upward on exactly the same principle. */
-  @media (max-width: 1023px) {
-    .ts-photo {
-      background-size: auto 170%;
-      background-position: 50% 74%;
-    }
-    .ts-glass { left: 0; right: 0; top: 18vh; bottom: 0; }
-
-    .ts-glass-a {
-      backdrop-filter: blur(7px);
-      -webkit-backdrop-filter: blur(7px);
-      -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) 0%, #000 10%, #000 100%);
-      mask-image: linear-gradient(to bottom, rgba(0,0,0,0) 0%, #000 10%, #000 100%);
-    }
-    .ts-glass-b {
-      background: linear-gradient(to bottom,
-        rgba(36,64,107,0.08) 0%,
-        rgba(250,248,243,0.20) 16%,
-        rgba(250,248,243,0.28) 100%);
-      backdrop-filter: blur(15px) saturate(190%);
-      -webkit-backdrop-filter: blur(15px) saturate(190%);
-      -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) 1%, #000 13%, #000 100%);
-      mask-image: linear-gradient(to bottom, rgba(0,0,0,0) 1%, #000 13%, #000 100%);
-    }
-    .ts-glass-c {
-      background: linear-gradient(to bottom,
-        rgba(250,248,243,0) 0%,
-        rgba(250,248,243,0.64) 12%,
-        rgba(250,248,243,0.82) 22%,
-        rgba(250,248,243,0.82) 100%);
-      backdrop-filter: blur(26px) saturate(170%) brightness(1.03);
-      -webkit-backdrop-filter: blur(26px) saturate(170%) brightness(1.03);
-      -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) 2%, #000 16%, #000 100%);
-      mask-image: linear-gradient(to bottom, rgba(0,0,0,0) 2%, #000 16%, #000 100%);
-    }
-  }
-
-  ${COLOR_UTIL_CSS}
-
+// Form-control skeuomorphic styling (inputs, selects, checkboxes, toggle
+// switch, primary/glass buttons) — shared between the auth pages (glass over
+// photo) and app-shell pages (opaque cards on paper), since none of these
+// rules reference the photo/backdrop, only rgba overlays that read the same
+// on both. One definition, included in both SHARED_CSS and APP_CSS, so a
+// tweak to how an input looks never has to be made twice.
+const FORM_CONTROL_CSS = `
   /* Carved into the glass: inner shadow from the top, bright lip. */
   .ts-input {
     color: #1F2937;
@@ -328,6 +217,126 @@ export const SHARED_CSS = `
   .ts-btn-glass:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.6); }
 `;
 
+export const SHARED_CSS = `
+  .ts-page { position: relative; overflow-x: hidden; background: #24406B; }
+
+  /* ONE sharp photo layer for the whole viewport. Nothing pre-blurs it —
+     the glass layers below blur whatever sits behind them, so the image
+     genuinely continues under the glass.
+     FRAMING KNOB: background-position picks which part of the photo lands in
+     the open area. Lower X% pushes a centred building rightward into the
+     clear zone. Tune once the real photo is dropped in. */
+  .ts-photo {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background-image: url('/ustp-cdo-campus.jpg'),
+      linear-gradient(180deg, #A9C2DC 0%, #D8E1E8 40%, #93AC8E 66%, #4F7A6A 100%);
+    background-size: cover;
+    background-position: 38% center;
+  }
+  .ts-photo-tint {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background: linear-gradient(90deg, rgba(36,64,107,0.16) 0%, rgba(36,64,107,0.05) 55%, rgba(36,64,107,0.10) 100%);
+  }
+
+  /* PROGRESSIVE GLASS — the reason there is no seam.
+     backdrop-filter can't be varied across an element, so three layers of
+     increasing blur are stacked, each with its own mask gradient. The
+     heaviest blur fades out earliest (nearest the form) and the lightest
+     reaches furthest toward the photo, so blur and tint ramp up gradually
+     instead of switching on at a boundary. */
+  .ts-glass {
+    position: absolute;
+    z-index: 1;
+    pointer-events: none;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+  }
+
+  @media (min-width: 1024px) {
+    /* FADE KNOB: this width plus the mask stops below decide how much of the
+       photo the glass eats. Solid paper must reach ~40% (past the form text);
+       everything right of ~56% should read as open photo. */
+    .ts-glass { top: 0; bottom: 0; left: 0; width: 64%; }
+
+    /* lightest blur, travels furthest right — softens only, never whitens */
+    .ts-glass-a {
+      backdrop-filter: blur(7px);
+      -webkit-backdrop-filter: blur(7px);
+      -webkit-mask-image: linear-gradient(to right, #000 0%, #000 48%, rgba(0,0,0,0) 100%);
+      mask-image: linear-gradient(to right, #000 0%, #000 48%, rgba(0,0,0,0) 100%);
+    }
+    /* mid blur, carries the institutional-blue tint through the fade zone */
+    .ts-glass-b {
+      background: linear-gradient(to right,
+        rgba(250,248,243,0.28) 0%,
+        rgba(250,248,243,0.20) 45%,
+        rgba(36,64,107,0.10) 74%,
+        rgba(36,64,107,0.02) 100%);
+      backdrop-filter: blur(15px) saturate(190%);
+      -webkit-backdrop-filter: blur(15px) saturate(190%);
+      -webkit-mask-image: linear-gradient(to right, #000 0%, #000 42%, rgba(0,0,0,0) 78%);
+      mask-image: linear-gradient(to right, #000 0%, #000 42%, rgba(0,0,0,0) 78%);
+    }
+    /* heaviest blur + the paper frost the form actually sits on */
+    .ts-glass-c {
+      background: linear-gradient(to right,
+        rgba(250,248,243,0.82) 0%,
+        rgba(250,248,243,0.76) 45%,
+        rgba(250,248,243,0.42) 74%,
+        rgba(250,248,243,0) 100%);
+      backdrop-filter: blur(26px) saturate(170%) brightness(1.03);
+      -webkit-backdrop-filter: blur(26px) saturate(170%) brightness(1.03);
+      -webkit-mask-image: linear-gradient(to right, #000 0%, #000 63%, rgba(0,0,0,0) 88%);
+      mask-image: linear-gradient(to right, #000 0%, #000 63%, rgba(0,0,0,0) 88%);
+    }
+  }
+
+  /* Narrow screens: the photo reads as a banner and the glass rises into it
+     from below, fading upward on exactly the same principle. */
+  @media (max-width: 1023px) {
+    .ts-photo {
+      background-size: auto 170%;
+      background-position: 50% 74%;
+    }
+    .ts-glass { left: 0; right: 0; top: 18vh; bottom: 0; }
+
+    .ts-glass-a {
+      backdrop-filter: blur(7px);
+      -webkit-backdrop-filter: blur(7px);
+      -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) 0%, #000 10%, #000 100%);
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,0) 0%, #000 10%, #000 100%);
+    }
+    .ts-glass-b {
+      background: linear-gradient(to bottom,
+        rgba(36,64,107,0.08) 0%,
+        rgba(250,248,243,0.20) 16%,
+        rgba(250,248,243,0.28) 100%);
+      backdrop-filter: blur(15px) saturate(190%);
+      -webkit-backdrop-filter: blur(15px) saturate(190%);
+      -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) 1%, #000 13%, #000 100%);
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,0) 1%, #000 13%, #000 100%);
+    }
+    .ts-glass-c {
+      background: linear-gradient(to bottom,
+        rgba(250,248,243,0) 0%,
+        rgba(250,248,243,0.64) 12%,
+        rgba(250,248,243,0.82) 22%,
+        rgba(250,248,243,0.82) 100%);
+      backdrop-filter: blur(26px) saturate(170%) brightness(1.03);
+      -webkit-backdrop-filter: blur(26px) saturate(170%) brightness(1.03);
+      -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) 2%, #000 16%, #000 100%);
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,0) 2%, #000 16%, #000 100%);
+    }
+  }
+
+  ${COLOR_UTIL_CSS}
+  ${FORM_CONTROL_CSS}
+`;
+
 /**
  * The split-screen scene both pages sit in: sharp photo on the right, glass
  * that fades into it on the left, form content directly on the glass with no
@@ -367,6 +376,7 @@ export function GlassScene({ children, maxWidth = '420px' }) {
 
 export const APP_CSS = `
   ${COLOR_UTIL_CSS}
+  ${FORM_CONTROL_CSS}
 
   /* Extremely subtle warm/sage glow behind everything — just enough that the
      glass cards have something to visibly float over. Kept at ~5% opacity
@@ -395,24 +405,38 @@ export const APP_CSS = `
       inset 0 1px 0 rgba(255,255,255,0.16),
       6px 0 28px -14px rgba(15,23,42,0.4);
   }
+  /* Three visibly distinct states — inactive items are deliberately muted
+     (52% opacity) so the active item reads instantly, rather than everything
+     sitting at a similar near-white weight with only a faint tint apart. */
   .ts-nav-item {
     position: relative;
-    color: rgba(250,248,243,0.72);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: rgba(250,248,243,0.52);
     border-radius: 10px;
-    transition: color 150ms ease, background 150ms ease;
+    transition: color 150ms ease, background 150ms ease, transform 120ms ease;
   }
-  .ts-nav-item:hover { color: #FAF8F3; background: rgba(255,255,255,0.06); }
+  .ts-nav-item:hover {
+    color: rgba(250,248,243,0.95);
+    background: rgba(255,255,255,0.08);
+    transform: translateX(1px);
+  }
   .ts-nav-item:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
   /* Active = looks lit from within, not just a translucent rectangle: soft
      inset glow + top highlight + a thin gold accent bar (used sparingly,
      echoing the checkbox/focus-ring gold elsewhere in the app). */
   .ts-nav-item-active {
     color: #FAF8F3;
-    background: linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.04) 100%);
+    background: linear-gradient(180deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.05) 100%);
     box-shadow:
-      inset 0 1px 0 rgba(255,255,255,0.35),
-      inset 0 0 0 1px rgba(255,255,255,0.08),
-      0 2px 10px rgba(15,23,42,0.28);
+      inset 0 1px 0 rgba(255,255,255,0.4),
+      inset 0 0 0 1px rgba(255,255,255,0.10),
+      0 3px 12px rgba(15,23,42,0.32);
+  }
+  .ts-nav-item-active:hover {
+    background: linear-gradient(180deg, rgba(255,255,255,0.24) 0%, rgba(255,255,255,0.06) 100%);
+    transform: none;
   }
   .ts-nav-item-active::before {
     content: '';
@@ -533,6 +557,25 @@ export const APP_CSS = `
     0% { background-position: 100% 50%; }
     100% { background-position: 0 50%; }
   }
+
+  /* ---- Mini calendar widget ---- */
+  .ts-cal-day {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    font-size: 12px;
+  }
+  .ts-cal-day-today {
+    color: #FAF8F3;
+    font-weight: 600;
+    background: linear-gradient(180deg, #DCA948 0%, #B8872B 100%);
+    box-shadow: 0 1px 3px rgba(31,41,55,0.3), inset 0 1px 0 rgba(255,255,255,0.5);
+  }
+  .ts-cal-dot { display: block; width: 4px; height: 4px; margin-top: 3px; border-radius: 999px; background: transparent; }
+  .ts-cal-dot-active { background: #4F7A6A; }
 `;
 
 export function DocumentIcon() {
@@ -626,5 +669,92 @@ export function LogoutIcon() {
       <path d="M8 3.5H5.5A1.5 1.5 0 0 0 4 5v10a1.5 1.5 0 0 0 1.5 1.5H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M13 13.5 17 10l-4-3.5M17 10H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+export function TicketIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path
+        d="M3 7.5a1.5 1.5 0 0 1 1.5-1.5h11A1.5 1.5 0 0 1 17 7.5v1.1a1.4 1.4 0 0 0 0 2.8v1.1a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 12.5v-1.1a1.4 1.4 0 0 0 0-2.8V7.5Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <path d="M11.5 6.3v7.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeDasharray="1.4 2" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shared app shell: sidebar (desktop) + slim top bar (mobile), used by every
+// logged-in screen so the nav is identical wherever it appears. `active`
+// picks which item gets the raised-glass highlight; only Home and the
+// logout button do anything real right now — Track requests and Ask
+// TrailSync are placeholders until those pages exist.
+// ---------------------------------------------------------------------------
+
+const NAV_ITEMS = [
+  { key: 'home', href: '/portal', label: 'Home', Icon: HomeIcon },
+  { key: 'request', href: '/request-form', label: 'Request a form', Icon: PlusCircleIcon },
+  { key: 'track', href: '#', label: 'Track requests', Icon: TicketIcon },
+  { key: 'ask', href: '#', label: 'Ask TrailSync', Icon: ChatIcon },
+];
+
+export function AppSidebar({ active, onLogout }) {
+  return (
+    <aside className="ts-sidebar hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-64 lg:flex-none lg:flex-col">
+      <div className="flex items-center gap-2 px-6 pb-8 pt-7">
+        <img
+          src="/trailsync-logo.png"
+          alt=""
+          aria-hidden="true"
+          style={{ height: '30px', width: 'auto', margin: '-6px 0' }}
+        />
+        <span className="text-lg font-semibold" style={{ ...FONT_SERIF, color: '#FAF8F3' }}>TrailSync</span>
+      </div>
+
+      <nav className="flex-1 space-y-2.5 px-3">
+        {NAV_ITEMS.map(({ key, href, label, Icon }) => (
+          <a
+            key={key}
+            href={href}
+            aria-current={key === active ? 'page' : undefined}
+            className={`ts-nav-item px-3 py-2.5 text-sm font-medium ${key === active ? 'ts-nav-item-active' : ''}`}
+          >
+            <Icon />
+            {label}
+          </a>
+        ))}
+      </nav>
+
+      <div className="px-3 pb-6">
+        <button type="button" onClick={onLogout} className="ts-nav-item w-full px-3 py-2.5 text-sm font-medium">
+          <LogoutIcon />
+          Log out
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+export function AppMobileHeader({ onLogout }) {
+  return (
+    <header className="ts-app-header sticky top-0 z-10 lg:hidden">
+      <div className="flex items-center justify-between px-6 py-3.5">
+        <div className="flex items-center gap-2">
+          <img
+            src="/trailsync-logo.png"
+            alt=""
+            aria-hidden="true"
+            style={{ height: '34px', width: 'auto', margin: '-7px 0' }}
+          />
+          <span className="ts-ink text-lg font-semibold" style={FONT_SERIF}>TrailSync</span>
+        </div>
+        <button type="button" onClick={onLogout} className="ts-link text-sm font-medium">
+          Log out
+        </button>
+      </div>
+    </header>
   );
 }
