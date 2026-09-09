@@ -1,7 +1,9 @@
 from django.contrib import admin
 from TrailSync.models import (
+    FaqEntry,
     FormRequest,
     FormSubmission,
+    ReleaseSchedule,
     ReleaseSlot,
     RequestProxy,
     Role,
@@ -22,5 +24,7 @@ admin.site.register(FormRequest)
 admin.site.register(FormSubmission)
 admin.site.register(ReleaseSlot)
 admin.site.register(RequestProxy)
+admin.site.register(ReleaseSchedule)
+admin.site.register(FaqEntry)
 
 

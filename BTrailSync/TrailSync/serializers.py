@@ -160,11 +160,20 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
     FormSubmission.form_data (see that model's docstring), so they're pulled
     out here rather than being real columns.
 
-    verification/release-schedule data would come from REQUIREMENT_
-    VERIFICATIONS / RELEASE_SCHEDULES tables per the original ERD — neither
-    exists yet, so verification_remarks stays null and release_schedule
-    falls back to the closest thing that does exist (release_slot, if one
-    happens to be set) rather than being fabricated.
+    Read-only, student-facing view. amount_due/payment_date are safe to
+    expose (students may see what they owe and when they paid), but
+    clearance_check_result, clearance_checked_by, duplicate_flag, and
+    or_number are deliberately absent — those are staff/system-set fields
+    per the ERD update and must never reach a student-facing response, let
+    alone be writable here. This serializer has no write path at all
+    (ModelSerializer is only ever constructed with an instance, never
+    `data=`, for this view's GET), so there's no separate step needed to
+    keep them non-editable.
+
+    verification_remarks stays null — no REQUIREMENT_VERIFICATIONS table
+    exists yet. release_schedule now merges the real ReleaseSchedule claim
+    record (claimed_at/claimant_name) with the ReleaseSlot window
+    (slot_date/start_time/end_time) when either exists.
     """
 
     transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
@@ -196,7 +205,13 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
             "proxy",
             "verification_remarks",
             "release_schedule",
+            # Safe for a student to read about their own request; everything
+            # else new on FormRequest (clearance_*, or_number,
+            # duplicate_flag) is intentionally NOT listed here.
+            "amount_due",
+            "payment_date",
         ]
+        read_only_fields = fields
 
     def _form_data(self, obj):
         submission = getattr(obj, "submission", None)
@@ -236,13 +251,27 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
 
     def get_release_schedule(self, obj):
         slot = obj.release_slot
-        if slot is None:
+        schedule = getattr(obj, "release_schedule", None)
+        if slot is None and schedule is None:
             return None
-        return {
-            "slot_date": slot.slot_date.isoformat(),
-            "start_time": slot.start_time.isoformat(timespec="minutes"),
-            "end_time": slot.end_time.isoformat(timespec="minutes"),
-        }
+
+        data = {}
+        if slot is not None:
+            data.update(
+                {
+                    "slot_date": slot.slot_date.isoformat(),
+                    "start_time": slot.start_time.isoformat(timespec="minutes"),
+                    "end_time": slot.end_time.isoformat(timespec="minutes"),
+                }
+            )
+        if schedule is not None:
+            data.update(
+                {
+                    "claimed_at": schedule.claimed_at.isoformat() if schedule.claimed_at else None,
+                    "claimant_name": schedule.claimant_name,
+                }
+            )
+        return data
 
 
 class RecentFormRequestSerializer(serializers.ModelSerializer):

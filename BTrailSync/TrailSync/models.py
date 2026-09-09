@@ -212,12 +212,24 @@ class ReleaseSlot(models.Model):
 class FormRequest(models.Model):
     """A student/alumni's request for one document, tracked through to release."""
 
+    # NOT YET UPDATED to the 9-stage map — see the migration-review note in
+    # chat. Only 7 stages were named (Pending Verification, Blocked, Verified,
+    # Approved/Ready to Print, Processing, Ready for Pickup, Released) and
+    # this enum still reflects the earlier 5-value flow so nothing silently
+    # breaks DashboardSummaryView's counts, TrackRequestsPage's filter tabs,
+    # or TicketCard's 4-dot progress line, all of which key off these exact
+    # values today.
     class RequestStatus(models.TextChoices):
         SUBMITTED = "Submitted", "Submitted"
         VERIFIED = "Verified", "Verified"
         READY = "Ready", "Ready for Pickup"
         RELEASED = "Released", "Released"
         REJECTED = "Rejected", "Rejected"
+
+    class ClearanceCheckResult(models.TextChoices):
+        NO_CHECK_NEEDED = "Active - No Check Needed", "Active - No Check Needed"
+        CLEARED = "Cleared", "Cleared"
+        NOT_CLEARED = "Not Cleared", "Not Cleared"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -250,6 +262,46 @@ class FormRequest(models.Model):
     # — current students never see the question and this stays False for them.
     requires_archive_retrieval = models.BooleanField(default=False)
 
+    # --- Added to match the current ERD/feature docs (see chat) ---
+
+    # Filled once processing completes, not at submission — stays blank
+    # until then, hence PositiveIntegerField(null=True) rather than a
+    # default of 0 (0 would falsely read as "done instantly").
+    processing_time_hours = models.PositiveIntegerField(null=True, blank=True)
+    is_rush = models.BooleanField(default=False)
+
+    # Front Desk staff-logged fields. Student-facing endpoints must treat
+    # these as read-only — see the serializer note below.
+    clearance_check_result = models.CharField(
+        max_length=30,
+        choices=ClearanceCheckResult.choices,
+        null=True,
+        blank=True,
+    )
+    clearance_checked_by = models.ForeignKey(
+        StaffProfile,
+        on_delete=models.SET_NULL,
+        related_name="clearance_checks",
+        null=True,
+        blank=True,
+    )
+    clearance_checked_at = models.DateTimeField(null=True, blank=True)
+
+    # Cashier/payment fields. amount_due is set server-side when Registrar
+    # approves (pulled from TransactionType.fee_amount) — never accepted as
+    # client input; or_number/payment_date are staff-entered after payment.
+    amount_due = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    or_number = models.CharField(max_length=50, null=True, blank=True)
+    payment_date = models.DateField(null=True, blank=True)
+
+    # Claim-stub / pickup fields.
+    arrival_notice_sent_at = models.DateTimeField(null=True, blank=True)
+    claim_stub_issued_at = models.DateTimeField(null=True, blank=True)
+    digital_stub_active = models.BooleanField(default=False)
+
+    # Staff-facing fraud signal only — never surfaced to the student.
+    duplicate_flag = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -258,6 +310,17 @@ class FormRequest(models.Model):
 
     def __str__(self):
         return f"{self.request_code} - {self.user.email}"
+
+    def blocked_by_clearance(self):
+        """True if this request's clearance result should hard-block any
+        transition to Processing or later.
+
+        No staff-facing status-update endpoint exists yet anywhere in this
+        codebase (everything built so far is student-facing) — this method
+        is where that endpoint should call in once it exists, rather than
+        the check being reimplemented ad hoc at each call site.
+        """
+        return self.clearance_check_result == self.ClearanceCheckResult.NOT_CLEARED
 
 
 class FormSubmission(models.Model):
@@ -326,3 +389,73 @@ class RequestProxy(models.Model):
 
     def __str__(self):
         return f"{self.proxy_full_name} ({self.relationship}) for {self.form_request.request_code}"
+
+
+class ReleaseSchedule(models.Model):
+    """The actual claim record for one FormRequest's release — who picked it
+    up, when, and how they signed for it.
+
+    This is a NEW table: it didn't exist anywhere in models.py before this
+    change, despite being referenced (e.g. Track Requests' serializer
+    already has a `release_schedule` field that was, until now, only ever
+    populated from ReleaseSlot as a stand-in). ReleaseSlot is the bookable
+    CAPACITY WINDOW a request is scheduled against; this is the record of
+    what happened when the document was actually claimed at that window —
+    a different concept, so it gets its own one-to-one table rather than
+    more columns bolted onto ReleaseSlot or FormRequest.
+    """
+
+    form_request = models.OneToOneField(
+        FormRequest,
+        on_delete=models.CASCADE,
+        related_name="release_schedule",
+    )
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    claimant_name = models.CharField(max_length=150, null=True, blank=True)
+    # A real uploaded signature image rather than a manually-managed path
+    # string — same pattern as FormSubmission.board_exam_photo. Named
+    # without the "_path" suffix since FileField already manages that
+    # internally; storage still resolves to a path on disk either way.
+    claimant_signature = models.FileField(upload_to="claim_signatures/%Y/%m/", null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Release record for {self.form_request.request_code}"
+
+
+class FaqEntry(models.Model):
+    """The chatbot's knowledge base for general questions not tied to a
+    specific document type — document-specific questions pull from
+    TransactionType instead, per the same shared-content-source design the
+    Credential Guide already uses.
+
+    Uses Django's default auto `id` PK rather than a literal `faq_id`
+    column, matching every other model in this file (none of them have a
+    literal `_id`-suffixed PK field despite the ERD naming convention).
+    category is constrained to TextChoices rather than free text, matching
+    how Role/RequestStatus/etc. are already done elsewhere in this codebase
+    — still a plain CharField underneath, just with fixed valid values.
+    """
+
+    class Category(models.TextChoices):
+        STATUS_TRACKING = "Status & Tracking", "Status & Tracking"
+        REQUIREMENTS_PROCESS = "Requirements & Process", "Requirements & Process"
+        CLAIM_STUB_PICKUP = "Claim Stub & Pickup", "Claim Stub & Pickup"
+        ACCOUNT_TECHNICAL = "Account/Technical", "Account/Technical"
+        GENERAL_INFO = "General Info", "General Info"
+
+    category = models.CharField(max_length=50, choices=Category.choices)
+    question = models.TextField()
+    answer = models.TextField()
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "FAQ entry"
+        verbose_name_plural = "FAQ entries"
+
+    def __str__(self):
+        return self.question[:80]

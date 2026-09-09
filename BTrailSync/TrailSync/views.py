@@ -380,7 +380,7 @@ class FormRequestListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         qs = (
             FormRequest.objects.filter(user=self.request.user)
-            .select_related("transaction_type", "submission", "release_slot", "proxy")
+            .select_related("transaction_type", "submission", "release_slot", "proxy", "release_schedule")
             .order_by("-created_at")
         )
 
