@@ -834,6 +834,84 @@ export const APP_CSS = `
   }
 
   .ts-ticket-detail { border-top: 1px solid #E3DFD2; padding: 1.1rem 1.5rem 1.25rem; }
+
+  /* ---- Generic neutral tag pill — catalog fee/processing badges and
+     "common purpose" tags, distinct from the semantic status .ts-pill-*
+     colors used on Track Requests. ---- */
+  .ts-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #24406B;
+    background: rgba(36,64,107,0.08);
+    border: 1px solid rgba(36,64,107,0.16);
+    white-space: nowrap;
+  }
+  .ts-tag-sage { color: #33574A; background: rgba(79,122,106,0.10); border-color: rgba(79,122,106,0.24); }
+
+  /* ---- Credential Guide: clickable catalog card ---- */
+  .ts-guide-card {
+    text-align: left;
+    width: 100%;
+    border-radius: 14px;
+    background: linear-gradient(165deg, rgba(255,255,255,0.86) 0%, rgba(250,248,243,0.70) 100%);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid rgba(255,255,255,0.65);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), 0 12px 26px -18px rgba(31,41,55,0.26);
+    transition: transform 150ms ease, box-shadow 150ms ease;
+  }
+  .ts-guide-card:hover { transform: translateY(-2px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.85), 0 18px 34px -18px rgba(31,41,55,0.3); }
+  .ts-guide-card:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
+
+  /* ---- Modal overlay for the catalog detail view — the app's first
+     modal; a grid of cards suits a popup better than pushing siblings
+     around the way TicketCard's inline expansion does for a linear list. ---- */
+  .ts-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(23,41,74,0.45);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+  }
+  .ts-modal-panel {
+    position: relative;
+    width: 100%;
+    max-width: 560px;
+    max-height: 88vh;
+    overflow-y: auto;
+    border-radius: 16px;
+    background: linear-gradient(165deg, rgba(250,248,243,0.98) 0%, rgba(245,242,235,0.96) 100%);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid rgba(255,255,255,0.7);
+    box-shadow: 0 30px 60px -20px rgba(15,23,42,0.45), inset 0 1px 0 rgba(255,255,255,0.85);
+  }
+  .ts-modal-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #5B6474;
+    background: rgba(91,100,116,0.08);
+    transition: color 150ms ease, background 150ms ease;
+  }
+  .ts-modal-close:hover { color: #1F2937; background: rgba(91,100,116,0.16); }
+  .ts-modal-close:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
 `;
 
 export function DocumentIcon() {
@@ -1017,6 +1095,14 @@ export function WarningIcon() {
   );
 }
 
+export function CloseIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+      <path d="M5 5l10 10M15 5 5 15" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function UploadIcon() {
   return (
     <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
@@ -1030,15 +1116,16 @@ export function UploadIcon() {
 // Shared app shell: sidebar (desktop) + slim top bar (mobile), used by every
 // logged-in screen so the nav is identical wherever it appears. `active`
 // picks which item gets the raised-glass highlight. Home, Request a form,
-// Track requests, Log out, and the avatar/name footer (which links to
-// Profile) are all real; only Ask TrailSync remains a placeholder until
-// that page exists.
+// Track requests, Credential Guide, Log out, and the avatar/name footer
+// (which links to Profile) are all real; only Ask TrailSync remains a
+// placeholder until that page exists.
 // ---------------------------------------------------------------------------
 
 const NAV_ITEMS = [
   { key: 'home', href: '/portal', label: 'Home', Icon: HomeIcon },
   { key: 'request', href: '/request-form', label: 'Request a form', Icon: PlusCircleIcon },
   { key: 'track', href: '/track-requests', label: 'Track requests', Icon: TicketIcon },
+  { key: 'guide', href: '/credential-guide', label: 'Credential Guide', Icon: BookIcon },
   { key: 'ask', href: '#', label: 'Ask TrailSync', Icon: ChatIcon },
 ];
 

@@ -151,18 +151,36 @@ class StaffProfile(models.Model):
 
 
 class TransactionType(models.Model):
-    """A requestable document, e.g. Transcript of Records, Certificate of Enrollment."""
+    """A requestable document, e.g. Transcript of Records, Certificate of Enrollment.
+
+    This is the ONE admin-editable source for a document's requirements/fee/
+    processing time — the Request Form's Step 1, the Credential Guide catalog,
+    and (eventually) the AI chatbot's answers all read the same rows here
+    rather than each keeping their own copy.
+    """
 
     name = models.CharField(max_length=150, unique=True)
     description = models.TextField(blank=True, null=True)
 
     # Shown on the Request a Form page as "You'll need: ..." once a document
     # type is picked, so students know what to prepare before they submit.
+    # Free text, comma/semicolon/newline-separated — surfaces split it into a
+    # list for display rather than requiring a separate structured field.
     required_documents = models.TextField(blank=True, null=True)
     # Both optional/informational — left blank where a document type has no
     # fixed fee or published turnaround.
     processing_time = models.CharField(max_length=100, blank=True, null=True)
     fee_amount = models.DecimalField(max_digits=8, decimal_places=2, blank=True, null=True)
+    # Which of FormSubmission.Purpose this document is commonly requested
+    # for — powers the Credential Guide's purpose filter chips. A list
+    # (JSONField) rather than a single choice since a document can serve
+    # more than one purpose (e.g. Transcript of Records for both further
+    # studies and employment).
+    common_purposes = models.JSONField(default=list, blank=True)
+    # Conditional/exceptional info worth flagging distinctly, e.g. "Board
+    # Exam purpose requires an additional 2x2 photo upload." Optional —
+    # most document types won't need one.
+    special_notes = models.TextField(blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

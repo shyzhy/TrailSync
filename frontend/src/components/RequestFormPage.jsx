@@ -188,6 +188,18 @@ export default function RequestFormPage() {
       const [meData, typesData] = await Promise.all([meRes.json(), typesRes.json()]);
       setMe(meData);
       setTransactionTypes(typesData);
+
+      // Deep-link from the Credential Guide ("Request this document"):
+      // ?transaction_type=<id> pre-selects Step 1's choice and skips
+      // straight to Step 2, but only once that id is confirmed to exist in
+      // what the backend actually returned — an invalid/stale id just
+      // leaves the student on Step 1 with nothing pre-selected.
+      const deepLinkId = new URLSearchParams(window.location.search).get('transaction_type');
+      if (deepLinkId && typesData.some((t) => String(t.id) === deepLinkId)) {
+        setTransactionTypeId(deepLinkId);
+        setStep(2);
+      }
+
       setStatus('ready');
     } catch {
       setStatus('error');

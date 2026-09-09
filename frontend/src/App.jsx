@@ -5,6 +5,7 @@ import RequestFormPage from './components/RequestFormPage.jsx';
 import TrackRequestsPage from './components/TrackRequestsPage.jsx';
 import ProfilePage from './components/ProfilePage.jsx';
 import ConfirmEmailPage from './components/ConfirmEmailPage.jsx';
+import CredentialGuidePage from './components/CredentialGuidePage.jsx';
 
 // Minimal path switch so all screens are reachable without pulling in a
 // router. Replace with react-router when routing lands.
@@ -15,6 +16,7 @@ export default function App() {
   if (pathname.startsWith('/track-requests')) return <TrackRequestsPage />;
   if (pathname.startsWith('/profile')) return <ProfilePage />;
   if (pathname.startsWith('/confirm-email')) return <ConfirmEmailPage />;
+  if (pathname.startsWith('/credential-guide')) return <CredentialGuidePage />;
   if (pathname.startsWith('/portal')) return <StudentDashboard />;
   return <LoginPage />;
 }

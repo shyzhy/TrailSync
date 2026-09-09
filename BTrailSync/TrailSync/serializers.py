@@ -256,7 +256,16 @@ class RecentFormRequestSerializer(serializers.ModelSerializer):
 class TransactionTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = TransactionType
-        fields = ["id", "name", "description", "required_documents", "processing_time", "fee_amount"]
+        fields = [
+            "id",
+            "name",
+            "description",
+            "required_documents",
+            "processing_time",
+            "fee_amount",
+            "common_purposes",
+            "special_notes",
+        ]
 
 
 class ReleaseSlotSerializer(serializers.ModelSerializer):
