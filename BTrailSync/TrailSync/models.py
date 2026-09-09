@@ -226,8 +226,9 @@ class FormRequest(models.Model):
         choices=RequestStatus.choices,
         default=RequestStatus.SUBMITTED,
     )
-    # Only meaningful for alumni requesting a pre-2018 record; the form only
-    # asks the question for that audience and defaults it False otherwise.
+    # Derived server-side from the alumni-only Graduation Date question in
+    # Step 2 (True when that date is before 2018) rather than asked directly
+    # — current students never see the question and this stays False for them.
     requires_archive_retrieval = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -241,17 +242,26 @@ class FormRequest(models.Model):
 
 
 class FormSubmission(models.Model):
-    """The student-supplied details for one FormRequest: copies + purpose.
+    """The student-supplied details for one FormRequest.
 
     One-to-one because this is the *content* of a single request, not a
     repeatable line item — a student wanting two different purposes files
     two separate FormRequests.
+
+    form_data holds every Step 2 wizard answer (purpose, purpose_other,
+    number_of_copies, semester, additional_notes, graduation_date for
+    alumni) as JSON rather than one column per field — the wizard's fields
+    already vary by transaction type and user category, and a fixed column
+    set can't keep up with that without a migration every time a new
+    document type needs a new question. Structured fields the rest of the
+    backend actually queries against (board_exam_photo) stay as real columns.
     """
 
     class Purpose(models.TextChoices):
         EMPLOYMENT = "Employment", "Employment"
         FURTHER_STUDIES = "Further studies", "Further studies"
         SCHOLARSHIP = "Scholarship", "Scholarship"
+        BOARD_EXAM = "Board Exam", "Board Exam"
         OTHER = "Other", "Other"
 
     form_request = models.OneToOneField(
@@ -259,12 +269,41 @@ class FormSubmission(models.Model):
         on_delete=models.CASCADE,
         related_name="submission",
     )
-    number_of_copies = models.PositiveIntegerField(default=1)
-    purpose = models.CharField(max_length=30, choices=Purpose.choices)
-    # Required (validated at the serializer level) only when purpose="Other".
-    purpose_other = models.CharField(max_length=255, blank=True, null=True)
+    form_data = models.JSONField(default=dict, blank=True)
+    # A real uploaded file, not just a filename in form_data — required when
+    # form_data["purpose"] == "Board Exam" (enforced in the serializer).
+    board_exam_photo = models.FileField(upload_to="board_exam_photos/%Y/%m/", null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Submission for {self.form_request.request_code}"
+
+
+class RequestProxy(models.Model):
+    """An authorized claimant nominated to pick up documents on the
+    student's behalf. One-to-one: a request either has a single nominated
+    proxy or none — Step 3 of the wizard is a straight on/off toggle, not a
+    list.
+    """
+
+    class Relationship(models.TextChoices):
+        PARENT = "Parent", "Parent"
+        SIBLING = "Sibling", "Sibling"
+        SPOUSE = "Spouse", "Spouse"
+        FRIEND = "Friend", "Friend"
+        OTHER = "Other", "Other"
+
+    form_request = models.OneToOneField(
+        FormRequest,
+        on_delete=models.CASCADE,
+        related_name="proxy",
+    )
+    proxy_full_name = models.CharField(max_length=150)
+    relationship = models.CharField(max_length=20, choices=Relationship.choices)
+    contact_number = models.CharField(max_length=20)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.proxy_full_name} ({self.relationship}) for {self.form_request.request_code}"

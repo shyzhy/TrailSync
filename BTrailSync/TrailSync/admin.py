@@ -3,6 +3,7 @@ from TrailSync.models import (
     FormRequest,
     FormSubmission,
     ReleaseSlot,
+    RequestProxy,
     Role,
     StaffProfile,
     TransactionType,
@@ -20,5 +21,6 @@ admin.site.register(TransactionType)
 admin.site.register(FormRequest)
 admin.site.register(FormSubmission)
 admin.site.register(ReleaseSlot)
+admin.site.register(RequestProxy)
 
 

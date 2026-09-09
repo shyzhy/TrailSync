@@ -71,6 +71,15 @@ const COLOR_UTIL_CSS = `
   .ts-banner-error { background: rgba(220,38,38,0.10); border: 1px solid rgba(220,38,38,0.35); color: #991B1B; }
   .ts-banner-pending { background: rgba(184,135,43,0.14); border: 1px solid rgba(184,135,43,0.45); color: #6B4E17; }
   .ts-banner-success { background: rgba(79,122,106,0.12); border: 1px solid rgba(79,122,106,0.42); color: #33574A; }
+
+  /* Neutral informational note — distinct from error/success/pending, e.g.
+     "You'll need: ..." under a Request a Form dropdown. */
+  .ts-info-note {
+    border-radius: 10px;
+    background: rgba(36,64,107,0.05);
+    border: 1px solid rgba(36,64,107,0.15);
+    color: #24406B;
+  }
 `;
 
 // Form-control skeuomorphic styling (inputs, selects, checkboxes, toggle
@@ -576,6 +585,137 @@ export const APP_CSS = `
   }
   .ts-cal-dot { display: block; width: 4px; height: 4px; margin-top: 3px; border-radius: 999px; background: transparent; }
   .ts-cal-dot-active { background: #4F7A6A; }
+
+  /* ---- Sidebar profile footer ---- */
+  .ts-sidebar-footer { border-top: 1px solid rgba(255,255,255,0.12); }
+  .ts-sidebar-avatar {
+    width: 34px; height: 34px;
+    border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 600;
+    color: #FAF8F3;
+    background: linear-gradient(180deg, #DCA948 0%, #B8872B 100%);
+    box-shadow: 0 1px 3px rgba(31,41,55,0.3), inset 0 1px 0 rgba(255,255,255,0.4);
+  }
+
+  /* ---- Wizard step indicator: glass badges, not flat filled circles ---- */
+  .ts-step-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 200ms ease;
+  }
+  .ts-step-badge-upcoming {
+    background: rgba(91,100,116,0.10);
+    color: #5B6474;
+    box-shadow: inset 0 1px 2px rgba(31,41,55,0.08);
+  }
+  .ts-step-badge-current {
+    width: 38px;
+    height: 38px;
+    color: #fff;
+    background: linear-gradient(180deg, #3E5D8F 0%, #24406B 60%, #17294A 100%);
+    box-shadow: 0 4px 10px rgba(23,41,74,0.35), inset 0 1px 0 rgba(255,255,255,0.4);
+  }
+  .ts-step-badge-done {
+    color: #fff;
+    background: linear-gradient(180deg, #6FA08C 0%, #4F7A6A 60%, #395C4E 100%);
+    box-shadow: 0 2px 6px rgba(79,122,106,0.35), inset 0 1px 0 rgba(255,255,255,0.4);
+  }
+  .ts-step-connector { height: 2px; flex: 1; background: #E3DFD2; border-radius: 2px; }
+  .ts-step-connector-done { background: linear-gradient(90deg, #4F7A6A, rgba(79,122,106,0.5)); }
+
+  /* ---- Step 1: selectable transaction-type cards ---- */
+  .ts-select-card {
+    position: relative;
+    width: 100%;
+    text-align: left;
+    border-radius: 14px;
+    background: linear-gradient(165deg, rgba(255,255,255,0.86) 0%, rgba(250,248,243,0.70) 100%);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1.5px solid rgba(255,255,255,0.65);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), 0 12px 26px -18px rgba(31,41,55,0.26);
+    transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease, background 150ms ease;
+  }
+  .ts-select-card:hover { transform: translateY(-2px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.85), 0 18px 34px -18px rgba(31,41,55,0.3); }
+  .ts-select-card:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
+  .ts-select-card-selected {
+    border-color: rgba(36,64,107,0.55);
+    background: linear-gradient(165deg, rgba(255,255,255,0.95) 0%, rgba(234,240,248,0.88) 100%);
+    box-shadow: 0 0 0 3px rgba(36,64,107,0.14), inset 0 1px 0 rgba(255,255,255,0.9), 0 16px 30px -18px rgba(31,41,55,0.3);
+  }
+  .ts-select-card-check {
+    position: absolute;
+    top: 12px; right: 12px;
+    width: 22px; height: 22px;
+    border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff;
+    background: linear-gradient(180deg, #3E5D8F, #24406B);
+    box-shadow: 0 1px 3px rgba(23,41,74,0.4);
+  }
+
+  /* ---- Step 3: on/off switch (distinct from the two-option segmented
+     toggle used for role/category elsewhere) ---- */
+  .ts-switch-wrap { position: relative; display: inline-flex; width: 46px; height: 26px; flex-shrink: 0; cursor: pointer; }
+  .ts-switch-input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+  .ts-switch-track {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: 999px;
+    background: rgba(31,41,55,0.14);
+    box-shadow: inset 0 2px 4px rgba(31,41,55,0.22);
+    transition: background 200ms ease, box-shadow 200ms ease;
+  }
+  .ts-switch-input:checked + .ts-switch-track {
+    background: linear-gradient(180deg, #3E5D8F, #24406B);
+    box-shadow: inset 0 1px 2px rgba(15,23,42,0.3);
+  }
+  .ts-switch-input:focus-visible + .ts-switch-track { box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
+  .ts-switch-thumb {
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 20px; height: 20px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #FFFFFF, #F1EEE6);
+    box-shadow: 0 1px 3px rgba(31,41,55,0.3), inset 0 1px 0 #fff;
+    transition: transform 200ms cubic-bezier(0.22, 0.9, 0.3, 1);
+  }
+  .ts-switch-input:checked ~ .ts-switch-thumb { transform: translateX(20px); }
+
+  /* ---- Gold-tinted glass warning card (Proxy Claimant Policy) ---- */
+  .ts-warning-card {
+    border-radius: 14px;
+    background: linear-gradient(165deg, rgba(184,135,43,0.16) 0%, rgba(184,135,43,0.06) 100%);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid rgba(184,135,43,0.38);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 10px 22px -16px rgba(184,135,43,0.4);
+    color: #6B4E17;
+  }
+
+  /* ---- Step 4: review summary rows ---- */
+  .ts-review-row { padding: 0.9rem 0; }
+  .ts-review-row + .ts-review-row { border-top: 1px solid #E3DFD2; }
+  .ts-review-label { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: #5B6474; }
+  .ts-review-value { color: #1F2937; font-weight: 600; margin-top: 2px; }
+
+  /* ---- File upload dropzone (Board Exam photo) ---- */
+  .ts-file-drop {
+    border-radius: 12px;
+    border: 1.5px dashed rgba(36,64,107,0.35);
+    background: rgba(255,255,255,0.5);
+    transition: border-color 150ms ease, background 150ms ease;
+  }
+  .ts-file-drop:hover { border-color: rgba(36,64,107,0.55); background: rgba(255,255,255,0.7); }
+  .ts-file-drop-filled { border-style: solid; border-color: rgba(79,122,106,0.5); background: rgba(79,122,106,0.06); }
 `;
 
 export function DocumentIcon() {
@@ -686,6 +826,88 @@ export function TicketIcon() {
   );
 }
 
+export function GridTableIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <rect x="3" y="3.5" width="14" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M3 8.2h14M3 12.4h14M8.5 3.5v13" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+export function GraduationCapIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M2 7.5 10 4l8 3.5-8 3.5-8-3.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M5.5 9.2v3.3c0 1.1 2 2 4.5 2s4.5-.9 4.5-2V9.2" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M17 7.8v4.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function BookIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M3 3.8c1.8-.7 4-.7 6 .4v11c-2-1.1-4.2-1.1-6-.4v-11Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M17 3.8c-1.8-.7-4-.7-6 .4v11c2-1.1 4.2-1.1 6-.4v-11Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function ShieldIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M10 2.5 16.5 5v4.8c0 4-2.7 6.7-6.5 8.2-3.8-1.5-6.5-4.2-6.5-8.2V5L10 2.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M7.3 10 9.3 12l3.4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function PaperPlaneIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M17.5 2.5 2.5 9.2l5.8 2.1L10.4 17l7.1-14.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M17.5 2.5 8.3 11.3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function KeyIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <circle cx="6.2" cy="13.8" r="3.2" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8.4 11.6 15.5 4.5M12.7 7.3l2 2M15 5l2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function CheckIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+      <path d="M4.5 10.5 8 14l7.5-8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function WarningIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M10 2.5 18 16.5H2L10 2.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M10 8v3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="10" cy="14" r="0.9" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function UploadIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M10 13V4M10 4 6.5 7.5M10 4l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3.5 13.5V15a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5v-1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Shared app shell: sidebar (desktop) + slim top bar (mobile), used by every
 // logged-in screen so the nav is identical wherever it appears. `active`
@@ -701,7 +923,21 @@ const NAV_ITEMS = [
   { key: 'ask', href: '#', label: 'Ask TrailSync', Icon: ChatIcon },
 ];
 
-export function AppSidebar({ active, onLogout }) {
+function initialsFor(me) {
+  const a = (me?.first_name || '').charAt(0);
+  const b = (me?.last_name || '').charAt(0);
+  return (a + b).toUpperCase() || '?';
+}
+
+/**
+ * `me` is optional — pages that haven't loaded /api/me/ yet (or don't need
+ * it) simply render the sidebar without the profile footer rather than
+ * requiring every caller to pass a stub.
+ */
+export function AppSidebar({ active, onLogout, me }) {
+  const profile = me?.profile;
+  const idLine = [profile?.school_id_number, profile?.course].filter(Boolean).join(' · ');
+
   return (
     <aside className="ts-sidebar hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-64 lg:flex-none lg:flex-col">
       <div className="flex items-center gap-2 px-6 pb-8 pt-7">
@@ -727,6 +963,22 @@ export function AppSidebar({ active, onLogout }) {
           </a>
         ))}
       </nav>
+
+      {me && (
+        <div className="ts-sidebar-footer flex items-center gap-2.5 px-4 py-4">
+          <span className="ts-sidebar-avatar">{initialsFor(me)}</span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium" style={{ color: '#FAF8F3' }}>
+              {me.first_name} {me.last_name}
+            </p>
+            {idLine && (
+              <p className="truncate text-xs" style={{ color: 'rgba(250,248,243,0.55)' }}>
+                {idLine}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="px-3 pb-6">
         <button type="button" onClick={onLogout} className="ts-nav-item w-full px-3 py-2.5 text-sm font-medium">

@@ -1,4 +1,6 @@
+import json
 import uuid
+from datetime import date, datetime
 
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -9,6 +11,7 @@ from .models import (
     FormRequest,
     FormSubmission,
     ReleaseSlot,
+    RequestProxy,
     Role,
     TransactionType,
     User,
@@ -97,67 +100,142 @@ def _generate_request_code():
     return f"W6-{uuid.uuid4().hex[:8].upper()}"
 
 
+def _parse_json_object(raw, field_name):
+    """form_data and proxy always arrive as a JSON-encoded string — the
+    request is always multipart (a file may be attached), and multipart
+    fields are strings by construction, never nested objects."""
+    if raw in (None, ""):
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        raise serializers.ValidationError({field_name: ["Invalid data."]})
+    if not isinstance(parsed, dict):
+        raise serializers.ValidationError({field_name: ["Invalid data."]})
+    return parsed
+
+
+def _parse_iso_date(value):
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
 class CreateFormRequestSerializer(serializers.Serializer):
-    """POST /api/form-requests/ body. user is deliberately not a field here —
-    it always comes from request.user in the view/create(), never the
-    payload, so a request can only ever be filed under the account making it.
+    """POST /api/form-requests/ body (always multipart/form-data, since a
+    file may be attached even though most submissions carry none).
+
+    user is deliberately not a field here — it always comes from
+    request.user in the view/create(), never the payload, so a request can
+    only ever be filed under the account making it.
+
+    form_data/proxy are opaque JSON blobs by design (see FormSubmission's
+    docstring) — validate() below is where their actual required fields are
+    enforced, since a flat serializer field can't reach inside them.
     """
 
     transaction_type = serializers.PrimaryKeyRelatedField(queryset=TransactionType.objects.all())
-    release_slot = serializers.PrimaryKeyRelatedField(queryset=ReleaseSlot.objects.all())
-    number_of_copies = serializers.IntegerField(min_value=1, default=1)
-    purpose = serializers.ChoiceField(choices=FormSubmission.Purpose.choices)
-    purpose_other = serializers.CharField(max_length=255, required=False, allow_blank=True)
-    # Only ever honored for alumni (see create()) — a current student can't
-    # legitimately answer "yes" to a pre-2018-graduation question.
-    requires_archive_retrieval = serializers.BooleanField(required=False, default=False)
+    form_data = serializers.CharField()
+    proxy = serializers.CharField(required=False, allow_blank=True)
+    board_exam_photo = serializers.FileField(required=False)
 
-    def validate_release_slot(self, slot):
-        if slot.available_slots <= 0:
-            raise serializers.ValidationError("This release slot is fully booked. Please choose another.")
-        return slot
+    def validate_form_data(self, raw):
+        parsed = _parse_json_object(raw, "form_data")
+        if parsed is None:
+            raise serializers.ValidationError("This field is required.")
+        return parsed
+
+    def validate_proxy(self, raw):
+        return _parse_json_object(raw, "proxy")
 
     def validate(self, attrs):
-        if attrs.get("purpose") == FormSubmission.Purpose.OTHER and not (attrs.get("purpose_other") or "").strip():
-            raise serializers.ValidationError({"purpose_other": "Please specify your purpose."})
+        errors = {}
+        form_data = attrs["form_data"]
+        user = self.context["request"].user
+        profile = getattr(user, "user_profile", None)
+        is_alumni = bool(profile and profile.user_category == "Alumni")
+
+        purpose = (form_data.get("purpose") or "").strip()
+        if not purpose:
+            errors.setdefault("form_data", {})["purpose"] = "Please select a purpose."
+        elif purpose not in FormSubmission.Purpose.values:
+            errors.setdefault("form_data", {})["purpose"] = "Please select a valid purpose."
+        if purpose == FormSubmission.Purpose.OTHER and not (form_data.get("purpose_other") or "").strip():
+            errors.setdefault("form_data", {})["purpose_other"] = "Please specify your purpose."
+
+        try:
+            copies = int(form_data.get("number_of_copies", 0))
+        except (TypeError, ValueError):
+            copies = 0
+        if copies < 1:
+            errors.setdefault("form_data", {})["number_of_copies"] = "Enter at least 1 copy."
+
+        if not (form_data.get("semester") or "").strip():
+            errors.setdefault("form_data", {})["semester"] = "Please select a semester / academic year."
+
+        # Alumni-only question; current students never see or answer it.
+        graduation_date = None
+        if is_alumni:
+            raw_grad_date = (form_data.get("graduation_date") or "").strip()
+            graduation_date = _parse_iso_date(raw_grad_date)
+            if graduation_date is None:
+                errors.setdefault("form_data", {})["graduation_date"] = "Please enter your graduation date."
+
+        # System-enforced, not a dismissible warning: Board Exam requests
+        # cannot proceed without the photo actually attached.
+        if purpose == FormSubmission.Purpose.BOARD_EXAM and not attrs.get("board_exam_photo"):
+            errors.setdefault("form_data", {})[
+                "board_exam_photo"
+            ] = "Please upload a white-background 2x2 photo for this request."
+
+        proxy = attrs.get("proxy")
+        if proxy is not None:
+            if not (proxy.get("proxy_full_name") or "").strip():
+                errors.setdefault("proxy", {})["proxy_full_name"] = "Proxy full name is required."
+            if proxy.get("relationship") not in RequestProxy.Relationship.values:
+                errors.setdefault("proxy", {})["relationship"] = "Please select a relationship."
+            if not (proxy.get("contact_number") or "").strip():
+                errors.setdefault("proxy", {})["contact_number"] = "Contact number is required."
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        attrs["_is_alumni"] = is_alumni
+        attrs["_graduation_date"] = graduation_date
         return attrs
 
     @transaction.atomic
     def create(self, validated_data):
         user = self.context["request"].user
+        form_data = validated_data["form_data"]
+        graduation_date = validated_data["_graduation_date"]
 
-        # Lock the row and re-check capacity inside the transaction — the
-        # validate_release_slot check above ran against a possibly-stale
-        # read, so this is the check that actually prevents overbooking
-        # under concurrent submissions for the same slot.
-        slot = ReleaseSlot.objects.select_for_update().get(pk=validated_data["release_slot"].pk)
-        if slot.available_slots <= 0:
-            raise serializers.ValidationError(
-                {"release_slot": "This release slot was just filled. Please choose another."}
-            )
-        slot.available_slots -= 1
-        slot.save(update_fields=["available_slots"])
-
-        profile = getattr(user, "user_profile", None)
-        requires_archive = (
-            bool(validated_data.get("requires_archive_retrieval"))
-            if profile and profile.user_category == "Alumni"
-            else False
-        )
+        # Pre-2018 grads may need records pulled from the archive — derived
+        # from the date they actually gave us, not a separate direct question.
+        requires_archive = bool(graduation_date and graduation_date < date(2018, 1, 1))
 
         form_request = FormRequest.objects.create(
             user=user,
             transaction_type=validated_data["transaction_type"],
-            release_slot=slot,
             request_code=_generate_request_code(),
             requires_archive_retrieval=requires_archive,
         )
         FormSubmission.objects.create(
             form_request=form_request,
-            number_of_copies=validated_data.get("number_of_copies", 1),
-            purpose=validated_data["purpose"],
-            purpose_other=(validated_data.get("purpose_other") or "").strip() or None,
+            form_data=form_data,
+            board_exam_photo=validated_data.get("board_exam_photo"),
         )
+
+        proxy = validated_data.get("proxy")
+        if proxy:
+            RequestProxy.objects.create(
+                form_request=form_request,
+                proxy_full_name=proxy["proxy_full_name"].strip(),
+                relationship=proxy["relationship"],
+                contact_number=proxy["contact_number"].strip(),
+            )
+
         return form_request
 
 

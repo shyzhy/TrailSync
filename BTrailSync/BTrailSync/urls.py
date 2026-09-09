@@ -14,6 +14,8 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
@@ -38,3 +40,8 @@ urlpatterns = [
     path('api/release-slots/', ReleaseSlotListView.as_view(), name='release-slots'),
     path('api/form-requests/', CreateFormRequestView.as_view(), name='form-requests'),
 ]
+
+if settings.DEBUG:
+    # Dev-only: serves uploaded files (e.g. the Board Exam photo) straight
+    # off disk. A real deployment needs a proper file store in front of this.
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

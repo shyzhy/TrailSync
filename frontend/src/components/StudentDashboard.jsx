@@ -141,7 +141,7 @@ export default function StudentDashboard() {
     <div className="ts-app-shell lg:flex" style={FONT_SANS}>
       <style>{APP_CSS}</style>
 
-      <AppSidebar active="home" onLogout={handleLogout} />
+      <AppSidebar active="home" onLogout={handleLogout} me={me} />
       <AppMobileHeader onLogout={handleLogout} />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8 sm:py-10 lg:px-10">

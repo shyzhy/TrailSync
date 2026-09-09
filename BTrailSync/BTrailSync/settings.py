@@ -154,3 +154,9 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# User-uploaded files (e.g. the Board Exam 2x2 photo on a form request).
+# Served via urls.py's static() helper in DEBUG only — a real deployment
+# needs a proper file store (S3, etc.) in front of MEDIA_URL instead.
+MEDIA_URL = 'media/'
+MEDIA_ROOT = BASE_DIR / 'media'
