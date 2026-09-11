@@ -30,6 +30,7 @@ from TrailSync.views import (
     MeView,
     RecentFormRequestsView,
     RegistrarApproveLogView,
+    RegistrarQueueApproveView,
     RegistrarAssignableRequestsView,
     RegistrarAssignSlotView,
     RegistrarCreateReleaseSlotView,
@@ -76,6 +77,7 @@ urlpatterns = [
     path('api/registrar/queue/', RegistrarQueueListView.as_view(), name='registrar-queue'),
     path('api/registrar/queue/<int:pk>/', RegistrarQueueDetailView.as_view(), name='registrar-queue-detail'),
     path('api/registrar/queue/<int:pk>/verify/', RegistrarQueueVerifyView.as_view(), name='registrar-queue-verify'),
+    path('api/registrar/queue/<int:pk>/approve/', RegistrarQueueApproveView.as_view(), name='registrar-queue-approve'),
     path('api/registrar/queue/<int:pk>/reject/', RegistrarQueueRejectView.as_view(), name='registrar-queue-reject'),
     # Release Slots — literal paths (calendar/, assignable-requests/, create/)
     # registered before the <int:pk> pattern so they aren't swallowed by it.

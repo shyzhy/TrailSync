@@ -65,6 +65,19 @@ EM_DASH = "—"
 MIDDOT = "·"
 SCISSORS = "✂"
 
+# Control block from the real USTP form this document stands in for
+# (FM-USTP-RGTR-09). Printed so a member of staff can see at a glance that
+# what the student handed them is the current revision of the official form
+# and not a lookalike.
+DOC_CODE = "FM-USTP-RGTR-09"
+DOC_REVISION = "00"
+DOC_EFFECTIVE = "10.01.21"
+
+# Window 6 releases only in this band. It is on the printed stub because it
+# is the single thing students most often get wrong, and the real form gives
+# it its own boxed notice.
+RELEASING_TIME_NOTICE = "RELEASING TIME is from 3:00 to 5:00 in the afternoon."
+
 _FONTS_LOADED = False
 _EMBEDDED_OK = False
 
@@ -216,6 +229,86 @@ def _caps_width(text, font, size, spacing=0.8):
     return pdfmetrics.stringWidth(text.upper(), font, size) + spacing * len(text)
 
 
+def _doc_control_box(c, right_x, top_y, fonts):
+    """The form-control table the real document carries in its top corner.
+
+    Reproduced because this PDF is not merely a receipt - it stands in for
+    FM-USTP-RGTR-09 itself, and a registrar's office identifies its forms by
+    this block. Returns the y of its bottom edge.
+    """
+    w, row1, row2 = 152.0, 12.0, 11.0
+    h = row1 + row2 + 12
+    x = right_x - w
+
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(0.7)
+    c.rect(x, top_y - h, w, h, stroke=1, fill=0)
+
+    c.setFillColor(BLUE)
+    c.rect(x, top_y - row1, w, row1, stroke=0, fill=1)
+    _caps(c, x + 4, top_y - row1 + 3.5, "Document Code No.", fonts["sans_bold"], 5.8, colors.white, spacing=0.4)
+
+    c.setFillColor(BLACK)
+    c.setFont(fonts["sans_bold"], 9)
+    c.drawCentredString(x + w / 2, top_y - row1 - 10, DOC_CODE)
+
+    divider_y = top_y - row1 - 14
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(0.5)
+    c.line(x, divider_y, x + w, divider_y)
+
+    thirds = w / 3
+    for i in (1, 2):
+        c.line(x + thirds * i, divider_y, x + thirds * i, top_y - h)
+
+    labels = ("Rev. No.", "Effective Date", "Page No.")
+    values = (DOC_REVISION, DOC_EFFECTIVE, "1 of 1")
+    for i, (label, value) in enumerate(zip(labels, values)):
+        cx = x + thirds * i + thirds / 2
+        c.setFillColor(GREY)
+        c.setFont(fonts["sans"], 5.4)
+        c.drawCentredString(cx, divider_y - 7, label)
+        c.setFillColor(BLACK)
+        c.setFont(fonts["sans_bold"], 6.8)
+        c.drawCentredString(cx, divider_y - 16, value)
+
+    return top_y - h
+
+
+def _verifier_of(form_request):
+    """The Front Desk staff member who signed this request off as verified.
+
+    Read from RequirementVerification rather than FormRequest because that is
+    where the verification EVENT is recorded, with its own author. The real
+    form has two separate signatures - Front Desk verifies, the University
+    Registrar approves - so the printed document needs both names, not one.
+    """
+    latest = form_request.verifications.filter(verification_status="Verified").first()
+    return latest.verified_by if latest else None
+
+
+def _signature_column(c, x, width, y, caption, name, subtitle, fonts):
+    """One signature block: rendered name over a rule, captioned beneath."""
+    if name:
+        c.setFillColor(BLACK)
+        c.setFont(fonts["serif"], 11)
+        c.drawString(x + 4, y + 7, _fit(name, fonts["serif"], 11, width - 8))
+
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(0.8)
+    c.line(x, y, x + width, y)
+
+    c.setFillColor(BLACK)
+    c.setFont(fonts["sans_bold"], 7.8)
+    c.drawString(x, y - 10, _fit(name or EM_DASH, fonts["sans_bold"], 7.8, width))
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 6.6)
+    c.drawString(x, y - 19, _fit(subtitle, fonts["sans"], 6.6, width))
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 6.4)
+    c.drawString(x, y - 28, caption)
+
+
 def _section_bar(c, x, y, width, title, fonts, height=15.0):
     """A reversed-out blue header bar. Returns the y of its bottom edge."""
     c.setFillColor(BLUE)
@@ -256,8 +349,8 @@ def build_receipt_pdf(form_request) -> bytes:
     form_data = (submission.form_data if submission else None) or {}
 
     purpose = form_data.get("purpose")
-    if purpose == "Other":
-        purpose = form_data.get("purpose_other") or "Other"
+    if purpose == "Others":
+        purpose = form_data.get("purpose_other") or "Others"
 
     buffer = io.BytesIO()
     c = pdfcanvas.Canvas(buffer, pagesize=A4)
@@ -292,13 +385,15 @@ def build_receipt_pdf(form_request) -> bytes:
     c.drawString(wordmark_x, y - 17, "TrailSync")
 
     c.setFillColor(BLACK)
-    c.setFont(fonts["sans_bold"], 8.5)
-    c.drawRightString(RIGHT, y - 8, f"USTP {EM_DASH} Cagayan de Oro")
+    c.setFont(fonts["sans_bold"], 7.6)
+    c.drawString(wordmark_x, y - 28, "University of Science and Technology of Southern Philippines")
     c.setFillColor(GREY)
-    c.setFont(fonts["sans"], 7.5)
-    c.drawRightString(RIGHT, y - 19, f"Office of the Registrar {MIDDOT} Window 6")
+    c.setFont(fonts["sans"], 6.8)
+    c.drawString(wordmark_x, y - 37, f"Cagayan de Oro {MIDDOT} Office of the Registrar {MIDDOT} Window 6")
 
-    y -= 34
+    _doc_control_box(c, RIGHT, y, fonts)
+
+    y -= 50
     c.setStrokeColor(GOLD)
     c.setLineWidth(1.1)
     c.line(LEFT, y, RIGHT, y)
@@ -306,7 +401,7 @@ def build_receipt_pdf(form_request) -> bytes:
 
     c.setFillColor(BLACK)
     c.setFont(fonts["serif_bold"], 13.5)
-    c.drawCentredString(PAGE_W / 2, y, f"Request for Credentials {EM_DASH} Official Form")
+    c.drawCentredString(PAGE_W / 2, y, "Request for Credential/s Form")
     y -= 12
 
     generated = _local(timezone.now())
@@ -364,6 +459,20 @@ def build_receipt_pdf(form_request) -> bytes:
     left_y = _field(
         c, LEFT, left_y, col_w, "Year Level", profile.year_level if profile else None, fonts
     )
+    # Both asked for by name on the real form's header block.
+    left_y = _field(
+        c, LEFT, left_y, col_w, "Birth Date",
+        f"{profile.birth_date:%B %d, %Y}" if (profile and profile.birth_date) else None,
+        fonts,
+    )
+    left_y = _field(
+        c, LEFT, left_y, col_w, "Classification",
+        # The form offers Student (Undergrad/Graduate) and Alumnus (High
+        # School/Undergrad/Graduate). Only the top-level distinction is
+        # captured today - see the note about the missing sub-level.
+        profile.user_category if profile else None,
+        fonts,
+    )
 
     copies = form_data.get("number_of_copies")
     right_y = _field(
@@ -383,6 +492,21 @@ def build_receipt_pdf(form_request) -> bytes:
     )
 
     y = min(left_y, right_y) - 6
+
+    # The student signs the printed form: the real document's very first
+    # field is "Signature over Printed Name", and it is the only thing on
+    # here the system cannot supply for them.
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(0.8)
+    sign_w = 250.0
+    c.line(LEFT, y - 12, LEFT + sign_w, y - 12)
+    c.setFillColor(BLACK)
+    c.setFont(fonts["sans_bold"], 7.6)
+    c.drawString(LEFT, y - 22, _student_name(user, profile).upper())
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 6.4)
+    c.drawString(LEFT, y - 31, "Signature over Printed Name")
+    y -= 44
 
     # ------------------------------------------------------------ amount due
     amount_h = 50.0
@@ -417,62 +541,49 @@ def build_receipt_pdf(form_request) -> bytes:
         c.line(RIGHT - 150, y - 36, RIGHT - 16, y - 36)
     y -= amount_h + 16
 
-    # -------------------------------------------------- approval / signature
-    c.setFillColor(BLACK)
-    c.setFont(fonts["sans_bold"], 9)
-    c.drawString(LEFT, y, "Approved by the Office of the Registrar")
-    y -= 30
-
+    # -------------------------------------------------- signatures
+    # Two separate sign-offs, mirroring the real form: Front Desk personnel
+    # VERIFY the requirements, the University Registrar APPROVES the request.
+    # In the current one-step workflow the same person does both, so both
+    # lines often carry the same name - which is precisely the argument for
+    # splitting Verified and Approved into distinct stages.
+    y -= 6
+    verifier = _verifier_of(form_request)
     approver = form_request.registrar_approved_by
-    sig_w = 210.0
-    if approver is not None:
-        # The approving staff member's name set above the rule, standing in
-        # for the "auto-applied signature" — a rendered name plus the
-        # electronic note below, never a fabricated handwriting image.
-        c.setFillColor(BLACK)
-        c.setFont(fonts["serif"], 12)
-        c.drawString(LEFT + 6, y + 7, approver.user.get_full_name())
 
-    c.setStrokeColor(BLACK)
-    c.setLineWidth(0.8)
-    c.line(LEFT, y, LEFT + sig_w, y)
-
-    if approver is not None:
-        c.setFillColor(BLACK)
-        c.setFont(fonts["sans_bold"], 8.5)
-        c.drawString(LEFT, y - 11, approver.user.get_full_name())
-        c.setFillColor(GREY)
-        c.setFont(fonts["sans"], 7.5)
-        detail = f"{approver.position or 'Registrar Staff'} {MIDDOT} {approver.employee_id}"
-        c.drawString(LEFT, y - 21, detail)
-    else:
-        # Approved before attribution was recorded, or the staff record was
-        # since removed — the office signs for it rather than a name being
-        # invented to fill the line.
-        c.setFillColor(BLACK)
-        c.setFont(fonts["sans_bold"], 8.5)
-        c.drawString(LEFT, y - 11, "Office of the Registrar")
-        c.setFillColor(GREY)
-        c.setFont(fonts["sans"], 7.5)
-        c.drawString(LEFT, y - 21, f"USTP {EM_DASH} Cagayan de Oro")
+    gutter = 26.0
+    sig_w = (CONTENT_W - gutter) / 2
+    _signature_column(
+        c, LEFT, sig_w, y,
+        "Name & Signature of Front Desk Personnel",
+        verifier.user.get_full_name() if verifier else None,
+        "Verified" if verifier else "Not yet verified",
+        fonts,
+    )
+    _signature_column(
+        c, LEFT + sig_w + gutter, sig_w, y,
+        "Approved",
+        approver.user.get_full_name() if approver else None,
+        (
+            f"University Registrar {MIDDOT} {approver.employee_id}"
+            if approver
+            else "University Registrar"
+        ),
+        fonts,
+    )
+    y -= 42
 
     approved_at = _local(form_request.registrar_approved_at)
     c.setFillColor(GREY)
-    c.setFont(fonts["sans"], 7)
-    c.drawRightString(RIGHT, y - 11, "DATE APPROVED")
-    c.setFillColor(BLACK)
-    c.setFont(fonts["sans_bold"], 8.5)
-    c.drawRightString(
-        RIGHT, y - 22,
-        approved_at.strftime("%B %d, %Y at %I:%M %p") if approved_at else EM_DASH,
-    )
-    y -= 34
-
-    c.setFillColor(GREY)
     c.setFont(fonts["sans"], 6.5)
+    stamped = (
+        f"Approved {approved_at:%B %d, %Y at %I:%M %p}. "
+        if approved_at
+        else ""
+    )
     c.drawString(
         LEFT, y,
-        "Electronically approved and generated by TrailSync. Valid without a handwritten signature.",
+        f"{stamped}Electronically generated by TrailSync. Valid without a handwritten signature.",
     )
     y -= 16
 
@@ -507,7 +618,7 @@ def build_receipt_pdf(form_request) -> bytes:
     # to sit in a Cashier's tray; whatever vertical slack the body did not
     # use collects as white space above the cut instead. The min() keeps the
     # cut below the Cashier box if this form ever grows more fields.
-    stub_h = 76.0
+    stub_h = 100.0
     y = min(MARGIN + stub_h + 20, body_bottom - 22)
 
     c.setStrokeColor(HAIRLINE)
@@ -526,28 +637,27 @@ def build_receipt_pdf(form_request) -> bytes:
     c.setFillColor(BLUE)
     c.rect(LEFT, y - stub_h, CONTENT_W, 3, stroke=0, fill=1)
 
-    _caps(c, LEFT + 12, y - 17, "Claim Stub", fonts["sans_bold"], 7.5, BLUE)
+    _caps(c, LEFT + 12, y - 16, "Claim Stub", fonts["sans_bold"], 7.5, BLUE)
     c.setFillColor(BLACK)
-    c.setFont(fonts["serif_bold"], 16)
-    c.drawString(LEFT + 12, y - 38, form_request.request_code)
+    c.setFont(fonts["serif_bold"], 15)
+    c.drawString(LEFT + 12, y - 35, form_request.request_code)
 
-    c.setFillColor(BLACK)
-    c.setFont(fonts["sans"], 8.5)
-    c.drawString(LEFT + 12, y - 52, _fit(_student_name(user, profile), fonts["sans"], 8.5, 240))
+    scheduled = form_request.scheduled_release()
+    release_text = f"{scheduled[0]:%B %d, %Y}" if scheduled else f"To be scheduled"
+
+    col2 = LEFT + 196
+    col3 = LEFT + 360
+    stub_y = y - 50
+    _field(c, LEFT + 12, stub_y, 170, "Name", _student_name(user, profile), fonts)
+    _field(c, col2, stub_y, 150, "Course", profile.course if profile else None, fonts)
+    _field(c, col3, stub_y, 140, "Date of Release", release_text, fonts)
+
     c.setFillColor(GREY)
-    c.setFont(fonts["sans"], 8)
+    c.setFont(fonts["sans"], 6.6)
     c.drawString(
-        LEFT + 12, y - 64, _fit(form_request.transaction_type.name, fonts["sans"], 8, 240)
+        LEFT + 12, y - 88,
+        f"{RELEASING_TIME_NOTICE} Present this stub upon claiming. If lost, a valid ID must be presented.",
     )
-
-    note_x = LEFT + 278
-    c.setFillColor(BLACK)
-    c.setFont(fonts["sans_bold"], 8)
-    c.drawString(note_x, y - 38, "Present this stub with a valid ID")
-    c.drawString(note_x, y - 49, "to claim your document at Window 6.")
-    c.setFillColor(GREY)
-    c.setFont(fonts["sans"], 7)
-    c.drawString(note_x, y - 63, f"USTP {EM_DASH} Cagayan de Oro {MIDDOT} Office of the Registrar")
 
     c.showPage()
     c.save()
@@ -557,7 +667,8 @@ def build_receipt_pdf(form_request) -> bytes:
 CLAIM_STUB_INSTRUCTION = (
     "Present this stub with a valid ID to claim your document at Window 6. "
     "If someone else is claiming on your behalf, they must also bring a "
-    "notarized authorization letter and both parties' valid IDs."
+    "notarized authorization letter and both parties' valid IDs. "
+    "If this stub is lost, a valid ID must be presented instead."
 )
 
 
@@ -608,13 +719,15 @@ def build_claim_stub_pdf(form_request) -> bytes:
     c.drawString(wordmark_x, y - 17, "TrailSync")
 
     c.setFillColor(BLACK)
-    c.setFont(fonts["sans_bold"], 8.5)
-    c.drawRightString(RIGHT, y - 8, f"USTP {EM_DASH} Cagayan de Oro")
+    c.setFont(fonts["sans_bold"], 7.6)
+    c.drawString(wordmark_x, y - 28, "University of Science and Technology of Southern Philippines")
     c.setFillColor(GREY)
-    c.setFont(fonts["sans"], 7.5)
-    c.drawRightString(RIGHT, y - 19, f"Office of the Registrar {MIDDOT} Window 6")
+    c.setFont(fonts["sans"], 6.8)
+    c.drawString(wordmark_x, y - 37, f"Cagayan de Oro {MIDDOT} Office of the Registrar {MIDDOT} Window 6")
 
-    y -= 34
+    _doc_control_box(c, RIGHT, y, fonts)
+
+    y -= 50
     c.setStrokeColor(GOLD)
     c.setLineWidth(1.1)
     c.line(LEFT, y, RIGHT, y)
@@ -625,7 +738,11 @@ def build_claim_stub_pdf(form_request) -> bytes:
     # card closes just under its own content. A fixed height left a band of
     # empty space that reads as a form field someone forgot to fill in.
     instruction_lines = _wrap(CLAIM_STUB_INSTRUCTION, fonts["sans"], 8, CONTENT_W - 40)
-    stub_h = 176.0 + len(instruction_lines) * 11 + 14
+    # 255 = fixed content above the instruction: header label and tracking
+    # number (106), four field rows (100), the divider (20) and the boxed
+    # releasing-time notice (29). Getting this wrong does not reflow
+    # anything, it just prints the last line outside the card border.
+    stub_h = 255.0 + len(instruction_lines) * 11 + 14
     stub_top = y
     c.setStrokeColor(BLACK)
     c.setLineWidth(1.4)
@@ -655,13 +772,17 @@ def build_claim_stub_pdf(form_request) -> bytes:
     col_w = (inner_w - 24) / 2
     col2 = inner + col_w + 24
     left_y = right_y = cursor
-    left_y = _field(c, inner, left_y, col_w, "Student Name", _student_name(user, profile), fonts)
+    left_y = _field(c, inner, left_y, col_w, "Name", _student_name(user, profile), fonts)
     left_y = _field(
-        c, inner, left_y, col_w, "School ID Number",
-        profile.school_id_number if profile else None, fonts,
+        c, inner, left_y, col_w, "Course",
+        profile.course if profile else None, fonts,
+    )
+    left_y = _field(
+        c, inner, left_y, col_w, "Date of Request",
+        f"{_local(form_request.created_at):%B %d, %Y}", fonts,
     )
     right_y = _field(
-        c, col2, right_y, col_w, "Document to Claim", form_request.transaction_type.name, fonts
+        c, col2, right_y, col_w, "Credential Requested", form_request.transaction_type.name, fonts
     )
 
     scheduled = form_request.scheduled_release()
@@ -674,7 +795,16 @@ def build_claim_stub_pdf(form_request) -> bytes:
         # Never a blank field: an empty line reads as an error, where saying
         # it is not scheduled yet tells the student what to do about it.
         when = f"To be scheduled {EM_DASH} check back soon"
-    right_y = _field(c, col2, right_y, col_w, "Release Date / Time", when, fonts)
+    right_y = _field(c, col2, right_y, col_w, "Date of Release", when, fonts)
+
+    # Assessed amount and O.R. number: on the real stub these are written in
+    # by the Cashier. Here they are already known by the time the stub is
+    # downloadable, so they print as recorded rather than as blank rules.
+    amount_text = format_money(form_request.amount_due) or EM_DASH
+    right_y = _field(c, col2, right_y, col_w, "Amount Assessed", amount_text, fonts)
+    right_y = _field(
+        c, col2, right_y, col_w, "O.R. Number", form_request.or_number or EM_DASH, fonts
+    )
 
     cursor = min(left_y, right_y) - 4
 
@@ -682,6 +812,15 @@ def build_claim_stub_pdf(form_request) -> bytes:
     c.setLineWidth(0.6)
     c.line(inner, cursor, RIGHT - 20, cursor)
     cursor -= 16
+
+    notice_h = 17.0
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(1.0)
+    c.rect(inner, cursor - notice_h + 5, inner_w, notice_h, stroke=1, fill=0)
+    c.setFillColor(BLACK)
+    c.setFont(fonts["sans_bold"], 8)
+    c.drawCentredString(inner + inner_w / 2, cursor - 7, RELEASING_TIME_NOTICE)
+    cursor -= notice_h + 12
 
     c.setFillColor(BLACK)
     c.setFont(fonts["sans"], 8)

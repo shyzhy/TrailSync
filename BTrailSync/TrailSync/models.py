@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
 from django.conf import settings
@@ -92,6 +94,22 @@ class UserProfile(models.Model):
     # nobody was ever asked - a default would be inventing a birthday.
     birth_date = models.DateField(null=True, blank=True)
 
+    # A second axis alongside user_category, not a replacement. Together they
+    # reconstruct the form's actual checkbox: Student (Undergrad/Graduate) or
+    # Alumnus (High School/Undergrad/Graduate). Nullable because existing
+    # profiles were never asked, and guessing someone's level would be worse
+    # than leaving the printed form's box blank.
+    academic_level = models.CharField(
+        max_length=20,
+        choices=[
+            ("High School", "High School"),
+            ("Undergraduate", "Undergraduate"),
+            ("Graduate", "Graduate"),
+        ],
+        null=True,
+        blank=True,
+    )
+
     course = models.CharField(max_length=150, blank=True, null=True)
     college = models.CharField(max_length=150, blank=True, null=True)
     year_level = models.CharField(max_length=50, blank=True, null=True)
@@ -176,6 +194,19 @@ class TransactionType(models.Model):
     # Both optional/informational — left blank where a document type has no
     # fixed fee or published turnaround.
     processing_time = models.CharField(max_length=100, blank=True, null=True)
+
+    # How fee_amount is applied. The real form prices most documents flat but
+    # charges Transcript of Records and Authentication BY THE PAGE, which is a
+    # different quantity from the number of copies - a request can need two
+    # copies of a ten-page transcript, and that is 2 x 10 x the fee.
+    pricing_unit = models.CharField(
+        max_length=10,
+        choices=[
+            ("flat", "Flat fee"),
+            ("per_page", "Per page"),
+        ],
+        default="flat",
+    )
     fee_amount = models.DecimalField(max_digits=8, decimal_places=2, blank=True, null=True)
     # Which of FormSubmission.Purpose this document is commonly requested
     # for — powers the Credential Guide's purpose filter chips. A list
@@ -224,6 +255,14 @@ class ReleaseSlot(models.Model):
         return f"{self.slot_date} {self.start_time}–{self.end_time} ({self.available_slots} left)"
 
 
+# Add-on fees from FM-USTP-RGTR-09. Plain constants rather than their own
+# table: they are two fixed line items on a printed form, and a table would
+# buy configurability nobody has asked for. If a third appears, or the office
+# wants to edit them without a deploy, that is when this earns a model.
+RUSH_FEE = Decimal("100.00")
+COMPLETION_OF_INC_FEE = Decimal("175.00")
+
+
 class FormRequest(models.Model):
     """A student/alumni's request for one document, tracked through to release."""
 
@@ -235,12 +274,14 @@ class FormRequest(models.Model):
         the wording the feature docs use - the same split that "Ready" ->
         "Ready for Pickup" already used before this change.
 
-        APPROVED replaced an earlier "Verified" value when the lifecycle was
-        filled in, and a data migration rewrote existing rows. The name
-        changed because the step means more than "the requirements check
-        out": it is where the Registrar signs off, the fee is assessed, and
-        the student can print the Cashier form. Verification as an EVENT is
-        still recorded separately in RequirementVerification.
+        VERIFIED and APPROVED are separate stages because the official form
+        (FM-USTP-RGTR-09) carries two separate signatures: "Verified - Name &
+        Signature of Front Desk Personnel" and "Approved - University
+        Registrar". Two people, two decisions. Front Desk checks that the
+        requirements and clearance are in order; the Registrar then signs off
+        and the fee is assessed, which is the point the student can print the
+        Cashier form. Collapsing them would put one person's name on both
+        signature lines of a document that exists to show they were distinct.
 
         PROCESSING is entered only once staff has logged a real Cashier
         payment (or_number + payment_date). That payment happens in person
@@ -254,6 +295,7 @@ class FormRequest(models.Model):
         """
 
         SUBMITTED = "Submitted", "Pending Verification"
+        VERIFIED = "Verified", "Verified"
         APPROVED = "Approved", "Approved - Ready to Print"
         PROCESSING = "Processing", "Processing"
         READY = "Ready", "Ready for Pickup"
@@ -369,31 +411,56 @@ class FormRequest(models.Model):
         return f"{self.request_code} - {self.user.email}"
 
     def compute_amount_due(self):
-        """What this request costs at the Cashier: the document's fee times
-        the number of copies asked for.
+        """What this request costs at the Cashier.
 
-        Called when Registrar approves, not at submission — the fee is
-        whatever TransactionType charges at approval time, and stamping it
-        onto the row means a later admin edit to the fee can't retroactively
-        change what an already-printed form said the student owed.
+        Three parts, matching how the printed form is actually totalled:
 
-        Returns None when the document type has no published fee, which is a
-        real case (fee_amount is nullable): the form then prints a blank
-        line to be written in by hand rather than a misleading 0.00.
+          base   - fee_amount, applied per page when the document is priced
+                   that way (Transcript of Records, Authentication), then
+                   multiplied by the number of copies. Pages and copies are
+                   different questions: two copies of a ten-page transcript
+                   is 2 x 10 x the per-page fee.
+          rush   - a flat add-on once per request, not per copy or per page.
+          INC    - a flat add-on when the purpose is Completion of INC, which
+                   is the one purpose on the form carrying its own fee.
+
+        Called when the Registrar approves, not at submission, and the result
+        is stamped onto the row - so a later change to the fee schedule
+        cannot retroactively alter what an already-printed form said was owed.
+
+        Returns None when the document type has no published fee, a real case
+        (fee_amount is nullable): the form then prints a blank line to be
+        written in by hand rather than a misleading 0.00.
         """
         fee = self.transaction_type.fee_amount
         if fee is None:
             return None
 
+        form_data = self._submission_form_data()
+
+        def _positive_int(value):
+            try:
+                return max(1, int(value))
+            except (TypeError, ValueError):
+                # Both live in the free-form form_data JSON, so either can be
+                # missing or a string; one is the safe reading.
+                return 1
+
+        base = fee
+        if self.transaction_type.pricing_unit == "per_page":
+            base = fee * _positive_int(form_data.get("number_of_pages"))
+
+        total = base * _positive_int(form_data.get("number_of_copies"))
+
+        if self.is_rush:
+            total += RUSH_FEE
+        if form_data.get("purpose") == FormSubmission.Purpose.COMPLETION_OF_INC:
+            total += COMPLETION_OF_INC_FEE
+        return total
+
+    def _submission_form_data(self):
         submission = getattr(self, "submission", None)
-        raw_copies = ((submission.form_data if submission else None) or {}).get("number_of_copies")
-        try:
-            copies = int(raw_copies)
-        except (TypeError, ValueError):
-            # number_of_copies lives in the free-form form_data JSON, so it
-            # can be missing or a string; one copy is the safe reading.
-            copies = 1
-        return fee * max(1, copies)
+        return (submission.form_data if submission else None) or {}
 
     def scheduled_release(self):
         """(date, time_start) for this request's handover, or None.
@@ -463,11 +530,23 @@ class FormSubmission(models.Model):
     """
 
     class Purpose(models.TextChoices):
-        EMPLOYMENT = "Employment", "Employment"
-        FURTHER_STUDIES = "Further studies", "Further studies"
-        SCHOLARSHIP = "Scholarship", "Scholarship"
-        BOARD_EXAM = "Board Exam", "Board Exam"
-        OTHER = "Other", "Other"
+        """Part 3 of FM-USTP-RGTR-09, verbatim.
+
+        Values carry the "For " prefix because that is how the printed form
+        words them, and these strings are what the generated PDF prints back.
+        A data migration rewrote the earlier shorter values.
+        """
+
+        EVALUATION = "For Evaluation", "For Evaluation"
+        EMPLOYMENT = "For Employment", "For Employment"
+        SCHOLARSHIP = "For Scholarship", "For Scholarship"
+        PERSONAL_FILE = "For Personal File", "For Personal File"
+        PASSPORT = "For Passport", "For Passport"
+        ADVANCED_STUDIES = "For Advanced Studies", "For Advanced Studies"
+        BOARD_EXAM = "For Board Exam", "For Board Exam"
+        RANKING = "For Ranking", "For Ranking"
+        COMPLETION_OF_INC = "For Completion of INC", "For Completion of INC"
+        OTHERS = "Others", "Others"
 
     form_request = models.OneToOneField(
         FormRequest,

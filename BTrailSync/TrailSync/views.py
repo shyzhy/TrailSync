@@ -588,12 +588,17 @@ class RegistrarQueueListView(generics.ListAPIView):
 
 
 class RegistrarQueueVerifyView(APIView):
-    """POST /api/registrar/queue/<id>/verify/ - the Registrar approval.
+    """POST /api/registrar/queue/<id>/verify/ - the Front Desk check.
 
-    Pending Verification -> Approved - Ready to Print. Beyond recording the
-    decision this is the point the fee is assessed and the approving
-    signatory is stamped, because all three are the same real-world act: the
-    Registrar signing off. The student can print the Cashier form from here.
+    Pending Verification -> Verified. This is the first of the two signatures
+    the official form carries ("Verified - Name & Signature of Front Desk
+    Personnel"): the requirements and clearance are in order, and the request
+    is fit to go to the Registrar.
+
+    Deliberately assesses NO fee and stamps NO registrar approval. Those
+    belong to the second signature, and a Front Desk verification that also
+    priced the request would put one person's name on both lines of a
+    document whose whole purpose is to show they were separate decisions.
     """
 
     permission_classes = [IsApprovedRegistrarStaff]
@@ -603,25 +608,54 @@ class RegistrarQueueVerifyView(APIView):
 
         if form_request.request_status != FormRequest.RequestStatus.SUBMITTED:
             return _wrong_state(form_request, "Pending Verification")
+        if form_request.blocked_by_clearance():
+            return _blocked_by_clearance_response(form_request)
 
         serializer = VerifyRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        staff_profile = getattr(request.user, "staff_profile", None)
         RequirementVerification.objects.create(
             form_request=form_request,
             verification_status=RequirementVerification.VerificationStatus.VERIFIED,
-            verified_by=staff_profile,
+            verified_by=getattr(request.user, "staff_profile", None),
             remarks=serializer.validated_data.get("remarks") or None,
         )
+        form_request.request_status = FormRequest.RequestStatus.VERIFIED
+        form_request.save(update_fields=["request_status", "updated_at"])
 
-        # Approval is the point the printable Cashier form becomes real:
-        # it needs an amount to pay and a signatory to attest to it, and
-        # neither exists before now. Both are stamped onto the row here
-        # rather than computed at print time so that reprinting a form
-        # always reproduces the same document the student first carried to
-        # the Cashier, even if the fee schedule or staff roster changes
-        # later.
+        # No notification here on purpose: verification is an internal
+        # handoff between two desks, and there is nothing for the student to
+        # do about it. They hear from us when the Registrar approves and
+        # there is something to print and pay.
+        return Response(RegistrarQueueRowSerializer(form_request).data)
+
+
+class RegistrarQueueApproveView(APIView):
+    """POST /api/registrar/queue/<id>/approve/ - the Registrar sign-off.
+
+    Verified -> Approved - Ready to Print. The second signature on the form
+    ("Approved - University Registrar"). This is where the fee is assessed
+    and stamped, because pricing is the Registrar's call, and where the
+    student first gets something to act on.
+
+    amount_due is written onto the row rather than computed at print time so
+    that reprinting a form always reproduces the document the student first
+    carried to the Cashier, even if the fee schedule changes afterwards.
+    """
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    def post(self, request, pk):
+        form_request = get_object_or_404(
+            FormRequest.objects.select_related("transaction_type", "submission"), pk=pk
+        )
+
+        if form_request.request_status != FormRequest.RequestStatus.VERIFIED:
+            return _wrong_state(form_request, "Verified")
+        if form_request.blocked_by_clearance():
+            return _blocked_by_clearance_response(form_request)
+
+        staff_profile = getattr(request.user, "staff_profile", None)
         form_request.request_status = FormRequest.RequestStatus.APPROVED
         form_request.registrar_approved_by = staff_profile
         form_request.registrar_approved_at = timezone.now()
@@ -652,18 +686,28 @@ class RegistrarQueueVerifyView(APIView):
 
 
 class RegistrarQueueRejectView(APIView):
-    """POST /api/registrar/queue/<id>/reject/ - creates a Rejected
-    RequirementVerification row (remarks required) and sets request_status.
+    """POST /api/registrar/queue/<id>/reject/ - turn a request back.
 
-    Sets status to "Rejected" — the closest existing analog to the feature
-    docs' "Needs Revision / blocked" state; that distinct stage doesn't
-    exist in the current 5-value enum either (same 9-stage gap as above).
+    Allowed from EITHER pre-approval stage. Front Desk rejects what fails the
+    requirements check; the Registrar can still refuse something Front Desk
+    passed. Refusing from Verified would force the Registrar to approve a
+    request they have just decided against.
+
+    Not permitted once approved: by then the student may have paid, and
+    unwinding that is a refund conversation, not a status change.
     """
 
     permission_classes = [IsApprovedRegistrarStaff]
 
     def post(self, request, pk):
         form_request = get_object_or_404(FormRequest, pk=pk)
+
+        if form_request.request_status not in (
+            FormRequest.RequestStatus.SUBMITTED,
+            FormRequest.RequestStatus.VERIFIED,
+        ):
+            return _wrong_state(form_request, "Pending Verification or Verified")
+
         serializer = RejectRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 

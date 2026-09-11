@@ -184,6 +184,7 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
     purpose = serializers.SerializerMethodField()
     purpose_other = serializers.SerializerMethodField()
     number_of_copies = serializers.SerializerMethodField()
+    number_of_pages = serializers.SerializerMethodField()
     semester = serializers.SerializerMethodField()
     additional_notes = serializers.SerializerMethodField()
     graduation_date = serializers.SerializerMethodField()
@@ -205,6 +206,7 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
             "purpose",
             "purpose_other",
             "number_of_copies",
+            "number_of_pages",
             "semester",
             "additional_notes",
             "graduation_date",
@@ -245,6 +247,9 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
 
     def get_number_of_copies(self, obj):
         return self._form_data(obj).get("number_of_copies")
+
+    def get_number_of_pages(self, obj):
+        return self._form_data(obj).get("number_of_pages")
 
     def get_semester(self, obj):
         return self._form_data(obj).get("semester")
@@ -392,7 +397,10 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
     verification_remarks = serializers.SerializerMethodField()
     proxy = serializers.SerializerMethodField()
     student_full_name = serializers.SerializerMethodField()
+    number_of_pages = serializers.SerializerMethodField()
+    submission_extras = serializers.SerializerMethodField()
     approved_by_name = serializers.SerializerMethodField()
+    verified_by_name = serializers.SerializerMethodField()
     release_schedule = serializers.SerializerMethodField()
 
     class Meta:
@@ -411,6 +419,8 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
             "purpose",
             "purpose_other",
             "number_of_copies",
+            "number_of_pages",
+            "submission_extras",
             "semester",
             "additional_notes",
             "requirements_status",
@@ -427,6 +437,7 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
             "or_number",
             "payment_date",
             "approved_by_name",
+            "verified_by_name",
             "registrar_approved_at",
             "release_schedule",
         ]
@@ -519,9 +530,32 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
         parts.append(obj.user.last_name or "")
         return " ".join(x for x in parts if x).strip() or obj.user.email
 
+    def get_number_of_pages(self, obj):
+        return self._form_data(obj).get("number_of_pages")
+
+    def get_submission_extras(self, obj):
+        """Conditional answers that only some document types or purposes ask
+        for. Returned as a flat label/value list so the review page can render
+        whatever is present without knowing what each document type requires.
+        """
+        data = self._form_data(obj)
+        pairs = (
+            ("CAV Agency", data.get("cav_agency")),
+            ("Certification Type", ", ".join(data.get("certification_subtypes") or []) or None),
+            ("Semester Taken", data.get("semester_taken")),
+            ("Subject Code", data.get("subject_code")),
+        )
+        return [{"label": label, "value": value} for label, value in pairs if value]
+
     def get_approved_by_name(self, obj):
         approver = obj.registrar_approved_by
         return approver.user.get_full_name() if approver else None
+
+    def get_verified_by_name(self, obj):
+        """Who signed the Front Desk line. Read from the verification event
+        rather than the request row, which only records the Registrar."""
+        latest = obj.verifications.filter(verification_status="Verified").first()
+        return latest.verified_by.user.get_full_name() if (latest and latest.verified_by) else None
 
     def get_release_schedule(self, obj):
         """The booked window merged with the claim record, if either exists.
@@ -741,6 +775,8 @@ class TransactionTypeSerializer(serializers.ModelSerializer):
             "required_documents",
             "processing_time",
             "fee_amount",
+            # Tells the request form whether to ask for a page count.
+            "pricing_unit",
             "common_purposes",
             "special_notes",
         ]
@@ -801,6 +837,28 @@ def _parse_iso_date(value):
 # unbounded multi-file endpoint is a denial-of-service hole: without them one
 # request could fill the disk. Sized for what the form actually asks for -
 # a handful of scans - rather than as a hard policy.
+# Sub-selections that live inside a single document type on the real form
+# rather than being types of their own. They are submission detail, so they
+# are stored in FormSubmission.form_data rather than earning columns.
+CAV_AGENCIES = ["DFA", "CHED", "DEP-ED", "PNP", "POEA", "BFP", "BJMP", "Others"]
+
+CERTIFICATION_SUBTYPES = [
+    "CAR",
+    "GPA",
+    "Endorsement",
+    "Officially enrolled",
+    "Subjects enrolled",
+    "USTP Conversion",
+    "English Medium of Instruction",
+    "Authorization Letter",
+    "Letter of No Objection",
+    "Graduated",
+    "Earned units",
+    "Grading System",
+    "Subjects w/ grades",
+    "Others",
+]
+
 MAX_ATTACHMENTS = 5
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
@@ -904,7 +962,7 @@ class CreateFormRequestSerializer(serializers.Serializer):
             errors.setdefault("form_data", {})["purpose"] = "Please select a purpose."
         elif purpose not in FormSubmission.Purpose.values:
             errors.setdefault("form_data", {})["purpose"] = "Please select a valid purpose."
-        if purpose == FormSubmission.Purpose.OTHER and not (form_data.get("purpose_other") or "").strip():
+        if purpose == FormSubmission.Purpose.OTHERS and not (form_data.get("purpose_other") or "").strip():
             errors.setdefault("form_data", {})["purpose_other"] = "Please specify your purpose."
 
         try:
@@ -916,6 +974,54 @@ class CreateFormRequestSerializer(serializers.Serializer):
 
         if not (form_data.get("semester") or "").strip():
             errors.setdefault("form_data", {})["semester"] = "Please select a semester / academic year."
+
+        # Pages only matter for documents priced by the page, and asking for
+        # them elsewhere would be a question with no consequence. Enforced
+        # here because the fee depends on it: a per-page document with no page
+        # count would silently price as a single page.
+        transaction_type = attrs["transaction_type"]
+        if transaction_type.pricing_unit == "per_page":
+            try:
+                pages = int(form_data.get("number_of_pages", 0))
+            except (TypeError, ValueError):
+                pages = 0
+            if pages < 1:
+                errors.setdefault("form_data", {})["number_of_pages"] = (
+                    f"{transaction_type.name} is charged per page. Enter the number of pages."
+                )
+
+        # The one purpose on the form carrying its own fee and its own two
+        # fields.
+        if purpose == FormSubmission.Purpose.COMPLETION_OF_INC:
+            if not (form_data.get("semester_taken") or "").strip():
+                errors.setdefault("form_data", {})["semester_taken"] = (
+                    "Please state the semester and school year the INC was taken."
+                )
+            if not (form_data.get("subject_code") or "").strip():
+                errors.setdefault("form_data", {})["subject_code"] = (
+                    "Please state the subject code."
+                )
+
+        # Sub-selections belonging to one document type each.
+        if transaction_type.name == "CAV Certification":
+            agency = (form_data.get("cav_agency") or "").strip()
+            if not agency:
+                errors.setdefault("form_data", {})["cav_agency"] = (
+                    "Please select which agency the CAV is for."
+                )
+            elif agency not in CAV_AGENCIES:
+                errors.setdefault("form_data", {})["cav_agency"] = "Please select a valid agency."
+
+        if transaction_type.name == "Certification":
+            subtypes = form_data.get("certification_subtypes") or []
+            if not isinstance(subtypes, list) or not subtypes:
+                errors.setdefault("form_data", {})["certification_subtypes"] = (
+                    "Please select at least one certification type."
+                )
+            elif any(x not in CERTIFICATION_SUBTYPES for x in subtypes):
+                errors.setdefault("form_data", {})["certification_subtypes"] = (
+                    "One or more selected certification types are not recognised."
+                )
 
         # Alumni-only question; current students never see or answer it.
         graduation_date = None
