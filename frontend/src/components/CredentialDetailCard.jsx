@@ -22,6 +22,17 @@ export function formatFee(amount) {
 }
 
 /**
+ * "₱50.00 per copy" / "₱30.00 per page". A bare "₱30.00" read as the whole
+ * price, when the server multiplies it by copies (and pages, for per-page
+ * documents) - so a student budgeting from the guide would come up short.
+ */
+export function formatFeeWithUnit(t) {
+  const fee = formatFee(t.fee_amount);
+  if (!fee || Number(t.fee_amount) === 0) return 'No fee';
+  return `${fee} ${t.pricing_unit === 'per_page' ? 'per page' : 'per copy'}`;
+}
+
+/**
  * Full detail for one TRANSACTION_TYPES row: description, common purposes,
  * requirements, fee, processing time, special notes, and an optional
  * "Request this document" deep-link. Deliberately just the content — not a
@@ -32,7 +43,7 @@ export function formatFee(amount) {
 export default function CredentialDetailCard({ transactionType, showRequestButton = true }) {
   const t = transactionType;
   const requirements = splitRequirements(t.required_documents);
-  const fee = formatFee(t.fee_amount);
+  const fee = formatFeeWithUnit(t);
 
   return (
     <div>
@@ -43,7 +54,7 @@ export default function CredentialDetailCard({ transactionType, showRequestButto
 
       {t.common_purposes?.length > 0 && (
         <div className="mt-4">
-          <p className="ts-review-label">Common Purpose(s)</p>
+          <p className="ts-review-label">Often requested for</p>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {t.common_purposes.map((p) => (
               <span key={p} className="ts-tag">
@@ -56,7 +67,7 @@ export default function CredentialDetailCard({ transactionType, showRequestButto
 
       {requirements.length > 0 && (
         <div className="mt-5">
-          <p className="ts-review-label">Requirements</p>
+          <p className="ts-review-label">What you&rsquo;ll need to bring</p>
           <ul className="mt-2 space-y-1.5">
             {requirements.map((r, i) => (
               <li key={i} className="ts-ink flex items-start gap-2 text-sm leading-relaxed">
@@ -68,15 +79,18 @@ export default function CredentialDetailCard({ transactionType, showRequestButto
         </div>
       )}
 
-      <div className="mt-5 grid grid-cols-2 gap-4">
+      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <p className="ts-review-label">Fee</p>
           <p className="ts-stat-number mt-1 text-2xl font-semibold" style={FONT_SERIF}>
-            {fee || 'No fee'}
+            {fee}
           </p>
+          {fee !== 'No fee' && (
+            <p className="ts-soft mt-0.5 text-xs">You pay at the Cashier once the Registrar approves your request.</p>
+          )}
         </div>
         <div>
-          <p className="ts-review-label">Standard Processing Time</p>
+          <p className="ts-review-label">Usually takes</p>
           <p className="ts-review-value mt-1">{t.processing_time || '—'}</p>
         </div>
       </div>
@@ -85,9 +99,9 @@ export default function CredentialDetailCard({ transactionType, showRequestButto
         <div className="ts-warning-card mt-5 p-4">
           <div className="flex items-center gap-2">
             <WarningIcon />
-            <span className="text-sm font-semibold">Special Notes</span>
+            <span className="text-sm font-semibold">Good to know</span>
           </div>
-          <p className="mt-2 text-xs leading-relaxed">{t.special_notes}</p>
+          <p className="mt-2 text-sm leading-relaxed">{t.special_notes}</p>
         </div>
       )}
 

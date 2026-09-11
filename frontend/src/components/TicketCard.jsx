@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { DownloadIcon, FONT_SERIF } from './trailsyncUI.jsx';
-import { LIFECYCLE, STATUS, STEP_LABEL } from '../lib/requestStatus.js';
+import { DownloadIcon, FONT_SERIF, HelpTip } from './trailsyncUI.jsx';
+import { LIFECYCLE, STATUS, STEP_LABEL, studentStatusLabel } from '../lib/requestStatus.js';
 import { authFetch } from '../lib/auth.js';
 
 const PESO = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
@@ -18,6 +18,13 @@ function formatAmount(value) {
 const STEP_ORDER = LIFECYCLE;
 const STEP_LABELS = STEP_LABEL;
 
+/** "15:00" -> "3:00 PM". The API sends 24-hour clock times; most people read 12. */
+function formatClock(hhmm) {
+  const [h, m] = String(hhmm).split(':').map(Number);
+  if (Number.isNaN(h)) return hhmm;
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m || 0).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+
 export function formatShortDate(iso) {
   try {
     return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -25,6 +32,18 @@ export function formatShortDate(iso) {
     return iso;
   }
 }
+
+// What each stage means for the student, in one short line. The dots alone
+// told them nothing: their labels were hover-only tooltips, and phones have
+// no hover.
+const NEXT_STEP = {
+  [STATUS.SUBMITTED]: "The Registrar's office is checking it.",
+  [STATUS.VERIFIED]: "Waiting for the Registrar's approval.",
+  [STATUS.APPROVED]: 'Download your form, then pay at the Cashier.',
+  [STATUS.PROCESSING]: 'Payment received. Your document is being prepared.',
+  [STATUS.READY]: 'Ready! Pick it up at Window 6.',
+  [STATUS.RELEASED]: 'Picked up. All done.',
+};
 
 function StepProgress({ status }) {
   const currentIndex = STEP_ORDER.indexOf(status);
@@ -125,14 +144,22 @@ export default function TicketCard({ request, expanded, onToggle }) {
             <div className="mt-3 flex items-center gap-2">
               <span className="ts-ticket-rejected-dot" aria-hidden="true" />
               <span className="text-xs font-medium" style={{ color: '#B91C1C' }}>
-                Rejected
+                Not approved
               </span>
               {request.verification_remarks && (
                 <span className="ts-soft text-xs">— {request.verification_remarks}</span>
               )}
             </div>
           ) : (
-            <StepProgress status={request.request_status} />
+            <>
+              <StepProgress status={request.request_status} />
+              <p className="mt-2 text-xs">
+                <span className="ts-ink font-semibold">{studentStatusLabel(request.request_status)}</span>
+                {NEXT_STEP[request.request_status] && (
+                  <span className="ts-soft"> &middot; {NEXT_STEP[request.request_status]}</span>
+                )}
+              </p>
+            </>
           )}
         </div>
       </button>
@@ -141,66 +168,94 @@ export default function TicketCard({ request, expanded, onToggle }) {
         <div className="ts-ticket-detail w-full">
           {request.request_status === STATUS.READY && (
             <div className="ts-banner ts-banner-pending mb-3 px-3.5 py-2.5 text-sm">
-              {request.release_schedule ? (
+              {request.release_schedule?.release_date ? (
                 <>
-                  <span className="font-semibold">Ready for release:</span>{' '}
-                  {formatShortDate(request.release_schedule.slot_date)} · {request.release_schedule.start_time}–
-                  {request.release_schedule.end_time}
+                  <span className="font-semibold">Ready to pick up:</span>{' '}
+                  {formatShortDate(request.release_schedule.release_date)}
+                  {request.release_schedule.release_time_start &&
+                    ` at ${formatClock(request.release_schedule.release_time_start)}`}
+                  , at Window 6. Bring your claim stub and a valid ID.
                 </>
               ) : (
-                'Your document is ready. Window 6 will confirm your release date and time soon.'
+                'Your document is ready! Window 6 releases documents from 3:00 to 5:00 PM. Bring your claim stub and a valid ID.'
               )}
+            </div>
+          )}
+
+          {isRejected && (
+            <div className="ts-banner ts-banner-error mb-3 px-3.5 py-2.5 text-sm">
+              This request wasn&rsquo;t approved
+              {request.verification_remarks ? <> &mdash; the Registrar&rsquo;s note is below</> : ''}. You can fix
+              what&rsquo;s needed and{' '}
+              <a href="/request-form" className="font-semibold underline">
+                send a new request
+              </a>
+              .
+            </div>
+          )}
+
+          {/* Mirrors the server's own flag, set for alumni who graduated
+              before 2018. Explains the wait up front instead of letting it
+              read as the request being stuck. */}
+          {request.requires_archive_retrieval && !isRejected && request.request_status !== STATUS.RELEASED && (
+            <div className="ts-info-note mb-3 flex items-start px-3.5 py-2.5 text-sm">
+              <span>Your records are in the university archive, so this may take a little longer than usual.</span>
+              <HelpTip label="Why does this take longer?">
+                Records from before 2018 are stored separately and have to be retrieved by hand before the Registrar
+                can prepare your document.
+              </HelpTip>
             </div>
           )}
 
           <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
             <div>
-              <p className="ts-review-label">Transaction Type</p>
+              <p className="ts-review-label">Document</p>
               <p className="ts-review-value">{request.transaction_type}</p>
             </div>
             <div>
-              <p className="ts-review-label">Purpose</p>
+              <p className="ts-review-label">What it&rsquo;s for</p>
               <p className="ts-review-value">
                 {request.purpose === 'Others' ? request.purpose_other || 'Others' : request.purpose || '—'}
               </p>
             </div>
             <div>
-              <p className="ts-review-label">Number of Copies</p>
+              <p className="ts-review-label">Copies</p>
               <p className="ts-review-value">{request.number_of_copies ?? '—'}</p>
             </div>
             <div>
-              <p className="ts-review-label">Semester / Year</p>
+              <p className="ts-review-label">Latest semester</p>
               <p className="ts-review-value">{request.semester || '—'}</p>
             </div>
             {amountDue && (
               <div>
-                <p className="ts-review-label">Amount Due</p>
+                <p className="ts-review-label">Amount to pay</p>
                 <p className="ts-review-value">{amountDue}</p>
+                <p className="ts-soft text-xs">Paid at the Cashier</p>
               </div>
             )}
             {request.graduation_date && (
               <div>
-                <p className="ts-review-label">Graduation Date</p>
-                <p className="ts-review-value">{request.graduation_date}</p>
+                <p className="ts-review-label">Graduated</p>
+                <p className="ts-review-value">{formatShortDate(request.graduation_date)}</p>
               </div>
             )}
             {request.additional_notes && (
               <div className="sm:col-span-2">
-                <p className="ts-review-label">Additional Notes</p>
+                <p className="ts-review-label">Your notes</p>
                 <p className="ts-review-value font-normal">{request.additional_notes}</p>
               </div>
             )}
             {request.proxy && (
               <div className="sm:col-span-2">
-                <p className="ts-review-label">Claimant Proxy Assignment</p>
+                <p className="ts-review-label">Picked up by</p>
                 <p className="ts-review-value">
                   {request.proxy.proxy_full_name} ({request.proxy.relationship}) — {request.proxy.contact_number}
                 </p>
               </div>
             )}
-            {!isRejected && request.verification_remarks && (
+            {request.verification_remarks && (
               <div className="sm:col-span-2">
-                <p className="ts-review-label">Staff Remarks</p>
+                <p className="ts-review-label">Note from the Registrar</p>
                 <p className="ts-review-value font-normal">{request.verification_remarks}</p>
               </div>
             )}
@@ -221,7 +276,9 @@ export default function TicketCard({ request, expanded, onToggle }) {
                 className="ts-btn-primary inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 text-sm font-medium"
               >
                 <DownloadIcon />
-                {docState === 'receipt' ? 'Preparing…' : 'Download Receipt'}
+                {/* It's the official request form (FM-USTP-RGTR-09) the student
+                    prints and brings to the Cashier, not a proof of payment. */}
+                {docState === 'receipt' ? 'Preparing…' : 'Download form'}
               </button>
             </div>
           )}
@@ -240,7 +297,7 @@ export default function TicketCard({ request, expanded, onToggle }) {
                 className="ts-btn-primary inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 text-sm font-medium"
               >
                 <DownloadIcon />
-                {docState === 'claim-stub' ? 'Preparing…' : 'Download Claim Stub'}
+                {docState === 'claim-stub' ? 'Preparing…' : 'Download claim stub'}
               </button>
             </div>
           )}

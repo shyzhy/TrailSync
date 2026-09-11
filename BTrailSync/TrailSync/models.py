@@ -129,6 +129,12 @@ class UserProfile(models.Model):
     # ReleaseSchedule.claimant_signature and SubmissionAttachment.file - the
     # field manages the path itself. Written only through
     # PATCH /api/me/avatar/, which validates and re-encodes the upload.
+    # When the student finished or skipped the first-time walkthrough. NULL
+    # means they have never been shown it, so the dashboard offers it once.
+    # Stored on the account rather than in the browser so a student is not
+    # walked through it again on every new phone or laptop they sign in from.
+    tour_completed_at = models.DateTimeField(null=True, blank=True)
+
     profile_picture = models.ImageField(
         upload_to=profile_picture_upload_to,
         max_length=255,

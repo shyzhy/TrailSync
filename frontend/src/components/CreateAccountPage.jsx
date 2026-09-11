@@ -9,6 +9,7 @@ import {
   GlassScene,
   Spinner,
 } from './trailsyncUI.jsx';
+import { friendlyMessage, NETWORK_ERROR } from '../lib/friendlyErrors.js';
 
 // Placeholder program list — swap for the real USTP–CDO offerings.
 const COURSES = [
@@ -52,7 +53,7 @@ const SERVER_FIELD_MAP = {
 };
 
 function mapServerErrors(data) {
-  const fallback = { general: 'Could not create your account. Please try again.' };
+  const fallback = { general: "We couldn't create your account just now. Please try again in a moment." };
   if (!data || typeof data !== 'object') return fallback;
 
   const mapped = {};
@@ -60,9 +61,9 @@ function mapServerErrors(data) {
 
   Object.entries(data).forEach(([key, value]) => {
     const message = Array.isArray(value)
-      ? value.filter(Boolean).join(' ')
+      ? value.filter(Boolean).map(friendlyMessage).join(' ')
       : typeof value === 'string'
-        ? value
+        ? friendlyMessage(value)
         : null;
     if (!message) return;
 
@@ -141,31 +142,31 @@ export default function CreateAccountPage() {
   const validate = () => {
     const next = {};
 
-    if (!firstName.trim()) next.firstName = 'First name is required.';
-    if (!lastName.trim()) next.lastName = 'Last name is required.';
-    if (!schoolId.trim()) next.schoolId = 'School ID Number is required.';
-    if (!course) next.course = 'Please select your course.';
-    if (userCategory === 'Student' && !yearLevel) next.yearLevel = 'Please select your year level.';
+    if (!firstName.trim()) next.firstName = 'Please enter your first name.';
+    if (!lastName.trim()) next.lastName = 'Please enter your last name.';
+    if (!schoolId.trim()) next.schoolId = 'Please enter your School ID number.';
+    if (!course) next.course = 'Please choose your course.';
+    if (userCategory === 'Student' && !yearLevel) next.yearLevel = 'Please choose your year level.';
 
     if (!email.trim()) {
-      next.email = 'Email address is required.';
+      next.email = 'Please enter your USTP email.';
     } else if (!EMAIL_RE.test(email.trim()) || !USTP_DOMAIN_RE.test(email.trim())) {
-      next.email = 'Please enter a valid USTP email (ending in @ustp.edu.ph).';
+      next.email = 'Please use your USTP email — the one ending in @ustp.edu.ph.';
     }
 
     if (!password) {
-      next.password = 'Password is required.';
+      next.password = 'Please choose a password.';
     } else if (password.length < 8) {
-      next.password = 'Password must be at least 8 characters.';
+      next.password = 'Please use at least 8 characters.';
     }
 
     if (!confirmPassword) {
-      next.confirmPassword = 'Please confirm your password.';
+      next.confirmPassword = 'Please type your password again.';
     } else if (password !== confirmPassword) {
-      next.confirmPassword = "Passwords don't match.";
+      next.confirmPassword = "This doesn't match the password above.";
     }
 
-    if (!agreed) next.agreed = 'You must accept the Terms & Conditions to continue.';
+    if (!agreed) next.agreed = 'Please tick the box to agree before creating your account.';
 
     return next;
   };
@@ -208,8 +209,8 @@ export default function CreateAccountPage() {
       }
 
       setSuccess(true);
-    } catch (networkError) {
-      setErrors({ general: 'Unable to reach the server. Please try again.' });
+    } catch {
+      setErrors({ general: NETWORK_ERROR });
     } finally {
       setLoading(false);
     }
@@ -226,14 +227,11 @@ export default function CreateAccountPage() {
           <h2 className="ts-ink mt-5 text-2xl font-semibold" style={FONT_SERIF}>
             Account created!
           </h2>
-          <p className="ts-soft mt-3 text-sm leading-relaxed">
-            You can now log in with your USTP email and password. Your student portal is ready —
-            no approval needed.
+          {/* Was followed by a green banner repeating "Account created!" word for word. */}
+          <p role="status" className="ts-soft mt-3 text-base leading-relaxed">
+            You can log in now with your USTP email or School ID number and the password you just chose. No
+            approval needed.
           </p>
-
-          <div role="status" className="ts-banner ts-banner-success mt-6 px-3.5 py-2.5 text-sm">
-            Account created! You can now log in.
-          </div>
 
           <a
             href={LOGIN_PATH}
@@ -255,13 +253,14 @@ export default function CreateAccountPage() {
     <GlassScene maxWidth="440px">
       <h1 className="ts-ink text-4xl font-semibold tracking-tight" style={FONT_SERIF}>TrailSync</h1>
       <div className="ts-rule mt-3" />
-      <p className="ts-soft mt-3 text-sm">Create your student or alumni account</p>
+      <p className="ts-soft mt-3 text-base">Create your account to request documents from the Registrar.</p>
+      <p className="ts-soft mt-6 text-sm font-medium">Are you still studying at USTP, or have you graduated?</p>
 
       {/* User category — decides Year Level visibility, and the role assigned server-side */}
       <div
         role="radiogroup"
         aria-label="I am a"
-        className="ts-toggle-track relative mt-8 grid grid-cols-2"
+        className="ts-toggle-track relative mt-2 grid grid-cols-2"
       >
         <div
           className="ts-toggle-thumb"
@@ -291,7 +290,7 @@ export default function CreateAccountPage() {
       <form onSubmit={handleSubmit} noValidate className="mt-7 space-y-5">
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <div>
-            <label htmlFor="firstName" className="ts-ink mb-1.5 block text-sm font-medium">First Name</label>
+            <label htmlFor="firstName" className="ts-ink mb-1.5 block text-sm font-medium">First name</label>
             <input
               id="firstName"
               name="firstName"
@@ -310,7 +309,7 @@ export default function CreateAccountPage() {
           </div>
 
           <div>
-            <label htmlFor="lastName" className="ts-ink mb-1.5 block text-sm font-medium">Last Name</label>
+            <label htmlFor="lastName" className="ts-ink mb-1.5 block text-sm font-medium">Last name</label>
             <input
               id="lastName"
               name="lastName"
@@ -331,7 +330,7 @@ export default function CreateAccountPage() {
 
         <div>
           <label htmlFor="middleName" className="ts-ink mb-1.5 block text-sm font-medium">
-            Middle Name <span className="ts-soft font-normal">(optional)</span>
+            Middle name <span className="ts-soft font-normal">(optional)</span>
           </label>
           <input
             id="middleName"
@@ -343,10 +342,13 @@ export default function CreateAccountPage() {
             placeholder="Santos"
             className="ts-input w-full px-3.5 py-2.5 text-sm"
           />
+          <p className="ts-soft mt-1.5 text-xs">
+            Type your name exactly as it is on your school records. It&rsquo;s printed on the forms you request.
+          </p>
         </div>
 
         <div>
-          <label htmlFor="schoolId" className="ts-ink mb-1.5 block text-sm font-medium">School ID Number</label>
+          <label htmlFor="schoolId" className="ts-ink mb-1.5 block text-sm font-medium">School ID number</label>
           <input
             id="schoolId"
             name="schoolId"
@@ -376,7 +378,7 @@ export default function CreateAccountPage() {
                 aria-describedby={errors.course ? 'course-error' : undefined}
                 className={`ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm ${errors.course ? 'ts-input-error' : ''}`}
               >
-                <option value="">Select course</option>
+                <option value="">Choose your course</option>
                 {COURSES.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
@@ -393,7 +395,7 @@ export default function CreateAccountPage() {
           {/* Year level is a student-only field. */}
           {userCategory === 'Student' && (
             <div>
-              <label htmlFor="yearLevel" className="ts-ink mb-1.5 block text-sm font-medium">Year Level</label>
+              <label htmlFor="yearLevel" className="ts-ink mb-1.5 block text-sm font-medium">Year level</label>
               <div className="relative">
                 <select
                   id="yearLevel"
@@ -404,7 +406,7 @@ export default function CreateAccountPage() {
                   aria-describedby={errors.yearLevel ? 'yearLevel-error' : undefined}
                   className={`ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm ${errors.yearLevel ? 'ts-input-error' : ''}`}
                 >
-                  <option value="">Select year</option>
+                  <option value="">Choose your year</option>
                   {YEAR_LEVELS.map((y) => (
                     <option key={y} value={y}>{y}</option>
                   ))}
@@ -421,7 +423,7 @@ export default function CreateAccountPage() {
         </div>
 
         <div>
-          <label htmlFor="email" className="ts-ink mb-1.5 block text-sm font-medium">Email Address</label>
+          <label htmlFor="email" className="ts-ink mb-1.5 block text-sm font-medium">USTP email</label>
           <input
             id="email"
             name="email"
@@ -476,7 +478,7 @@ export default function CreateAccountPage() {
         </div>
 
         <div>
-          <label htmlFor="confirmPassword" className="ts-ink mb-1.5 block text-sm font-medium">Confirm Password</label>
+          <label htmlFor="confirmPassword" className="ts-ink mb-1.5 block text-sm font-medium">Type your password again</label>
           <div className="relative">
             <input
               id="confirmPassword"
@@ -549,7 +551,7 @@ export default function CreateAccountPage() {
           className="ts-btn-primary flex w-full items-center justify-center gap-2 py-2.5 text-sm font-medium"
         >
           {loading && <Spinner />}
-          {loading ? 'Creating account…' : 'Create Account'}
+          {loading ? 'Creating your account…' : 'Create account'}
         </button>
       </form>
 

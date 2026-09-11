@@ -42,6 +42,7 @@ from .serializers import (
     FormRequestResultSerializer,
     MarkReadySerializer,
     MeSerializer,
+    NotificationSerializer,
     RecentFormRequestSerializer,
     RegisterSerializer,
     RegistrarQueueRowSerializer,
@@ -270,6 +271,28 @@ class MeAvatarView(APIView):
             profile.profile_picture.delete(save=False)
         profile.profile_picture = None
         profile.save(update_fields=["profile_picture", "updated_at"])
+        return Response(MeSerializer(request.user).data)
+
+
+class MeTourView(APIView):
+    """POST /api/me/tour/ - the student finished or skipped the walkthrough.
+
+    Idempotent: replaying the tour from the Help button later does not move
+    the original timestamp, which records when they first saw it.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        profile = getattr(request.user, "user_profile", None)
+        if profile is None:
+            return Response(
+                {"detail": "The walkthrough is only for student accounts."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if profile.tour_completed_at is None:
+            profile.tour_completed_at = timezone.now()
+            profile.save(update_fields=["tour_completed_at", "updated_at"])
         return Response(MeSerializer(request.user).data)
 
 
@@ -1315,3 +1338,129 @@ class RegistrarReleaseView(APIView):
 
         form_request.refresh_from_db()
         return Response(RegistrarQueueRowSerializer(form_request).data)
+
+
+# ---------------------------------------------------------------------------
+# Student notifications
+# ---------------------------------------------------------------------------
+#
+# The lifecycle transitions have been writing Notification rows since they
+# were built; these are what finally let a student read them. Every query is
+# scoped to request.user, so there is no way to address someone else's inbox:
+# another user's id simply 404s, which also avoids confirming it exists.
+
+
+class NotificationPagination(FormRequestPagination):
+    page_size = 20
+
+
+class NotificationListView(generics.ListAPIView):
+    """GET /api/notifications/ - the signed-in user's inbox, newest first.
+
+    ?order=oldest flips it, for the full page's sort toggle.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = NotificationSerializer
+    pagination_class = NotificationPagination
+
+    def get_queryset(self):
+        order = "created_at" if self.request.query_params.get("order") == "oldest" else "-created_at"
+        return (
+            Notification.objects.filter(user=self.request.user)
+            .select_related("form_request")
+            .order_by(order, "-id")
+        )
+
+
+class NotificationUnreadCountView(APIView):
+    """GET /api/notifications/unread-count/ - the number on the bell.
+
+    Its own tiny endpoint because every student page asks for it on load;
+    fetching a page of full notifications just to count them would be waste.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        count = Notification.objects.filter(user=request.user, is_read=False).count()
+        return Response({"unread_count": count})
+
+
+class NotificationMarkReadView(APIView):
+    """POST /api/notifications/<id>/read/ - mark one notification read."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        notification = get_object_or_404(Notification, pk=pk, user=request.user)
+        if not notification.is_read:
+            notification.is_read = True
+            notification.read_at = timezone.now()
+            notification.save(update_fields=["is_read", "read_at"])
+        return Response(NotificationSerializer(notification).data)
+
+
+class NotificationMarkAllReadView(APIView):
+    """POST /api/notifications/mark-all-read/ - clear the bell."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        marked = Notification.objects.filter(user=request.user, is_read=False).update(
+            is_read=True, read_at=timezone.now()
+        )
+        return Response({"marked": marked, "unread_count": 0})
+
+
+# ---------------------------------------------------------------------------
+# Staff fraud alert (duplicate_flag)
+# ---------------------------------------------------------------------------
+#
+# The home for the flag on the registrar side, now that Notifications is a
+# student-only page. What SETS the flag is still undecided (see the chat
+# note): nothing in the codebase writes it yet. These endpoints make any
+# flagged request impossible to miss once something does.
+
+
+class RegistrarFlaggedRequestsView(APIView):
+    """GET /api/registrar/dashboard/flagged/ - requests carrying the fraud flag."""
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    def get(self, request):
+        flagged = (
+            FormRequest.objects.filter(duplicate_flag=True)
+            .select_related("user", "transaction_type")
+            .order_by("-updated_at")[:20]
+        )
+        return Response(
+            [
+                {
+                    "id": fr.id,
+                    "request_code": fr.request_code,
+                    "student_name": fr.user.get_full_name() or fr.user.email,
+                    "transaction_type": fr.transaction_type.name,
+                    "request_status": fr.request_status,
+                }
+                for fr in flagged
+            ]
+        )
+
+
+class RegistrarClearFlagView(APIView):
+    """POST /api/registrar/queue/<id>/clear-flag/ - staff reviewed it.
+
+    Clearing is deliberately a separate, explicit act rather than something
+    that happens as a side effect of opening the request: looking at a fraud
+    alert is not the same as having dealt with it.
+    """
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    def post(self, request, pk):
+        form_request = get_object_or_404(FormRequest, pk=pk)
+        if form_request.duplicate_flag:
+            form_request.duplicate_flag = False
+            form_request.save(update_fields=["duplicate_flag", "updated_at"])
+        return Response({"id": form_request.id, "duplicate_flag": False})

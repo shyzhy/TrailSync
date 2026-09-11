@@ -70,6 +70,12 @@ export default function MiniCalendar({ highlightDates = [] }) {
         })}
       </div>
 
+      {/* Without this, the dots are a puzzle to anyone who hasn't been told. */}
+      <p className="ts-soft mt-3 flex items-start gap-2 text-xs">
+        <span className="ts-cal-dot ts-cal-dot-active mt-1.5 shrink-0" aria-hidden="true" style={{ margin: '6px 0 0' }} />
+        A dot marks a day you&rsquo;re scheduled to pick up a document at Window 6.
+      </p>
+
       <div className="ts-hairline mt-4 h-px" />
       <p className="ts-ink mt-3 text-sm font-semibold" style={FONT_SERIF}>
         Today — {todayLabel}

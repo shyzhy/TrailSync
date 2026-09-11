@@ -8,6 +8,7 @@ import {
   greetingForNow,
   Avatar,
   InboxIcon,
+  WarningIcon,
 } from './trailsyncUI.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 import { STATUS } from '../lib/requestStatus.js';
@@ -67,6 +68,20 @@ export default function RegistrarDashboardPage() {
   const [summary, setSummary] = useState(null);
   const [recentSubmissions, setRecentSubmissions] = useState(null);
   const [releaseSlots, setReleaseSlots] = useState(null);
+  const [flagged, setFlagged] = useState([]);
+
+  // The fraud alert loads on its own, so a failure here can't take the rest
+  // of the dashboard down with it - and a failure the other way round can't
+  // hide a flag. Staff-only: the endpoint is IsApprovedRegistrarStaff, and
+  // duplicate_flag appears on no student-facing serializer.
+  const loadFlagged = useCallback(async () => {
+    try {
+      const res = await authFetch('/api/registrar/dashboard/flagged/');
+      if (res.ok) setFlagged(await res.json());
+    } catch {
+      // Left as-is; the next load tries again.
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setStatus('loading');
@@ -116,7 +131,8 @@ export default function RegistrarDashboardPage() {
       return;
     }
     load();
-  }, [load]);
+    loadFlagged();
+  }, [load, loadFlagged]);
 
   const handleLogout = () => {
     clearSession();
@@ -160,6 +176,35 @@ export default function RegistrarDashboardPage() {
             <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
               Retry
             </button>
+          </div>
+        )}
+
+        {flagged.length > 0 && (
+          <div role="alert" className="ts-warning-card mb-8 p-5">
+            <div className="flex items-center gap-2">
+              <WarningIcon />
+              <h2 className="text-base font-semibold">
+                {flagged.length === 1
+                  ? '1 request flagged as a possible duplicate'
+                  : `${flagged.length} requests flagged as possible duplicates`}
+              </h2>
+            </div>
+            <p className="mt-1.5 text-sm leading-relaxed">
+              These may reuse another request&rsquo;s tracking number. Check each one before taking any action on
+              it. The student isn&rsquo;t shown this flag.
+            </p>
+            <ul className="mt-3 space-y-2">
+              {flagged.map((f) => (
+                <li key={f.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm">
+                  <span className="min-w-0">
+                    <strong>{f.request_code}</strong> &middot; {f.student_name} &middot; {f.transaction_type}
+                  </span>
+                  <a href={`/registrar/queue/${f.id}`} className="ts-link shrink-0 font-semibold">
+                    Review
+                  </a>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

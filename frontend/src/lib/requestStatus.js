@@ -61,7 +61,8 @@ export const STUDENT_STATUS_LABEL = {
   [STATUS.PROCESSING]: 'Processing',
   [STATUS.READY]: 'Ready for Pickup',
   [STATUS.RELEASED]: 'Released',
-  [STATUS.REJECTED]: 'Rejected',
+  // Softer than "Rejected", and true: the student can fix it and try again.
+  [STATUS.REJECTED]: 'Not approved',
 };
 
 /** Compact labels for the progress line, where space is tight. */

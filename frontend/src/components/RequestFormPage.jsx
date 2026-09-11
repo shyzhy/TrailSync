@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  APP_CSS,
-  AppMobileHeader,
-  AppSidebar,
   BookIcon,
   CheckIcon,
   CheckSealIcon,
   ChevronIcon,
   DocumentIcon,
-  FONT_SANS,
   FONT_SERIF,
   GraduationCapIcon,
   GridTableIcon,
+  HelpTip,
   KeyIcon,
   PaperPlaneIcon,
   ShieldIcon,
@@ -19,12 +16,16 @@ import {
   UploadIcon,
   WarningIcon,
 } from './trailsyncUI.jsx';
+import StudentShell from './StudentShell.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { NETWORK_ERROR, friendlySummary } from '../lib/friendlyErrors.js';
 
 const LOGIN_PATH = '/';
 const DASHBOARD_PATH = '/portal';
 
-const STEP_LABELS = ['Select Service', 'Form Details', 'Proxy Assignment', 'Review & Submit'];
+// Plain words for each step. "Proxy Assignment" and "Select Service" were
+// the database's vocabulary, not the student's.
+const STEP_LABELS = ['Choose document', 'Your details', 'Who picks it up', 'Check & send'];
 // Part 3 of FM-USTP-RGTR-09, verbatim and in the form's own order.
 const PURPOSE_OPTIONS = [
   'For Evaluation',
@@ -42,23 +43,44 @@ const PURPOSE_OPTIONS = [
 // Sub-selections that belong to one document type each, from Part 2. They
 // are submission detail rather than separate documents, so they ride along
 // in form_data instead of being their own transaction types.
-const CAV_AGENCIES = ['DFA', 'CHED', 'DEP-ED', 'PNP', 'POEA', 'BFP', 'BJMP', 'Others'];
+//
+// `value` is what is stored and what the server validates against, so it stays
+// exactly as printed on the paper form. `label` is what a first-time requester
+// reads: an unexplained "BJMP" or "POEA" means nothing to most people.
+const CAV_AGENCIES = [
+  { value: 'DFA', label: 'Department of Foreign Affairs (DFA)', hint: 'Often needed to work or study abroad' },
+  { value: 'CHED', label: 'Commission on Higher Education (CHED)' },
+  { value: 'DEP-ED', label: 'Department of Education (DepEd)' },
+  { value: 'PNP', label: 'Philippine National Police (PNP)' },
+  {
+    value: 'POEA',
+    label: 'Philippine Overseas Employment Administration (POEA)',
+    hint: 'For jobs abroad — now part of the Department of Migrant Workers',
+  },
+  { value: 'BFP', label: 'Bureau of Fire Protection (BFP)' },
+  { value: 'BJMP', label: 'Bureau of Jail Management and Penology (BJMP)' },
+  { value: 'Others', label: 'Another agency' },
+];
 
+// Descriptions only where the meaning is certain. The four without one (CAR,
+// Endorsement, USTP Conversion, Authorization Letter) are printed on the form
+// with no explanation, and guessing at what an official certification says
+// would be worse than showing the name alone - see the chat note.
 const CERTIFICATION_SUBTYPES = [
-  'CAR',
-  'GPA',
-  'Endorsement',
-  'Officially enrolled',
-  'Subjects enrolled',
-  'USTP Conversion',
-  'English Medium of Instruction',
-  'Authorization Letter',
-  'Letter of No Objection',
-  'Graduated',
-  'Earned units',
-  'Grading System',
-  'Subjects w/ grades',
-  'Others',
+  { value: 'CAR', hint: null },
+  { value: 'GPA', hint: 'Your grade point average' },
+  { value: 'Endorsement', hint: null },
+  { value: 'Officially enrolled', hint: "That you're currently enrolled" },
+  { value: 'Subjects enrolled', hint: "The subjects you're taking this term" },
+  { value: 'USTP Conversion', hint: null },
+  { value: 'English Medium of Instruction', hint: 'That your classes were taught in English — often asked for abroad' },
+  { value: 'Authorization Letter', hint: null },
+  { value: 'Letter of No Objection', hint: "That the university doesn't object to you studying elsewhere" },
+  { value: 'Graduated', hint: 'That you graduated, and when' },
+  { value: 'Earned units', hint: "The units you've completed so far" },
+  { value: 'Grading System', hint: "How USTP's grading scale works" },
+  { value: 'Subjects w/ grades', hint: 'Your subjects, together with your grades' },
+  { value: 'Others', hint: 'Something not listed — describe it in Additional notes' },
 ];
 const RELATIONSHIP_OPTIONS = ['Parent', 'Sibling', 'Spouse', 'Friend', 'Other'];
 
@@ -85,7 +107,9 @@ function descriptionForTransactionType(t) {
     const trimmed = t.required_documents.trim();
     return trimmed.length > 90 ? `${trimmed.slice(0, 87)}…` : trimmed;
   }
-  return 'Registrar document request.';
+  // Only reached for a document an admin adds without a description; the
+  // catalogue ships with one for every type.
+  return 'Issued by the Office of the Registrar.';
 }
 
 function formatFee(amount) {
@@ -114,20 +138,26 @@ function getSemesterOptions() {
   return options;
 }
 
-// Backend replies with nested {"form_data": {"field": "message"}, "proxy": {...}}
-// (see CreateFormRequestSerializer) — this is a safety-net path (the wizard's
-// own per-step gating should prevent reaching submit with invalid data), so
-// flattening into one general banner is an acceptable trade-off rather than
-// re-implementing per-field mapping across three different form sections.
-function flattenServerErrors(data) {
-  if (!data || typeof data !== 'object') return 'Could not submit your request. Please try again.';
-  const messages = [];
-  Object.values(data).forEach((v) => {
-    if (typeof v === 'string') messages.push(v);
-    else if (Array.isArray(v)) messages.push(...v.filter((x) => typeof x === 'string'));
-    else if (v && typeof v === 'object') messages.push(...Object.values(v).filter((x) => typeof x === 'string'));
-  });
-  return messages.length ? messages.join(' ') : 'Could not submit your request. Please try again.';
+/** "a", "a and b", "a, b and c" - for a sentence, not a bullet list. */
+function joinList(items) {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+/**
+ * Says why the Next button is greyed out. Shown only while something is
+ * missing, and politely - it's guidance, not an error, since the student
+ * hasn't done anything wrong by not having filled it in yet.
+ */
+function MissingHint({ items }) {
+  if (!items.length) return null;
+  const [first, ...rest] = items;
+  const text = items.length === 1 && first.startsWith('choose') ? `${first[0].toUpperCase()}${first.slice(1)} to continue.` : `To continue, add ${joinList([first, ...rest])}.`;
+  return (
+    <p className="ts-soft text-right text-sm" aria-live="polite">
+      {text}
+    </p>
+  );
 }
 
 function Stepper({ current }) {
@@ -138,7 +168,9 @@ function Stepper({ current }) {
         const state = num < current ? 'done' : num === current ? 'current' : 'upcoming';
         return (
           <div key={label} className={`flex items-center ${num < STEP_LABELS.length ? 'flex-1' : ''}`}>
-            <div className="flex flex-col items-center" style={{ width: '84px' }}>
+            {/* Four fixed 84px columns plus connectors came to 384px, wider
+                than a 375px phone once the page gutters were counted. */}
+            <div className="flex w-[68px] flex-col items-center sm:w-[84px]">
               <span className={`ts-step-badge ts-step-badge-${state}`}>
                 {state === 'done' ? <CheckIcon /> : num}
               </span>
@@ -182,7 +214,9 @@ export default function RequestFormPage() {
 
   // Step 1
   const [transactionTypeId, setTransactionTypeId] = useState('');
-  const [guideOpen, setGuideOpen] = useState(false);
+  // Open by default: "what you'll need" is exactly what a first-timer is
+  // missing, and hiding it behind a collapse means they never see it.
+  const [guideOpen, setGuideOpen] = useState(true);
 
   // Step 2
   const [purpose, setPurpose] = useState('');
@@ -274,22 +308,38 @@ export default function RequestFormPage() {
   const needsCertificationSubtypes = selectedType?.name === 'Certification';
   const isIncCompletion = purpose === 'For Completion of INC';
 
-  const step1Valid = Boolean(transactionTypeId);
-  const step2Valid =
-    Boolean(purpose) &&
-    (purpose !== 'Others' || purposeOther.trim().length > 0) &&
-    Number(numberOfCopies) >= 1 &&
-    Boolean(semester) &&
-    (!isAlumni || Boolean(graduationDate)) &&
-    (purpose !== 'For Board Exam' || Boolean(boardExamPhoto)) &&
-    // Mirrors the server's rules so the Next button cannot walk a student
-    // into a 400 they can only discover after submitting.
-    (!isPerPage || Number(numberOfPages) >= 1) &&
-    (!needsCavAgency || Boolean(cavAgency)) &&
-    (!needsCertificationSubtypes || certificationSubtypes.length > 0) &&
-    (!isIncCompletion || (semesterTaken.trim().length > 0 && subjectCode.trim().length > 0));
-  const step3Valid =
-    !proxyEnabled || (proxyFullName.trim().length > 0 && Boolean(proxyRelationship) && proxyContactNumber.trim().length > 0);
+  // What each step still needs, in words a student can act on. The Next
+  // buttons are disabled from these SAME lists, so the reason shown under a
+  // greyed-out button can never disagree with why it's greyed out - a
+  // disabled button with no explanation is where first-time users get stuck.
+  // Step 2 mirrors the server's rules, so Next can't walk a student into an
+  // error they'd only discover after submitting.
+  const step1Missing = transactionTypeId ? [] : ['choose a document'];
+  const step2Missing = [
+    !purpose && 'what you need it for',
+    purpose === 'Others' && !purposeOther.trim() && 'your reason',
+    // Listed in the order the fields appear on screen.
+    needsCavAgency && !cavAgency && 'the agency',
+    needsCertificationSubtypes && certificationSubtypes.length === 0 && 'what the certification should say',
+    !(Number(numberOfCopies) >= 1) && 'how many copies',
+    !semester && 'the semester',
+    isAlumni && !graduationDate && 'your graduation date',
+    purpose === 'For Board Exam' && !boardExamPhoto && 'your 2x2 photo',
+    isPerPage && !(Number(numberOfPages) >= 1) && 'the number of pages',
+    isIncCompletion && !semesterTaken.trim() && 'the semester you took the subject',
+    isIncCompletion && !subjectCode.trim() && 'the subject code',
+  ].filter(Boolean);
+  const step3Missing = proxyEnabled
+    ? [
+        !proxyFullName.trim() && "the person's full name",
+        !proxyRelationship && 'how they are related to you',
+        !proxyContactNumber.trim() && 'their contact number',
+      ].filter(Boolean)
+    : [];
+
+  const step1Valid = step1Missing.length === 0;
+  const step2Valid = step2Missing.length === 0;
+  const step3Valid = step3Missing.length === 0;
   const step4Valid = confirmAccurate;
 
   const goToStep = (n) => {
@@ -344,12 +394,12 @@ export default function RequestFormPage() {
       }
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setGeneralError(flattenServerErrors(data));
+        setGeneralError(friendlySummary(data, "We couldn't send your request. Please check your answers and try again."));
         return;
       }
       setResult(data);
     } catch {
-      setGeneralError('Unable to reach the server. Please try again.');
+      setGeneralError(NETWORK_ERROR);
     } finally {
       setSubmitting(false);
     }
@@ -358,50 +408,61 @@ export default function RequestFormPage() {
   // ---- Success screen ----
   if (result) {
     return (
-      <div className="ts-app-shell lg:flex" style={FONT_SANS}>
-        <style>{APP_CSS}</style>
-        <AppSidebar active="request" onLogout={handleLogout} me={me} />
-        <AppMobileHeader onLogout={handleLogout} />
-
-        <main className="mx-auto w-full max-w-2xl flex-1 px-6 py-8 sm:py-10 lg:px-10">
+      <StudentShell active="request" me={me} onLogout={handleLogout} onMeChange={setMe}>
+      <main className="mx-auto w-full max-w-2xl flex-1 px-6 pb-8 pt-4 sm:pb-10 sm:pt-6 lg:pt-3 lg:px-10">
           <div className="ts-card p-8 text-center sm:p-10">
             <div className="flex justify-center">
               <CheckSealIcon />
             </div>
             <h1 className="ts-ink mt-5 text-2xl font-semibold" style={FONT_SERIF}>
-              Your request {result.request_code} has been submitted!
+              Your request has been sent!
             </h1>
-            <p className="ts-soft mt-3 text-sm">
-              {result.transaction_type} · Status: {result.request_status}
+            <p className="ts-soft mt-3 text-base">
+              {result.transaction_type} &middot; Tracking number{' '}
+              <strong className="ts-ink">{result.request_code}</strong>
             </p>
-            <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
+
+            {/* Previously "Status: Submitted" - the raw database value, and no
+                hint of what comes next. */}
+            <div className="ts-well mx-auto mt-6 max-w-md px-5 py-4 text-left">
+              <p className="ts-ink text-sm font-semibold">What happens next</p>
+              <ol className="ts-soft mt-2 list-decimal space-y-1.5 pl-5 text-sm">
+                <li>The Registrar&rsquo;s office checks your request.</li>
+                <li>Once it&rsquo;s approved, you&rsquo;ll print your form and pay at the Cashier.</li>
+                <li>We&rsquo;ll tell you when your document is ready to pick up at Window 6.</li>
+              </ol>
+              <p className="ts-soft mt-3 text-sm">
+                Watch the bell at the top of the page &mdash; we&rsquo;ll notify you at every step.
+              </p>
+            </div>
+
+            <div className="mt-7 flex flex-col-reverse justify-center gap-3 sm:flex-row">
+              <a href={DASHBOARD_PATH} className="ts-btn-glass flex items-center justify-center px-6 py-2.5 text-sm font-medium">
+                Back to home
+              </a>
               <a
-                href={DASHBOARD_PATH}
+                href={`/track-requests?search=${encodeURIComponent(result.request_code)}`}
                 className="ts-btn-primary flex items-center justify-center px-6 py-2.5 text-sm font-medium"
               >
-                Back to dashboard
+                See my request
               </a>
             </div>
           </div>
         </main>
-      </div>
+      </StudentShell>
     );
   }
 
   return (
-    <div className="ts-app-shell lg:flex" style={FONT_SANS}>
-      <style>{APP_CSS}</style>
-      <AppSidebar active="request" onLogout={handleLogout} me={me} />
-      <AppMobileHeader onLogout={handleLogout} />
-
-      <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-8 sm:py-10 lg:px-10">
+    <StudentShell active="request" me={me} onLogout={handleLogout} onMeChange={setMe}>
+      <main className="mx-auto w-full max-w-3xl flex-1 px-6 pb-8 pt-4 sm:pb-10 sm:pt-6 lg:pt-3 lg:px-10">
         <Stepper current={step} />
 
         {status === 'error' && (
           <div className="ts-banner ts-banner-error mb-6 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>Something went wrong loading this form.</span>
+            <span>We couldn&rsquo;t load the form. Please check your internet connection.</span>
             <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
-              Retry
+              Try again
             </button>
           </div>
         )}
@@ -425,10 +486,14 @@ export default function RequestFormPage() {
             {step === 1 && (
               <div>
                 <h1 className="ts-ink text-2xl font-semibold" style={FONT_SERIF}>
-                  Choose a Transaction Type
+                  Which document do you need?
                 </h1>
-                <p className="ts-soft mt-1.5 text-sm">
-                  Select the specific document registrar service you wish to request for collection from Window 6.
+                <p className="ts-soft mt-1.5 text-base">
+                  Pick one. You&rsquo;ll collect it at Window 6 once it&rsquo;s ready. Not sure which?{' '}
+                  <a href="/credential-guide" className="ts-link font-medium">
+                    See what each one is for
+                  </a>
+                  .
                 </p>
 
                 <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -458,15 +523,16 @@ export default function RequestFormPage() {
                   })}
                 </div>
 
-                <div className="mt-8 flex justify-end">
+                <div className="mt-8 flex flex-col items-end gap-2">
                   <button
                     type="button"
                     disabled={!step1Valid}
                     onClick={() => goToStep(2)}
                     className="ts-btn-primary px-6 py-2.5 text-sm font-medium"
                   >
-                    Next Step
+                    Next
                   </button>
+                  <MissingHint items={step1Missing} />
                 </div>
               </div>
             )}
@@ -475,15 +541,15 @@ export default function RequestFormPage() {
             {step === 2 && (
               <div>
                 <h1 className="ts-ink text-2xl font-semibold" style={FONT_SERIF}>
-                  Document Request Details
+                  A few details about your {selectedType?.name || 'document'}
                 </h1>
-                <p className="ts-soft mt-1.5 text-sm">
-                  Provide details concerning your {selectedType?.name || 'document'} request.
+                <p className="ts-soft mt-1.5 text-base">
+                  Answer the questions below. Anything marked with <span className="ts-error-text">*</span> is required.
                 </p>
 
                 {requestingAsLine && (
-                  <div className="ts-info-note mt-4 px-3.5 py-2.5 text-xs">
-                    <span className="font-semibold">Requesting as:</span> {requestingAsLine}
+                  <div className="ts-info-note mt-4 px-3.5 py-2.5 text-sm">
+                    <span className="font-semibold">You&rsquo;re requesting as:</span> {requestingAsLine}
                   </div>
                 )}
 
@@ -510,7 +576,12 @@ export default function RequestFormPage() {
                           <p className="ts-soft mt-2">
                             {selectedType.processing_time && <>Processing time: {selectedType.processing_time}</>}
                             {selectedType.processing_time && selectedType.fee_amount ? ' · ' : ''}
-                            {formatFee(selectedType.fee_amount) && <>Fee (payable at the Cashier): {formatFee(selectedType.fee_amount)}</>}
+                            {formatFee(selectedType.fee_amount) && (
+                              <>
+                                Fee (paid at the Cashier): {formatFee(selectedType.fee_amount)}{' '}
+                                {selectedType.pricing_unit === 'per_page' ? 'per page' : 'per copy'}
+                              </>
+                            )}
                           </p>
                         )}
                       </div>
@@ -520,10 +591,16 @@ export default function RequestFormPage() {
 
                 <div className="ts-card mt-4 space-y-5 p-6 sm:p-8">
                   <div>
-                    <label htmlFor="purpose" className="ts-ink mb-1.5 block text-sm font-medium">
-                      Purpose of Request
-                      <RequiredMark />
-                    </label>
+                    <div className="mb-1.5 flex items-center">
+                      <label htmlFor="purpose" className="ts-ink text-sm font-medium">
+                        What do you need it for?
+                        <RequiredMark />
+                      </label>
+                      <HelpTip label="Why are we asking?">
+                        The reason is printed on your official request form. A few reasons &mdash; like a Board Exam
+                        or completing an INC &mdash; need an extra detail or fee, and we&rsquo;ll ask for it here.
+                      </HelpTip>
+                    </div>
                     <div className="relative">
                       <select
                         id="purpose"
@@ -548,7 +625,8 @@ export default function RequestFormPage() {
                         type="text"
                         value={purposeOther}
                         onChange={(e) => setPurposeOther(e.target.value)}
-                        placeholder="Please specify"
+                        placeholder="Tell us what you need it for"
+                        aria-label="What you need the document for"
                         className="ts-input mt-3 w-full px-3.5 py-2.5 text-sm"
                       />
                     )}
@@ -558,7 +636,8 @@ export default function RequestFormPage() {
                     {isIncCompletion && (
                       <div className="ts-well mt-3 space-y-3 px-3.5 py-3.5">
                         <p className="ts-soft text-xs leading-relaxed">
-                          Completion of INC carries an additional ₱175.00 fee.
+                          Completing an INC (incomplete grade) adds a ₱175.00 fee, paid at the Cashier. Tell us which
+                          subject it&rsquo;s for.
                         </p>
                         <div>
                           <label htmlFor="semesterTaken" className="ts-ink mb-1.5 block text-sm font-medium">
@@ -626,10 +705,17 @@ export default function RequestFormPage() {
                       separate documents. */}
                   {needsCavAgency && (
                     <div>
-                      <label htmlFor="cavAgency" className="ts-ink mb-1.5 block text-sm font-medium">
-                        CAV Certification for
-                        <RequiredMark />
-                      </label>
+                      <div className="mb-1.5 flex items-center">
+                        <label htmlFor="cavAgency" className="ts-ink text-sm font-medium">
+                          Which agency is this for?
+                          <RequiredMark />
+                        </label>
+                        <HelpTip label="What is a CAV?">
+                          CAV stands for Certification, Authentication and Verification. It confirms your school
+                          records are genuine for the government office that asked for them &mdash; often needed to
+                          work or study abroad.
+                        </HelpTip>
+                      </div>
                       <div className="relative">
                         <select
                           id="cavAgency"
@@ -637,10 +723,10 @@ export default function RequestFormPage() {
                           onChange={(e) => setCavAgency(e.target.value)}
                           className="ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm"
                         >
-                          <option value="">Select the receiving agency</option>
+                          <option value="">Choose the office that asked for it</option>
                           {CAV_AGENCIES.map((a) => (
-                            <option key={a} value={a}>
-                              {a}
+                            <option key={a.value} value={a.value}>
+                              {a.label}
                             </option>
                           ))}
                         </select>
@@ -649,19 +735,26 @@ export default function RequestFormPage() {
                         </span>
                       </div>
                       <p className="ts-soft mt-1.5 text-xs">
-                        Which agency the authenticated documents are being sent to.
+                        {CAV_AGENCIES.find((a) => a.value === cavAgency)?.hint ||
+                          "Pick the office you'll be giving the document to. Not sure? Ask whoever requested it from you."}
                       </p>
                     </div>
                   )}
 
                   {needsCertificationSubtypes && (
                     <div>
-                      <p className="ts-ink mb-1.5 block text-sm font-medium">
-                        What should the certification state?
-                        <RequiredMark />
-                      </p>
-                      <div className="ts-well grid grid-cols-1 gap-x-4 gap-y-2 px-3.5 py-3.5 sm:grid-cols-2">
-                        {CERTIFICATION_SUBTYPES.map((sub) => {
+                      <div className="mb-1.5 flex items-center">
+                        <p className="ts-ink text-sm font-medium">
+                          What should the certification say?
+                          <RequiredMark />
+                        </p>
+                        <HelpTip label="What is a certification?">
+                          A certification is a short official letter from the Registrar confirming something about your
+                          records. Tick everything it needs to cover &mdash; one certification can cover several.
+                        </HelpTip>
+                      </div>
+                      <div className="ts-well grid grid-cols-1 gap-x-4 gap-y-3 px-3.5 py-3.5 sm:grid-cols-2">
+                        {CERTIFICATION_SUBTYPES.map(({ value: sub, hint }) => {
                           const checked = certificationSubtypes.includes(sub);
                           return (
                             <label key={sub} className="flex cursor-pointer select-none items-start gap-2.5 text-sm">
@@ -682,19 +775,22 @@ export default function RequestFormPage() {
                                   </svg>
                                 </span>
                               </span>
-                              <span className="ts-soft">{sub}</span>
+                              <span>
+                                <span className="ts-ink block">{sub}</span>
+                                {hint && <span className="ts-soft block text-xs">{hint}</span>}
+                              </span>
                             </label>
                           );
                         })}
                       </div>
-                      <p className="ts-soft mt-1.5 text-xs">Select every item the certification needs to cover.</p>
+                      <p className="ts-soft mt-1.5 text-xs">Tick at least one.</p>
                     </div>
                   )}
 
                   <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                     <div>
                       <label htmlFor="numberOfCopies" className="ts-ink mb-1.5 block text-sm font-medium">
-                        Number of Copies
+                        Number of copies
                         <RequiredMark />
                       </label>
                       <input
@@ -714,7 +810,7 @@ export default function RequestFormPage() {
                     {isPerPage && (
                       <div>
                         <label htmlFor="numberOfPages" className="ts-ink mb-1.5 block text-sm font-medium">
-                          Number of Pages
+                          Number of pages
                           <RequiredMark />
                         </label>
                         <input
@@ -735,10 +831,16 @@ export default function RequestFormPage() {
                     )}
 
                     <div>
-                      <label htmlFor="semester" className="ts-ink mb-1.5 block text-sm font-medium">
-                        Specific Semester / Academic Year
-                        <RequiredMark />
-                      </label>
+                      <div className="mb-1.5 flex items-center">
+                        <label htmlFor="semester" className="ts-ink text-sm font-medium">
+                          Your latest semester at USTP
+                          <RequiredMark />
+                        </label>
+                        <HelpTip label="Which semester should I pick?">
+                          The most recent semester you were enrolled in. It&rsquo;s printed on your official request
+                          form.
+                        </HelpTip>
+                      </div>
                       <div className="relative">
                         <select
                           id="semester"
@@ -746,7 +848,7 @@ export default function RequestFormPage() {
                           onChange={(e) => setSemester(e.target.value)}
                           className="ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm"
                         >
-                          <option value="">Select semester</option>
+                          <option value="">Choose a semester</option>
                           {semesterOptions.map((s) => (
                             <option key={s} value={s}>
                               {s}
@@ -764,7 +866,7 @@ export default function RequestFormPage() {
                   {isAlumni && (
                     <div>
                       <label htmlFor="graduationDate" className="ts-ink mb-1.5 block text-sm font-medium">
-                        Graduation Date
+                        When did you graduate?
                         <RequiredMark />
                       </label>
                       <input
@@ -774,12 +876,27 @@ export default function RequestFormPage() {
                         onChange={(e) => setGraduationDate(e.target.value)}
                         className="ts-input w-full px-3.5 py-2.5 text-sm"
                       />
+                      {/* Mirrors the server's own rule (graduated before 2018 =
+                          requires_archive_retrieval), so the student is warned at
+                          the moment it applies rather than surprised by a wait. */}
+                      {graduationDate && graduationDate < '2018-01-01' && (
+                        <div className="ts-info-note mt-2 flex items-start px-3.5 py-2.5 text-sm">
+                          <span>
+                            Records from before 2018 are kept in the university archive, so this request may take a
+                            little longer than usual.
+                          </span>
+                          <HelpTip label="Why does this take longer?">
+                            Older records are stored separately and have to be retrieved by hand before the Registrar
+                            can prepare your document.
+                          </HelpTip>
+                        </div>
+                      )}
                     </div>
                   )}
 
                   <div>
                     <label htmlFor="additionalNotes" className="ts-ink mb-1.5 block text-sm font-medium">
-                      Additional Notes <span className="ts-soft font-normal">(optional)</span>
+                      Additional notes <span className="ts-soft font-normal">(optional)</span>
                     </label>
                     <textarea
                       id="additionalNotes"
@@ -792,18 +909,21 @@ export default function RequestFormPage() {
                   </div>
                 </div>
 
-                <div className="mt-8 flex justify-between">
-                  <button type="button" onClick={() => goToStep(1)} className="ts-btn-glass px-6 py-2.5 text-sm font-medium">
+                <div className="mt-8 flex justify-between gap-3">
+                  <button type="button" onClick={() => goToStep(1)} className="ts-btn-glass self-start px-6 py-2.5 text-sm font-medium">
                     Back
                   </button>
-                  <button
-                    type="button"
-                    disabled={!step2Valid}
-                    onClick={() => goToStep(3)}
-                    className="ts-btn-primary px-6 py-2.5 text-sm font-medium"
-                  >
-                    Next Step
-                  </button>
+                  <div className="flex flex-col items-end gap-2">
+                    <button
+                      type="button"
+                      disabled={!step2Valid}
+                      onClick={() => goToStep(3)}
+                      className="ts-btn-primary px-6 py-2.5 text-sm font-medium"
+                    >
+                      Next
+                    </button>
+                    <MissingHint items={step2Missing} />
+                  </div>
                 </div>
               </div>
             )}
@@ -811,29 +931,39 @@ export default function RequestFormPage() {
             {/* ============================ STEP 3 ============================ */}
             {step === 3 && (
               <div>
-                <h1 className="ts-ink text-2xl font-semibold" style={FONT_SERIF}>
-                  Proxy Assignment Configuration
-                </h1>
-                <p className="ts-soft mt-1.5 text-sm">
-                  Configure whether an authorized proxy is allowed to obtain transcripts directly on your behalf.
+                <div className="flex items-center">
+                  <h1 className="ts-ink text-2xl font-semibold" style={FONT_SERIF}>
+                    Who will pick it up?
+                  </h1>
+                  <HelpTip label="What's a proxy?">
+                    A proxy is someone you trust &mdash; like a parent or friend &mdash; who picks up the document for
+                    you if you can&rsquo;t go to Window 6 yourself.
+                  </HelpTip>
+                </div>
+                {/* Was "obtain transcripts directly on your behalf" - wrong for
+                    every document that isn't a transcript. */}
+                <p className="ts-soft mt-1.5 text-base">
+                  Most people collect their own document. If someone else will collect it for you, tell us who.
                 </p>
 
                 <div className="ts-card mt-6 flex items-center justify-between gap-4 p-5">
-                  <div>
-                    <p className="ts-ink text-sm font-semibold">Will someone else claim this document on your behalf?</p>
-                    <p className="ts-soft mt-1 text-xs">Enable this configuration to nominate a designated claimant proxy.</p>
-                  </div>
+                  <label htmlFor="proxyEnabled" className="cursor-pointer">
+                    <p className="ts-ink text-sm font-semibold">Someone else will pick it up for me</p>
+                    <p className="ts-soft mt-1 text-sm">
+                      {proxyEnabled ? 'On — tell us about them below.' : 'Off — you will pick it up yourself.'}
+                    </p>
+                  </label>
                   <Switch id="proxyEnabled" checked={proxyEnabled} onChange={(e) => setProxyEnabled(e.target.checked)} />
                 </div>
 
                 {proxyEnabled && (
                   <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
                     <div className="ts-card p-6">
-                      <h2 className="ts-ink text-sm font-semibold">Nominated Claimant Proxy Information</h2>
+                      <h2 className="ts-ink text-sm font-semibold">About the person picking it up</h2>
                       <div className="mt-4 space-y-4">
                         <div>
                           <label htmlFor="proxyFullName" className="ts-ink mb-1.5 block text-sm font-medium">
-                            Proxy Full Name
+                            Their full name
                             <RequiredMark />
                           </label>
                           <input
@@ -846,7 +976,7 @@ export default function RequestFormPage() {
                         </div>
                         <div>
                           <label htmlFor="proxyRelationship" className="ts-ink mb-1.5 block text-sm font-medium">
-                            Relationship to Student
+                            How are they related to you?
                             <RequiredMark />
                           </label>
                           <div className="relative">
@@ -856,7 +986,7 @@ export default function RequestFormPage() {
                               onChange={(e) => setProxyRelationship(e.target.value)}
                               className="ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm"
                             >
-                              <option value="">Select relationship</option>
+                              <option value="">Choose one</option>
                               {RELATIONSHIP_OPTIONS.map((r) => (
                                 <option key={r} value={r}>
                                   {r}
@@ -870,12 +1000,14 @@ export default function RequestFormPage() {
                         </div>
                         <div>
                           <label htmlFor="proxyContactNumber" className="ts-ink mb-1.5 block text-sm font-medium">
-                            Contact Number
+                            Their mobile number
                             <RequiredMark />
                           </label>
                           <input
                             id="proxyContactNumber"
                             type="tel"
+                            inputMode="tel"
+                            placeholder="09XX XXX XXXX"
                             value={proxyContactNumber}
                             onChange={(e) => setProxyContactNumber(e.target.value)}
                             className="ts-input w-full px-3.5 py-2.5 text-sm"
@@ -884,31 +1016,46 @@ export default function RequestFormPage() {
                       </div>
                     </div>
 
+                    {/* Word for word what the official form (FM-USTP-RGTR-09,
+                        Reminder B) requires. This card previously asked for a
+                        "student-signed" letter and "relationship proof": the
+                        form requires a NOTARIZED letter and photocopies of BOTH
+                        people's IDs, and no proof of relationship at all. A
+                        first-timer following the old wording would have been
+                        turned away at the window. */}
                     <div className="ts-warning-card p-6">
                       <div className="flex items-center gap-2">
                         <WarningIcon />
-                        <h2 className="text-sm font-semibold">Proxy Claimant Policy</h2>
+                        <h2 className="text-sm font-semibold">They must bring all three</h2>
                       </div>
-                      <p className="mt-3 text-xs leading-relaxed">
-                        Your nominated proxy claimant must present a valid government-issued photo identification card,
-                        relationship proof, and student-signed authorization letter at Window 6 to claim files.
-                      </p>
+                      <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-relaxed">
+                        <li>
+                          An authorization letter from you, <strong>notarized</strong> by a lawyer (a signed letter
+                          alone won&rsquo;t be accepted)
+                        </li>
+                        <li>A photocopy of <strong>your</strong> valid ID</li>
+                        <li>A photocopy of <strong>their own</strong> valid ID</li>
+                      </ol>
+                      <p className="mt-3 text-sm leading-relaxed">Without all three, Window 6 can&rsquo;t release your document to them.</p>
                     </div>
                   </div>
                 )}
 
-                <div className="mt-8 flex justify-between">
-                  <button type="button" onClick={() => goToStep(2)} className="ts-btn-glass px-6 py-2.5 text-sm font-medium">
+                <div className="mt-8 flex justify-between gap-3">
+                  <button type="button" onClick={() => goToStep(2)} className="ts-btn-glass self-start px-6 py-2.5 text-sm font-medium">
                     Back
                   </button>
-                  <button
-                    type="button"
-                    disabled={!step3Valid}
-                    onClick={() => goToStep(4)}
-                    className="ts-btn-primary px-6 py-2.5 text-sm font-medium"
-                  >
-                    Next Step
-                  </button>
+                  <div className="flex flex-col items-end gap-2">
+                    <button
+                      type="button"
+                      disabled={!step3Valid}
+                      onClick={() => goToStep(4)}
+                      className="ts-btn-primary px-6 py-2.5 text-sm font-medium"
+                    >
+                      Next
+                    </button>
+                    <MissingHint items={step3Missing} />
+                  </div>
                 </div>
               </div>
             )}
@@ -917,19 +1064,20 @@ export default function RequestFormPage() {
             {step === 4 && (
               <div>
                 <h1 className="ts-ink text-2xl font-semibold" style={FONT_SERIF}>
-                  Review and Submit Request
+                  Check your request
                 </h1>
-                <p className="ts-soft mt-1.5 text-sm">
-                  Double check all request details prior to routing to Registrar Window 6.
+                <p className="ts-soft mt-1.5 text-base">
+                  Look over everything below. Tap <strong className="ts-ink">Edit</strong> to change anything, then send
+                  it to the Registrar.
                 </p>
 
                 <div className="ts-card mt-6 p-6 sm:p-8">
-                  <h2 className="ts-ink text-sm font-semibold">Request Confirmation Summary</h2>
+                  <h2 className="ts-ink text-sm font-semibold">Your request</h2>
 
                   <div className="mt-2">
                     <div className="ts-review-row flex items-start justify-between gap-4">
                       <div>
-                        <p className="ts-review-label">Transaction Type</p>
+                        <p className="ts-review-label">Document</p>
                         <p className="ts-review-value">{selectedType?.name}</p>
                       </div>
                       <button type="button" onClick={() => goToStep(1)} className="ts-link shrink-0 text-sm font-medium">
@@ -939,7 +1087,7 @@ export default function RequestFormPage() {
 
                     <div className="ts-review-row flex items-start justify-between gap-4">
                       <div>
-                        <p className="ts-review-label">Purpose of Request</p>
+                        <p className="ts-review-label">What it’s for</p>
                         <p className="ts-review-value">{purpose === 'Others' ? purposeOther : purpose}</p>
                       </div>
                       <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
@@ -949,7 +1097,7 @@ export default function RequestFormPage() {
 
                     <div className="ts-review-row flex items-start justify-between gap-4">
                       <div>
-                        <p className="ts-review-label">Number of Copies</p>
+                        <p className="ts-review-label">Number of copies</p>
                         <p className="ts-review-value">{numberOfCopies}</p>
                       </div>
                       <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
@@ -960,7 +1108,7 @@ export default function RequestFormPage() {
                     {isPerPage && (
                       <div className="ts-review-row flex items-start justify-between gap-4">
                         <div>
-                          <p className="ts-review-label">Number of Pages</p>
+                          <p className="ts-review-label">Number of pages</p>
                           <p className="ts-review-value">{numberOfPages}</p>
                         </div>
                         <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
@@ -972,8 +1120,8 @@ export default function RequestFormPage() {
                     {needsCavAgency && (
                       <div className="ts-review-row flex items-start justify-between gap-4">
                         <div>
-                          <p className="ts-review-label">CAV Certification for</p>
-                          <p className="ts-review-value">{cavAgency}</p>
+                          <p className="ts-review-label">Agency</p>
+                          <p className="ts-review-value">{CAV_AGENCIES.find((a) => a.value === cavAgency)?.label || cavAgency}</p>
                         </div>
                         <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
                           Edit
@@ -984,7 +1132,7 @@ export default function RequestFormPage() {
                     {needsCertificationSubtypes && (
                       <div className="ts-review-row flex items-start justify-between gap-4">
                         <div className="min-w-0">
-                          <p className="ts-review-label">Certification Type</p>
+                          <p className="ts-review-label">Certification should say</p>
                           <p className="ts-review-value">{certificationSubtypes.join(', ')}</p>
                         </div>
                         <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
@@ -1009,7 +1157,7 @@ export default function RequestFormPage() {
 
                     <div className="ts-review-row flex items-start justify-between gap-4">
                       <div>
-                        <p className="ts-review-label">Semester / Year</p>
+                        <p className="ts-review-label">Latest semester</p>
                         <p className="ts-review-value">{semester}</p>
                       </div>
                       <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
@@ -1020,7 +1168,7 @@ export default function RequestFormPage() {
                     {isAlumni && (
                       <div className="ts-review-row flex items-start justify-between gap-4">
                         <div>
-                          <p className="ts-review-label">Graduation Date</p>
+                          <p className="ts-review-label">Graduated</p>
                           <p className="ts-review-value">{graduationDate}</p>
                         </div>
                         <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
@@ -1032,7 +1180,7 @@ export default function RequestFormPage() {
                     {purpose === 'For Board Exam' && boardExamPhoto && (
                       <div className="ts-review-row flex items-start justify-between gap-4">
                         <div>
-                          <p className="ts-review-label">Board Exam Photo</p>
+                          <p className="ts-review-label">2x2 photo</p>
                           <p className="ts-review-value">{boardExamPhoto.name}</p>
                         </div>
                         <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
@@ -1044,7 +1192,7 @@ export default function RequestFormPage() {
                     {additionalNotes.trim() && (
                       <div className="ts-review-row flex items-start justify-between gap-4">
                         <div>
-                          <p className="ts-review-label">Additional Notes</p>
+                          <p className="ts-review-label">Additional notes</p>
                           <p className="ts-review-value font-normal">{additionalNotes}</p>
                         </div>
                         <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
@@ -1056,7 +1204,7 @@ export default function RequestFormPage() {
                     {proxyEnabled && (
                       <div className="ts-review-row flex items-start justify-between gap-4">
                         <div>
-                          <p className="ts-review-label">Claimant Proxy Assignment</p>
+                          <p className="ts-review-label">Picked up by</p>
                           <p className="ts-review-value">
                             {proxyFullName} ({proxyRelationship}) — {proxyContactNumber}
                           </p>
@@ -1097,7 +1245,7 @@ export default function RequestFormPage() {
                         </svg>
                       </span>
                     </span>
-                    <span className="ts-soft text-sm">I confirm that all information provided is accurate.</span>
+                    <span className="ts-soft text-sm">I’ve checked everything above, and it’s correct.</span>
                   </label>
                 </div>
 
@@ -1107,7 +1255,7 @@ export default function RequestFormPage() {
                     onClick={() => goToStep(3)}
                     className="ts-btn-glass px-6 py-2.5 text-sm font-medium"
                   >
-                    Back to Proxy
+                    Back
                   </button>
                   <button
                     type="button"
@@ -1116,7 +1264,7 @@ export default function RequestFormPage() {
                     className="ts-btn-primary flex items-center justify-center gap-2 px-6 py-2.5 text-sm font-medium"
                   >
                     {submitting && <Spinner />}
-                    {submitting ? 'Submitting…' : 'Submit Request'}
+                    {submitting ? 'Sending…' : 'Send request'}
                   </button>
                 </div>
               </div>
@@ -1124,6 +1272,6 @@ export default function RequestFormPage() {
           </>
         )}
       </main>
-    </div>
+    </StudentShell>
   );
 }

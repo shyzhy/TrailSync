@@ -8,6 +8,7 @@ import {
   Spinner,
 } from './trailsyncUI.jsx';
 import { saveSession } from '../lib/auth.js';
+import { friendlyMessage, NETWORK_ERROR, SERVER_ERROR } from '../lib/friendlyErrors.js';
 
 const STUDENT_ROLES = ['Student', 'Alumni'];
 const ROLE_ROUTES = { Student: '/portal', Alumni: '/portal', 'Registrar Staff': '/registrar/dashboard' };
@@ -21,6 +22,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [pendingApproval, setPendingApproval] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
 
   const handleRoleChange = (nextRole) => {
     if (nextRole === role) return;
@@ -55,15 +57,15 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier: identifier.trim(), password }),
       });
-      const data = await response.json();
+      // A crashed server answers with an HTML page, not JSON - that's "try
+      // again later", not "you can't reach us".
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         if (response.status === 403 && /pending admin approval/i.test(data.detail || '')) {
           setPendingApproval(true);
         } else {
-          setErrors({
-            general: data.detail || (role === 'staff' ? 'Incorrect email or password.' : 'Incorrect School ID or password.'),
-          });
+          setErrors({ general: data.detail ? friendlyMessage(data.detail) : SERVER_ERROR });
         }
         return;
       }
@@ -71,7 +73,11 @@ export default function LoginPage() {
       const userRole = data.user?.role;
       const expectedStudentTab = STUDENT_ROLES.includes(userRole);
       if ((role === 'student' && !expectedStudentTab) || (role === 'staff' && expectedStudentTab)) {
-        setErrors({ general: `This account is registered as ${userRole}. Please use the correct login tab.` });
+        setErrors({
+          general: expectedStudentTab
+            ? 'This is a student account. Choose “Student / Alumni” above, then log in again.'
+            : 'This is a Registrar staff account. Choose “Registrar Staff” above, then log in again.',
+        });
         return;
       }
 
@@ -79,8 +85,8 @@ export default function LoginPage() {
       saveSession(data, remember);
 
       window.location.href = ROLE_ROUTES[userRole] || '/portal';
-    } catch (networkError) {
-      setErrors({ general: 'Unable to reach the server. Please try again.' });
+    } catch {
+      setErrors({ general: NETWORK_ERROR });
     } finally {
       setLoading(false);
     }
@@ -107,8 +113,10 @@ export default function LoginPage() {
       </div>
       <div className="ts-rule mt-3" />
       <p className="ts-soft mt-3 text-sm">USTP–CDO Registrar · Window 6</p>
-      <p className="ts-soft mt-1.5 text-xs leading-relaxed">
-        Request and release registrar forms at Window 6 — with AI assistance every step of the way.
+      {/* The AI assistant isn't built yet, so the old line promising "AI
+          assistance every step of the way" came out until it is. */}
+      <p className="ts-soft mt-1.5 text-sm leading-relaxed">
+        Request documents from the Registrar online, follow their progress, and pick them up at Window 6.
       </p>
 
       {/* Role toggle — physical sliding switch */}
@@ -141,7 +149,7 @@ export default function LoginPage() {
       <form onSubmit={handleSubmit} noValidate className="mt-7 space-y-5">
         <div>
           <label htmlFor="identifier" className="ts-ink mb-1.5 block text-sm font-medium">
-            Email or School ID Number
+            {role === 'staff' ? 'Email' : 'Email or School ID number'}
           </label>
           <input
             id="identifier"
@@ -152,7 +160,7 @@ export default function LoginPage() {
             onChange={(e) => setIdentifier(e.target.value)}
             aria-invalid={Boolean(errors.identifier || errors.general)}
             aria-describedby={errors.identifier ? 'identifier-error' : undefined}
-            placeholder="e.g. 2021300123 or juan.delacruz@ustp.edu.ph"
+            placeholder={role === 'staff' ? 'e.g. maria.santos@ustp.edu.ph' : 'e.g. 2021300123 or juan.delacruz@ustp.edu.ph'}
             className={`ts-input w-full px-3.5 py-2.5 text-sm ${errors.identifier ? 'ts-input-error' : ''}`}
           />
           {errors.identifier && (
@@ -163,7 +171,16 @@ export default function LoginPage() {
         <div>
           <div className="mb-1.5 flex items-center justify-between">
             <label htmlFor="password" className="ts-ink block text-sm font-medium">Password</label>
-            <a href="#" className="ts-link text-sm">Forgot password?</a>
+            {/* There's no online reset yet; this used to be a link to "#"
+                that did nothing. Now it at least says what to do. */}
+            <button
+              type="button"
+              onClick={() => setForgotOpen((o) => !o)}
+              aria-expanded={forgotOpen}
+              className="ts-link text-sm"
+            >
+              Forgot password?
+            </button>
           </div>
           <div className="relative">
             <input
@@ -191,6 +208,12 @@ export default function LoginPage() {
           {errors.password && (
             <p id="password-error" className="ts-error-text mt-1.5 text-sm">{errors.password}</p>
           )}
+          {forgotOpen && (
+            <p className="ts-info-note mt-2 px-3.5 py-2.5 text-sm">
+              You can&rsquo;t reset your password online yet. Please ask at Window 6 in the Registrar&rsquo;s Office,
+              and bring your school ID.
+            </p>
+          )}
         </div>
 
         {errors.general && (
@@ -199,9 +222,12 @@ export default function LoginPage() {
           </div>
         )}
 
-        {pendingApproval && role === 'staff' && (
+        {/* Shown on either tab: gated to the staff tab, a pending account
+            signing in from the student tab got no message at all. */}
+        {pendingApproval && (
           <div role="status" className="ts-banner ts-banner-pending px-3.5 py-2.5 text-sm">
-            Your staff account is pending admin approval. You'll be notified once it's activated.
+            Your staff account is still waiting for approval. You&rsquo;ll be able to log in once an administrator
+            approves it.
           </div>
         )}
 
@@ -222,7 +248,7 @@ export default function LoginPage() {
                 </svg>
               </span>
             </span>
-            <span className="ts-soft text-sm">Remember me</span>
+            <span className="ts-soft text-sm">Keep me logged in on this device</span>
           </label>
         </div>
 
@@ -238,8 +264,8 @@ export default function LoginPage() {
 
       {role === 'student' && (
         <p className="ts-soft mt-6 text-sm">
-          Don't have an account?{' '}
-          <a href="/create-account" className="ts-link font-medium">Create one</a>
+          New to TrailSync?{' '}
+          <a href="/create-account" className="ts-link font-medium">Create an account</a>
         </p>
       )}
 

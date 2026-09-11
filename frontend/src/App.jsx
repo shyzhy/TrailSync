@@ -4,6 +4,7 @@ import StudentDashboard from './components/StudentDashboard.jsx';
 import RequestFormPage from './components/RequestFormPage.jsx';
 import TrackRequestsPage from './components/TrackRequestsPage.jsx';
 import ProfilePage from './components/ProfilePage.jsx';
+import NotificationsPage from './components/NotificationsPage.jsx';
 import ConfirmEmailPage from './components/ConfirmEmailPage.jsx';
 import CredentialGuidePage from './components/CredentialGuidePage.jsx';
 import RegistrarDashboardPage from './components/RegistrarDashboardPage.jsx';
@@ -19,6 +20,7 @@ export default function App() {
   if (pathname.startsWith('/request-form')) return <RequestFormPage />;
   if (pathname.startsWith('/track-requests')) return <TrackRequestsPage />;
   if (pathname.startsWith('/profile')) return <ProfilePage />;
+  if (pathname.startsWith('/notifications')) return <NotificationsPage />;
   if (pathname.startsWith('/confirm-email')) return <ConfirmEmailPage />;
   if (pathname.startsWith('/credential-guide')) return <CredentialGuidePage />;
   if (pathname.startsWith('/registrar/dashboard')) return <RegistrarDashboardPage />;

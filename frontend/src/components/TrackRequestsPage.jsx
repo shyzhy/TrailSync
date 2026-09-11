@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  APP_CSS,
-  AppMobileHeader,
-  AppSidebar,
-  FONT_SANS,
   FONT_SERIF,
   InboxIcon,
   SearchIcon,
 } from './trailsyncUI.jsx';
+import StudentShell from './StudentShell.jsx';
 import TicketCard from './TicketCard.jsx';
 import { LIFECYCLE, STATUS, studentStatusLabel } from '../lib/requestStatus.js';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
@@ -41,8 +38,12 @@ export default function TrackRequestsPage() {
   const [me, setMe] = useState(() => getStoredUser());
 
   const [activeFilter, setActiveFilter] = useState('All');
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState(''); // debounced value actually sent to the server
+  // ?search= arrives from a notification, the dashboard's recent list, or the
+  // "See my request" button after submitting - so those links open straight
+  // onto the request they're about instead of a list to hunt through.
+  const [initialSearch] = useState(() => new URLSearchParams(window.location.search).get('search') || '');
+  const [searchInput, setSearchInput] = useState(initialSearch);
+  const [search, setSearch] = useState(initialSearch); // debounced value actually sent to the server
   const [page, setPage] = useState(1);
 
   const [results, setResults] = useState([]);
@@ -81,6 +82,11 @@ export default function TrackRequestsPage() {
       const [meData, listData] = await Promise.all([meRes.json(), listRes.json()]);
       setMe(meData);
       setResults(listData.results || []);
+      // Arrived via a link to one specific request: open it, rather than
+      // making a first-time user work out that the card can be expanded.
+      if (initialSearch && search === initialSearch && listData.results?.length === 1) {
+        setExpandedId(listData.results[0].id);
+      }
       setPageInfo({
         count: listData.count ?? 0,
         start: listData.start ?? 0,
@@ -92,7 +98,13 @@ export default function TrackRequestsPage() {
     } catch {
       setStatus('error');
     }
-  }, [activeFilter, search, page]);
+  }, [activeFilter, search, page, initialSearch]);
+
+  const clearFilters = () => {
+    setActiveFilter('All');
+    setSearchInput('');
+    setSearch('');
+  };
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -108,27 +120,27 @@ export default function TrackRequestsPage() {
   };
 
   return (
-    <div className="ts-app-shell lg:flex" style={FONT_SANS}>
-      <style>{APP_CSS}</style>
-      <AppSidebar active="track" onLogout={handleLogout} me={me} />
-      <AppMobileHeader onLogout={handleLogout} />
-
-      <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-8 sm:py-10 lg:px-10">
+    <StudentShell active="track" me={me} onLogout={handleLogout} onMeChange={setMe}>
+      <main className="mx-auto w-full max-w-4xl flex-1 px-6 pb-8 pt-4 sm:pb-10 sm:pt-6 lg:pt-3 lg:px-10">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="ts-ink text-3xl font-semibold tracking-tight" style={FONT_SERIF}>
-              Track your requests
+              Track my requests
             </h1>
-            <p className="ts-soft mt-1.5 text-sm">Your ticket is called at Window 6 once it's ready for release.</p>
+            <p className="ts-soft mt-1.5 text-base">
+              See how far along each request is. Tap one to see its details and download your forms.
+            </p>
           </div>
 
-          <div className="relative w-full sm:w-64">
+          <div className="relative w-full sm:w-72">
+            {/* "Tracking number" is what the printed form and claim stub call
+                it; "request code" was the database's name for the same thing. */}
             <input
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search request code..."
-              aria-label="Search request code"
+              placeholder="Tracking number, e.g. W6-002"
+              aria-label="Search by tracking number"
               className="ts-input w-full py-2.5 pl-9 pr-3 text-sm"
             />
             <span className="ts-soft pointer-events-none absolute left-3 top-1/2 -translate-y-1/2">
@@ -153,9 +165,9 @@ export default function TrackRequestsPage() {
 
         {status === 'error' && (
           <div className="ts-banner ts-banner-error mt-6 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>Something went wrong loading your requests.</span>
+            <span>We couldn&rsquo;t load your requests. Please check your internet connection.</span>
             <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
-              Retry
+              Try again
             </button>
           </div>
         )}
@@ -172,15 +184,33 @@ export default function TrackRequestsPage() {
           {status === 'ready' && results.length === 0 && (
             <div className="ts-card flex flex-col items-center px-6 py-14 text-center">
               <InboxIcon />
-              <p className="ts-ink mt-4 text-sm font-semibold">No requests found</p>
-              <p className="ts-soft mt-1 text-sm">
-                {activeFilter !== 'All' || search
-                  ? "Try a different filter or search term, or submit a new request."
-                  : "You haven't submitted any requests yet."}
-              </p>
-              <a href="/request-form" className="ts-btn-primary mt-5 px-5 py-2.5 text-sm font-medium">
-                Request a form
-              </a>
+              {/* Two different situations that used to share one message: a
+                  filter hiding everything needs "show all", not "request". */}
+              {activeFilter !== 'All' || search ? (
+                <>
+                  <p className="ts-ink mt-4 text-base font-semibold">
+                    {search ? `No requests match “${search}”` : 'No requests here yet'}
+                  </p>
+                  <p className="ts-soft mt-1.5 max-w-sm text-sm">
+                    {search
+                      ? 'Check the tracking number on your form or claim stub, or show all your requests instead.'
+                      : 'None of your requests are at this step right now.'}
+                  </p>
+                  <button type="button" onClick={clearFilters} className="ts-btn-primary mt-5 px-6 py-2.5 text-sm font-medium">
+                    Show all my requests
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="ts-ink mt-4 text-base font-semibold">No requests yet</p>
+                  <p className="ts-soft mt-1.5 max-w-sm text-sm">
+                    You haven&rsquo;t requested any documents yet. Tap below to request your first one.
+                  </p>
+                  <a href="/request-form" className="ts-btn-primary mt-5 px-6 py-2.5 text-sm font-medium">
+                    Request my first document
+                  </a>
+                </>
+              )}
             </div>
           )}
 
@@ -198,8 +228,12 @@ export default function TrackRequestsPage() {
         {status === 'ready' && results.length > 0 && (
           <div className="mt-6 flex flex-col items-center justify-between gap-3 sm:flex-row">
             <p className="ts-soft text-sm">
-              Showing {pageInfo.start}–{pageInfo.end} of {pageInfo.count} requests
+              {pageInfo.count === 1
+                ? 'Showing 1 request'
+                : `Showing ${pageInfo.start}–${pageInfo.end} of ${pageInfo.count} requests`}
             </p>
+            {/* Two dead buttons on a single page read as broken, not as "that's everything". */}
+            {(pageInfo.previous || pageInfo.next) && (
             <div className="flex gap-2">
               <button
                 type="button"
@@ -218,9 +252,10 @@ export default function TrackRequestsPage() {
                 Next
               </button>
             </div>
+            )}
           </div>
         )}
       </main>
-    </div>
+    </StudentShell>
   );
 }

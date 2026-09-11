@@ -1,17 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  APP_CSS,
-  AppMobileHeader,
-  AppSidebar,
   Avatar,
   avatarUrlFor,
   CameraIcon,
   ChevronIcon,
-  FONT_SANS,
   FONT_SERIF,
   Spinner,
 } from './trailsyncUI.jsx';
+import StudentShell from './StudentShell.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser, updateStoredUser } from '../lib/auth.js';
+import { friendlyFieldErrors, friendlySummary, NETWORK_ERROR } from '../lib/friendlyErrors.js';
 
 const LOGIN_PATH = '/';
 
@@ -73,6 +71,39 @@ function cropToSquare(file) {
   });
 }
 
+/** First, middle, last - the same order the server prints on the official form (receipts._student_name). */
+function printedName(first, middle, last) {
+  return [first, middle, last].map((s) => (s || '').trim()).filter(Boolean).join(' ');
+}
+
+/**
+ * The "are you sure?" step shown in place of a form's submit button.
+ * Nothing is sent until the student confirms, and "Go back" leaves every
+ * field exactly as they typed it.
+ */
+function ConfirmPanel({ title, children, confirmLabel, busyLabel, busy, onConfirm, onCancel }) {
+  return (
+    <div role="group" aria-label={title} className="ts-info-note mt-5 block px-4 py-4 text-sm">
+      <p className="ts-ink text-base font-semibold">{title}</p>
+      <div className="mt-2 space-y-2 leading-relaxed">{children}</div>
+      <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <button type="button" onClick={onCancel} disabled={busy} className="ts-btn-glass px-5 py-2.5 text-sm font-medium">
+          Go back
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={busy}
+          className="ts-btn-primary flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium"
+        >
+          {busy && <Spinner />}
+          {busy ? busyLabel : confirmLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ReadOnlyField({ label, value }) {
   return (
     <div>
@@ -101,6 +132,7 @@ export default function ProfilePage() {
   const [profileErrors, setProfileErrors] = useState({});
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileSuccess, setProfileSuccess] = useState(false);
+  const [confirmingName, setConfirmingName] = useState(false);
 
   // Change email
   const [emailFormOpen, setEmailFormOpen] = useState(false);
@@ -108,6 +140,7 @@ export default function ProfilePage() {
   const [emailError, setEmailError] = useState('');
   const [emailSending, setEmailSending] = useState(false);
   const [emailSentMessage, setEmailSentMessage] = useState('');
+  const [confirmingEmail, setConfirmingEmail] = useState(false);
 
   // Change password
   const [passwordOpen, setPasswordOpen] = useState(false);
@@ -117,6 +150,7 @@ export default function ProfilePage() {
   const [passwordErrors, setPasswordErrors] = useState({});
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [passwordSuccess, setPasswordSuccess] = useState(false);
+  const [confirmingPassword, setConfirmingPassword] = useState(false);
 
   const load = async () => {
     setStatus('loading');
@@ -160,8 +194,24 @@ export default function ProfilePage() {
 
   const clearProfileError = (key) => setProfileErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
 
-  const handleSaveProfile = async (e) => {
+  const savedName = printedName(me?.first_name, me?.profile?.middle_name, me?.last_name);
+  const draftName = printedName(firstName, middleName, lastName);
+  const nameChanged = draftName !== savedName;
+
+  // A name change gets a recap first: it's printed on every form the student
+  // downloads, so a typo here ends up on paper at the Registrar. A contact
+  // number alone saves straight away.
+  const handleProfileSubmit = (e) => {
     e.preventDefault();
+    setProfileSuccess(false);
+    if (nameChanged && firstName.trim() && lastName.trim()) {
+      setConfirmingName(true);
+      return;
+    }
+    saveProfile();
+  };
+
+  const saveProfile = async () => {
     setProfileErrors({});
     setProfileSuccess(false);
     setProfileSaving(true);
@@ -183,22 +233,17 @@ export default function ProfilePage() {
       }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setProfileErrors(
-          typeof data === 'object'
-            ? Object.fromEntries(
-                Object.entries(data).map(([k, v]) => [k, Array.isArray(v) ? v.join(' ') : String(v)])
-              )
-            : { general: 'Could not save your changes.' }
-        );
+        setProfileErrors(friendlyFieldErrors(data));
         return;
       }
       setMe(data);
       updateStoredUser(data);
       setProfileSuccess(true);
     } catch {
-      setProfileErrors({ general: 'Unable to reach the server. Please try again.' });
+      setProfileErrors({ general: NETWORK_ERROR });
     } finally {
       setProfileSaving(false);
+      setConfirmingName(false);
     }
   };
 
@@ -268,7 +313,7 @@ export default function ProfilePage() {
       }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setAvatarError(data.image?.[0] || data.detail || "Couldn't update your photo.");
+        setAvatarError(friendlySummary(data, "We couldn't update your photo. Please try again."));
         setAvatarPreview(null);
         return;
       }
@@ -277,7 +322,7 @@ export default function ProfilePage() {
       setAvatarPreview(null);
       setAvatarNotice('Profile picture updated');
     } catch {
-      setAvatarError('Unable to reach the server. Please try again.');
+      setAvatarError(NETWORK_ERROR);
       setAvatarPreview(null);
     } finally {
       setAvatarBusy(false);
@@ -297,21 +342,27 @@ export default function ProfilePage() {
       }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setAvatarError(data.detail || "Couldn't remove your photo.");
+        setAvatarError(friendlySummary(data, "We couldn't remove your photo. Please try again."));
         return;
       }
       setMe(data);
       updateStoredUser(data);
       setAvatarNotice('Profile picture removed');
     } catch {
-      setAvatarError('Unable to reach the server. Please try again.');
+      setAvatarError(NETWORK_ERROR);
     } finally {
       setAvatarBusy(false);
     }
   };
 
-  const handleRequestEmailChange = async (e) => {
+  const handleEmailSubmit = (e) => {
     e.preventDefault();
+    setEmailError('');
+    setEmailSentMessage('');
+    setConfirmingEmail(true);
+  };
+
+  const requestEmailChange = async () => {
     setEmailError('');
     setEmailSentMessage('');
     setEmailSending(true);
@@ -323,20 +374,36 @@ export default function ProfilePage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setEmailError(data.new_email?.[0] || data.detail || 'Could not send a verification link.');
+        setEmailError(friendlySummary(data, "We couldn't send the link. Please try again."));
         return;
       }
       setEmailSentMessage(data.detail);
       setNewEmail('');
     } catch {
-      setEmailError('Unable to reach the server. Please try again.');
+      setEmailError(NETWORK_ERROR);
     } finally {
       setEmailSending(false);
+      setConfirmingEmail(false);
     }
   };
 
-  const handleChangePassword = async (e) => {
+  // The obvious mistakes are caught before the recap, so "Yes, change my
+  // password" isn't followed straight away by "those don't match". The
+  // server still checks everything, including password strength.
+  const handlePasswordSubmit = (e) => {
     e.preventDefault();
+    setPasswordSuccess(false);
+    const problems = {};
+    if (!currentPassword) problems.current_password = 'Please enter the password you use now.';
+    if (!newPassword) problems.new_password = 'Please choose a new password.';
+    if (newPassword && confirmNewPassword !== newPassword) {
+      problems.confirm_new_password = "This doesn't match the new password above.";
+    }
+    setPasswordErrors(problems);
+    if (Object.keys(problems).length === 0) setConfirmingPassword(true);
+  };
+
+  const changePassword = async () => {
     setPasswordErrors({});
     setPasswordSuccess(false);
     setPasswordSaving(true);
@@ -352,13 +419,7 @@ export default function ProfilePage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setPasswordErrors(
-          typeof data === 'object'
-            ? Object.fromEntries(
-                Object.entries(data).map(([k, v]) => [k, Array.isArray(v) ? v.join(' ') : String(v)])
-              )
-            : { general: 'Could not update your password.' }
-        );
+        setPasswordErrors(friendlyFieldErrors(data));
         return;
       }
       setPasswordSuccess(true);
@@ -366,29 +427,26 @@ export default function ProfilePage() {
       setNewPassword('');
       setConfirmNewPassword('');
     } catch {
-      setPasswordErrors({ general: 'Unable to reach the server. Please try again.' });
+      setPasswordErrors({ general: NETWORK_ERROR });
     } finally {
       setPasswordSaving(false);
+      setConfirmingPassword(false);
     }
   };
 
   return (
-    <div className="ts-app-shell lg:flex" style={FONT_SANS}>
-      <style>{APP_CSS}</style>
-      <AppSidebar active="profile" onLogout={handleLogout} me={me} />
-      <AppMobileHeader onLogout={handleLogout} />
-
-      <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-8 sm:py-10 lg:px-10">
+    <StudentShell active="profile" me={me} onLogout={handleLogout} onMeChange={setMe}>
+      <main className="mx-auto w-full max-w-3xl flex-1 px-6 pb-8 pt-4 sm:pb-10 sm:pt-6 lg:pt-3 lg:px-10">
         <h1 className="ts-ink text-3xl font-semibold tracking-tight" style={FONT_SERIF}>
           Profile
         </h1>
-        <p className="ts-soft mt-1.5 text-sm">View your account details and update the information you're able to self-edit.</p>
+        <p className="ts-soft mt-1.5 text-base">Your account details. You can change your photo, name, contact number, email and password here.</p>
 
         {status === 'error' && (
           <div className="ts-banner ts-banner-error mt-6 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>Something went wrong loading your profile.</span>
+            <span>We couldn&rsquo;t load your profile. Please check your internet connection.</span>
             <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
-              Retry
+              Try again
             </button>
           </div>
         )}
@@ -478,17 +536,17 @@ export default function ProfilePage() {
 
             {/* ---- Account (mostly read-only: official records) ---- */}
             <div className="ts-card mt-6 p-6 sm:p-8">
-              <h2 className="ts-ink text-sm font-semibold">Account</h2>
-              <p className="ts-soft mt-1 text-xs">
-                These are official university records. Changes to your course, category, or year level go through the
-                registrar, not this page.
+              <h2 className="ts-ink text-base font-semibold">Account</h2>
+              <p className="ts-soft mt-1 text-sm">
+                These come from your university records, so you can&rsquo;t change them here. If your course or year
+                level is wrong, ask at Window 6.
               </p>
 
               <div className="mt-5 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-                <ReadOnlyField label="School ID Number" value={profile?.school_id_number} />
+                <ReadOnlyField label="School ID number" value={profile?.school_id_number} />
                 <ReadOnlyField label="Course" value={profile?.course} />
-                <ReadOnlyField label="User Category" value={profile?.user_category} />
-                {isStudent && <ReadOnlyField label="Year Level" value={profile?.year_level} />}
+                <ReadOnlyField label="Student or alumnus" value={profile?.user_category} />
+                {isStudent && <ReadOnlyField label="Year level" value={profile?.year_level} />}
               </div>
 
               <div className="ts-hairline my-5 h-px" />
@@ -504,6 +562,7 @@ export default function ProfilePage() {
                     setEmailFormOpen((o) => !o);
                     setEmailError('');
                     setEmailSentMessage('');
+                    setConfirmingEmail(false);
                   }}
                   className="ts-link shrink-0 text-sm font-medium"
                 >
@@ -512,9 +571,10 @@ export default function ProfilePage() {
               </div>
 
               {emailFormOpen && (
-                <form onSubmit={handleRequestEmailChange} className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start">
+                <form onSubmit={handleEmailSubmit} className="mt-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
                   <div className="flex-1">
-                    <label htmlFor="newEmail" className="sr-only">
+                    <label htmlFor="newEmail" className="ts-ink mb-1.5 block text-sm font-medium">
                       New email address
                     </label>
                     <input
@@ -525,6 +585,7 @@ export default function ProfilePage() {
                       onChange={(e) => {
                         setNewEmail(e.target.value);
                         setEmailError('');
+                        setConfirmingEmail(false);
                       }}
                       placeholder="new.email@ustp.edu.ph"
                       className="ts-input w-full px-3.5 py-2.5 text-sm"
@@ -532,31 +593,57 @@ export default function ProfilePage() {
                     {emailError && <p className="ts-error-text mt-1.5 text-sm">{emailError}</p>}
                     {emailSentMessage && (
                       <p className="mt-1.5 text-sm" style={{ color: '#33574A' }}>
-                        {emailSentMessage} Check that inbox for a confirmation link — this page's email won't change
-                        until you click it.
+                        {emailSentMessage} Open the link in that email within 1 hour. Your email stays the same until
+                        you do.
                       </p>
                     )}
                   </div>
-                  <button
-                    type="submit"
-                    disabled={emailSending}
-                    className="ts-btn-primary flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium sm:shrink-0"
-                  >
-                    {emailSending && <Spinner />}
-                    {emailSending ? 'Sending…' : 'Send verification link'}
-                  </button>
+                  {/* Secondary: "Save changes" below stays the page's one
+                      main button. The recap's own button takes over once
+                      this is pressed. */}
+                  {!confirmingEmail && (
+                    <button
+                      type="submit"
+                      className="ts-btn-glass flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium sm:mt-[1.625rem] sm:shrink-0"
+                    >
+                      Continue
+                    </button>
+                  )}
+                  </div>
+                  {confirmingEmail && (
+                    <ConfirmPanel
+                      title="Change your email?"
+                      confirmLabel="Send the link"
+                      busyLabel="Sending…"
+                      busy={emailSending}
+                      onConfirm={requestEmailChange}
+                      onCancel={() => setConfirmingEmail(false)}
+                    >
+                      <p>
+                        We&rsquo;ll email a link to <strong className="ts-ink break-all">{newEmail.trim()}</strong>.
+                      </p>
+                      <p>
+                        Your email stays <strong className="ts-ink break-all">{me?.email}</strong> until you open that
+                        link. It stops working after 1 hour.
+                      </p>
+                      <p>
+                        After that, you&rsquo;ll log in with the new email or your School ID number, and TrailSync
+                        emails will go to the new address.
+                      </p>
+                    </ConfirmPanel>
+                  )}
                 </form>
               )}
             </div>
 
             {/* ---- Personal Information (editable) ---- */}
-            <form onSubmit={handleSaveProfile} className="ts-card mt-6 p-6 sm:p-8">
-              <h2 className="ts-ink text-sm font-semibold">Personal Information</h2>
+            <form onSubmit={handleProfileSubmit} className="ts-card mt-6 p-6 sm:p-8">
+              <h2 className="ts-ink text-base font-semibold">Your name and contact number</h2>
 
               <div className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2">
                 <div>
                   <label htmlFor="firstName" className="ts-ink mb-1.5 block text-sm font-medium">
-                    First Name
+                    First name
                   </label>
                   <input
                     id="firstName"
@@ -564,6 +651,7 @@ export default function ProfilePage() {
                     value={firstName}
                     onChange={(e) => {
                       setFirstName(e.target.value);
+                      setConfirmingName(false);
                       clearProfileError('first_name');
                     }}
                     className={`ts-input w-full px-3.5 py-2.5 text-sm ${profileErrors.first_name ? 'ts-input-error' : ''}`}
@@ -573,7 +661,7 @@ export default function ProfilePage() {
 
                 <div>
                   <label htmlFor="lastName" className="ts-ink mb-1.5 block text-sm font-medium">
-                    Last Name
+                    Last name
                   </label>
                   <input
                     id="lastName"
@@ -581,6 +669,7 @@ export default function ProfilePage() {
                     value={lastName}
                     onChange={(e) => {
                       setLastName(e.target.value);
+                      setConfirmingName(false);
                       clearProfileError('last_name');
                     }}
                     className={`ts-input w-full px-3.5 py-2.5 text-sm ${profileErrors.last_name ? 'ts-input-error' : ''}`}
@@ -590,20 +679,23 @@ export default function ProfilePage() {
 
                 <div>
                   <label htmlFor="middleName" className="ts-ink mb-1.5 block text-sm font-medium">
-                    Middle Name <span className="ts-soft font-normal">(optional)</span>
+                    Middle name <span className="ts-soft font-normal">(optional)</span>
                   </label>
                   <input
                     id="middleName"
                     type="text"
                     value={middleName}
-                    onChange={(e) => setMiddleName(e.target.value)}
+                    onChange={(e) => {
+                      setMiddleName(e.target.value);
+                      setConfirmingName(false);
+                    }}
                     className="ts-input w-full px-3.5 py-2.5 text-sm"
                   />
                 </div>
 
                 <div>
                   <label htmlFor="contactNumber" className="ts-ink mb-1.5 block text-sm font-medium">
-                    Contact Number
+                    Mobile number
                   </label>
                   <input
                     id="contactNumber"
@@ -624,6 +716,15 @@ export default function ProfilePage() {
                 </div>
               </div>
 
+              {/* Live, so a student sees the effect of a middle name or a
+                  spelling fix before saving rather than on a printed form. */}
+              <div className="mt-5 rounded-lg border px-4 py-3" style={{ borderColor: '#E3DFD2', background: '#FAF8F3' }}>
+                <p className="ts-soft text-xs font-medium uppercase tracking-wide">Printed on your forms as</p>
+                <p className="ts-ink mt-1 text-base font-semibold" style={FONT_SERIF}>
+                  {draftName || '—'}
+                </p>
+              </div>
+
               {profileErrors.general && (
                 <div role="alert" className="ts-banner ts-banner-error mt-5 px-3.5 py-2.5 text-sm">
                   {profileErrors.general}
@@ -631,20 +732,45 @@ export default function ProfilePage() {
               )}
               {profileSuccess && (
                 <div role="status" className="ts-banner ts-banner-success mt-5 px-3.5 py-2.5 text-sm">
-                  Profile updated.
+                  Your changes are saved.
                 </div>
               )}
 
-              <div className="mt-6 flex justify-end">
-                <button
-                  type="submit"
-                  disabled={profileSaving}
-                  className="ts-btn-primary flex items-center justify-center gap-2 px-6 py-2.5 text-sm font-medium"
+              {confirmingName ? (
+                <ConfirmPanel
+                  title="Is your new name spelled correctly?"
+                  confirmLabel="Yes, save my name"
+                  busyLabel="Saving…"
+                  busy={profileSaving}
+                  onConfirm={saveProfile}
+                  onCancel={() => setConfirmingName(false)}
                 >
-                  {profileSaving && <Spinner />}
-                  {profileSaving ? 'Saving…' : 'Save Changes'}
-                </button>
-              </div>
+                  <p>
+                    <span className="ts-soft">From:</span> <strong className="ts-ink">{savedName || '—'}</strong>
+                    <br />
+                    <span className="ts-soft">To:</span> <strong className="ts-ink">{draftName}</strong>
+                  </p>
+                  <p>
+                    This name is printed on the forms you download from TrailSync &mdash; including forms for requests
+                    you&rsquo;ve already sent &mdash; so it should match your school records exactly.
+                  </p>
+                  <p className="ts-soft">
+                    Changing it here doesn&rsquo;t change your school records. If your name is wrong on those, request
+                    a Correction of Name instead.
+                  </p>
+                </ConfirmPanel>
+              ) : (
+                <div className="mt-6 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={profileSaving}
+                    className="ts-btn-primary flex w-full items-center justify-center gap-2 px-6 py-2.5 text-sm font-medium sm:w-auto"
+                  >
+                    {profileSaving && <Spinner />}
+                    {profileSaving ? 'Saving…' : 'Save changes'}
+                  </button>
+                </div>
+              )}
             </form>
 
             {/* ---- Change Password (collapsible) ---- */}
@@ -655,8 +781,8 @@ export default function ProfilePage() {
                 className="flex w-full items-center justify-between px-6 py-5 text-left sm:px-8"
               >
                 <div>
-                  <h2 className="ts-ink text-sm font-semibold">Change Password</h2>
-                  <p className="ts-soft mt-1 text-xs">Updates your login password only — nothing else on this page.</p>
+                  <h2 className="ts-ink text-base font-semibold">Change password</h2>
+                  <p className="ts-soft mt-1 text-sm">Changes the password you log in with. Nothing else changes.</p>
                 </div>
                 <span className={`ts-soft shrink-0 transition-transform ${passwordOpen ? 'rotate-180' : ''}`}>
                   <ChevronIcon />
@@ -665,13 +791,13 @@ export default function ProfilePage() {
 
               {passwordOpen && (
                 <form
-                  onSubmit={handleChangePassword}
+                  onSubmit={handlePasswordSubmit}
                   className="space-y-5 border-t px-6 pb-8 pt-5 sm:px-8"
                   style={{ borderColor: '#E3DFD2' }}
                 >
                   <div>
                     <label htmlFor="currentPassword" className="ts-ink mb-1.5 block text-sm font-medium">
-                      Current Password
+                      Password you use now
                     </label>
                     <input
                       id="currentPassword"
@@ -679,6 +805,7 @@ export default function ProfilePage() {
                       value={currentPassword}
                       onChange={(e) => {
                         setCurrentPassword(e.target.value);
+                        setConfirmingPassword(false);
                         setPasswordErrors((p) => ({ ...p, current_password: undefined }));
                       }}
                       className={`ts-input w-full px-3.5 py-2.5 text-sm ${
@@ -693,7 +820,7 @@ export default function ProfilePage() {
                   <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                     <div>
                       <label htmlFor="newPassword" className="ts-ink mb-1.5 block text-sm font-medium">
-                        New Password
+                        New password
                       </label>
                       <input
                         id="newPassword"
@@ -701,6 +828,7 @@ export default function ProfilePage() {
                         value={newPassword}
                         onChange={(e) => {
                           setNewPassword(e.target.value);
+                          setConfirmingPassword(false);
                           setPasswordErrors((p) => ({ ...p, new_password: undefined }));
                         }}
                         className={`ts-input w-full px-3.5 py-2.5 text-sm ${
@@ -714,7 +842,7 @@ export default function ProfilePage() {
 
                     <div>
                       <label htmlFor="confirmNewPassword" className="ts-ink mb-1.5 block text-sm font-medium">
-                        Confirm New Password
+                        Type the new password again
                       </label>
                       <input
                         id="confirmNewPassword"
@@ -722,6 +850,7 @@ export default function ProfilePage() {
                         value={confirmNewPassword}
                         onChange={(e) => {
                           setConfirmNewPassword(e.target.value);
+                          setConfirmingPassword(false);
                           setPasswordErrors((p) => ({ ...p, confirm_new_password: undefined }));
                         }}
                         className={`ts-input w-full px-3.5 py-2.5 text-sm ${
@@ -741,26 +870,40 @@ export default function ProfilePage() {
                   )}
                   {passwordSuccess && (
                     <div role="status" className="ts-banner ts-banner-success px-3.5 py-2.5 text-sm">
-                      Your password has been updated.
+                      Your password is changed. Use the new one next time you log in.
                     </div>
                   )}
 
-                  <div className="flex justify-end">
-                    <button
-                      type="submit"
-                      disabled={passwordSaving}
-                      className="ts-btn-primary flex items-center justify-center gap-2 px-6 py-2.5 text-sm font-medium"
+                  {confirmingPassword ? (
+                    <ConfirmPanel
+                      title="Change your password?"
+                      confirmLabel="Yes, change my password"
+                      busyLabel="Changing…"
+                      busy={passwordSaving}
+                      onConfirm={changePassword}
+                      onCancel={() => setConfirmingPassword(false)}
                     >
-                      {passwordSaving && <Spinner />}
-                      {passwordSaving ? 'Updating…' : 'Update Password'}
-                    </button>
-                  </div>
+                      <p>
+                        From now on, you&rsquo;ll log in with your new password. Your old one will stop working.
+                      </p>
+                      <p className="ts-soft">You&rsquo;ll stay logged in on this device.</p>
+                    </ConfirmPanel>
+                  ) : (
+                    <div className="flex justify-end">
+                      <button
+                        type="submit"
+                        className="ts-btn-glass flex w-full items-center justify-center gap-2 px-6 py-2.5 text-sm font-medium sm:w-auto"
+                      >
+                        Continue
+                      </button>
+                    </div>
+                  )}
                 </form>
               )}
             </div>
           </>
         )}
       </main>
-    </div>
+    </StudentShell>
   );
 }

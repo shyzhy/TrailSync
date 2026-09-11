@@ -20,6 +20,13 @@ from django.contrib import admin
 from django.urls import include, path
 
 from TrailSync.views import (
+    RegistrarFlaggedRequestsView,
+    RegistrarClearFlagView,
+    NotificationUnreadCountView,
+    NotificationMarkReadView,
+    NotificationMarkAllReadView,
+    NotificationListView,
+    MeTourView,
     ChangeEmailConfirmView,
     ChangeEmailRequestView,
     ChangePasswordView,
@@ -56,6 +63,13 @@ urlpatterns = [
     path('api/auth/', include('TrailSync.urls')),
     path('api/me/', MeView.as_view(), name='me'),
     path('api/me/avatar/', MeAvatarView.as_view(), name='me-avatar'),
+    path('api/me/tour/', MeTourView.as_view(), name='me-tour'),
+    # Student notifications. unread-count and mark-all-read are literal paths
+    # registered before <int:pk>/ so they are never read as an id.
+    path('api/notifications/', NotificationListView.as_view(), name='notifications'),
+    path('api/notifications/unread-count/', NotificationUnreadCountView.as_view(), name='notifications-unread-count'),
+    path('api/notifications/mark-all-read/', NotificationMarkAllReadView.as_view(), name='notifications-mark-all-read'),
+    path('api/notifications/<int:pk>/read/', NotificationMarkReadView.as_view(), name='notification-read'),
     path('api/me/change-password/', ChangePasswordView.as_view(), name='change-password'),
     path('api/me/change-email/request/', ChangeEmailRequestView.as_view(), name='change-email-request'),
     path('api/me/change-email/confirm/', ChangeEmailConfirmView.as_view(), name='change-email-confirm'),
@@ -74,11 +88,13 @@ urlpatterns = [
     path('api/form-requests/<int:pk>/release/', RegistrarReleaseView.as_view(), name='form-request-release'),
     path('api/registrar/dashboard/summary/', RegistrarDashboardSummaryView.as_view(), name='registrar-dashboard-summary'),
     path('api/registrar/dashboard/recent-submissions/', RegistrarRecentSubmissionsView.as_view(), name='registrar-recent-submissions'),
+    path('api/registrar/dashboard/flagged/', RegistrarFlaggedRequestsView.as_view(), name='registrar-flagged'),
     path('api/registrar/dashboard/todays-release-slots/', RegistrarTodaysReleaseSlotsView.as_view(), name='registrar-todays-release-slots'),
     # Processing Queue
     path('api/registrar/queue/', RegistrarQueueListView.as_view(), name='registrar-queue'),
     path('api/registrar/queue/<int:pk>/', RegistrarQueueDetailView.as_view(), name='registrar-queue-detail'),
     path('api/registrar/queue/<int:pk>/verify/', RegistrarQueueVerifyView.as_view(), name='registrar-queue-verify'),
+    path('api/registrar/queue/<int:pk>/clear-flag/', RegistrarClearFlagView.as_view(), name='registrar-clear-flag'),
     path('api/registrar/queue/<int:pk>/approve/', RegistrarQueueApproveView.as_view(), name='registrar-queue-approve'),
     path('api/registrar/queue/<int:pk>/reject/', RegistrarQueueRejectView.as_view(), name='registrar-queue-reject'),
     # Release Slots — literal paths (calendar/, assignable-requests/, create/)

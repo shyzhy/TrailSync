@@ -10,6 +10,7 @@ import {
   RegistrarSidebar,
   Spinner,
   Toast,
+  WarningIcon,
 } from './trailsyncUI.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 import { STATUS, statusLabel, statusPillClass } from '../lib/requestStatus.js';
@@ -107,6 +108,7 @@ export default function RequestReviewPage({ requestId }) {
   const [actionLoading, setActionLoading] = useState(null);
   const [actionError, setActionError] = useState('');
   const [toast, setToast] = useState(null);
+  const [confirmingClearFlag, setConfirmingClearFlag] = useState(false);
 
   const load = useCallback(async () => {
     setStatus('loading');
@@ -246,6 +248,37 @@ export default function RequestReviewPage({ requestId }) {
     [load],
   );
 
+  /**
+   * Clear the duplicate flag once staff have checked the request.
+   *
+   * Not a lifecycle transition, so it doesn't go through runTransition: the
+   * endpoint answers with just {id, duplicate_flag}, not the full row, and
+   * clearing a flag never conflicts with the request's stage.
+   */
+  const clearFlag = async () => {
+    setActionLoading('clear-flag');
+    setActionError('');
+    try {
+      const res = await authFetch(`/api/registrar/queue/${request.id}/clear-flag/`, { method: 'POST' });
+      if (res.status === 401) {
+        clearSession();
+        window.location.href = LOGIN_PATH;
+        return;
+      }
+      if (!res.ok) {
+        setActionError('Could not clear the flag. Please try again.');
+        return;
+      }
+      setRequest((prev) => ({ ...prev, duplicate_flag: false }));
+      setConfirmingClearFlag(false);
+      setToast({ message: 'Flag cleared.', tone: 'success' });
+    } catch {
+      setActionError('Unable to reach the server. Please try again.');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const proxy = request?.proxy || null;
   const schedule = request?.release_schedule || null;
   const amountDue = formatAmount(request?.amount_due);
@@ -313,6 +346,50 @@ export default function RequestReviewPage({ requestId }) {
                 </p>
               </div>
             </div>
+
+            {request.duplicate_flag && (
+              <div role="alert" className="ts-warning-card mt-5 p-4">
+                <div className="flex items-center gap-2">
+                  <WarningIcon />
+                  <span className="text-sm font-semibold">Flagged: possible duplicate</span>
+                </div>
+                <p className="mt-1.5 text-sm leading-relaxed">
+                  This request may reuse another request&rsquo;s tracking number. Check it against the original before
+                  approving or releasing anything. The student can&rsquo;t see this flag.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  {confirmingClearFlag ? (
+                    <>
+                      <span className="text-sm">Clear the flag? Only do this once you&rsquo;ve checked it.</span>
+                      <button
+                        type="button"
+                        onClick={clearFlag}
+                        disabled={busy}
+                        className="ts-btn-primary px-4 py-1.5 text-sm font-medium"
+                      >
+                        {actionLoading === 'clear-flag' ? 'Clearing…' : 'Yes, clear flag'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingClearFlag(false)}
+                        disabled={busy}
+                        className="ts-link text-sm font-medium"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingClearFlag(true)}
+                      className="ts-btn-glass px-4 py-1.5 text-sm font-medium"
+                    >
+                      Mark as reviewed
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
               {/* ---------------- Left: the request itself ---------------- */}

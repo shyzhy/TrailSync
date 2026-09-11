@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 // Shared TrailSync visual system: the gradient-fade glass scene, the
 // skeuomorphic control styling, and the icons. Both LoginPage and
@@ -91,6 +91,15 @@ const COLOR_UTIL_CSS = `
 // on both. One definition, included in both SHARED_CSS and APP_CSS, so a
 // tweak to how an input looks never has to be made twice.
 const FORM_CONTROL_CSS = `
+  /* On phones: iOS Safari zooms the whole page when a field under 16px gets
+     focus, leaving a first-time user scrolled sideways mid-form. Element +
+     class so it outranks Tailwind's text-sm on the same input. And 44px is
+     the smallest tap target people hit reliably with a thumb. */
+  @media (max-width: 639px) {
+    input.ts-input, select.ts-input, textarea.ts-input { font-size: 16px; }
+    .ts-btn-primary, .ts-btn-glass, .ts-btn-sage, .ts-btn-outline-danger { min-height: 44px; }
+  }
+
   /* Carved into the glass: inner shadow from the top, bright lip. */
   .ts-input {
     color: #1F2937;
@@ -700,6 +709,155 @@ export const APP_CSS = `
     -webkit-backdrop-filter: blur(2px);
     backdrop-filter: blur(2px);
   }
+
+  /* ---- Nav extras: unread count, and an honest "not built yet" item ---- */
+  .ts-nav-count {
+    margin-left: auto;
+    min-width: 20px; height: 20px; padding: 0 6px;
+    border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #fff;
+    background: #B91C1C;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25);
+  }
+  .ts-nav-item-soon { cursor: default; opacity: 0.55; }
+  .ts-nav-item-soon:hover { background: transparent; }
+  .ts-nav-soon {
+    margin-left: auto;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 999px;
+    color: rgba(250,248,243,0.85);
+    border: 1px solid rgba(250,248,243,0.3);
+  }
+
+  /* ---- HelpTip: the small "?" ---- */
+  .ts-helptip { position: relative; display: inline-flex; vertical-align: middle; margin-left: 6px; }
+  .ts-helptip-btn {
+    width: 20px; height: 20px;
+    border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; line-height: 1;
+    color: #24406B;
+    background: linear-gradient(180deg, #FFFFFF 0%, #EEF1F6 100%);
+    border: 1px solid rgba(36,64,107,0.28);
+    box-shadow: 0 1px 2px rgba(31,41,55,0.12), inset 0 1px 0 rgba(255,255,255,0.9);
+    cursor: help;
+  }
+  .ts-helptip-btn:hover { border-color: rgba(36,64,107,0.5); }
+  .ts-helptip-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.6); }
+  .ts-helptip-bubble {
+    position: absolute; bottom: calc(100% + 9px); left: 50%;
+    z-index: 70;
+    width: max-content; max-width: min(280px, 80vw);
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 13px; font-weight: 400; line-height: 1.5; text-align: left;
+    white-space: normal;
+    color: #F7F5EF;
+    background: rgba(31,41,55,0.96);
+    box-shadow: 0 10px 24px rgba(20,24,31,0.28);
+    pointer-events: none;
+  }
+  .ts-helptip-bubble::after {
+    content: ''; position: absolute; top: 100%; left: 50%;
+    margin-left: -6px; border: 6px solid transparent; border-top-color: rgba(31,41,55,0.96);
+  }
+
+  /* ---- Student top bar ---- */
+  .ts-topbar {
+    position: sticky; top: 0; z-index: 30;
+    background: linear-gradient(180deg, rgba(250,248,243,0.9) 0%, rgba(250,248,243,0.72) 100%);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+    backdrop-filter: blur(14px) saturate(1.2);
+    border-bottom: 1px solid rgba(227,223,210,0.8);
+  }
+  @media (min-width: 1024px) {
+    /* The sidebar already carries the brand on desktop; the bar only has to
+       hold the bell, so it stays out of the way. */
+    .ts-topbar { background: transparent; border-bottom: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+  }
+  .ts-icon-btn {
+    position: relative;
+    height: 42px; min-width: 42px; padding: 0 12px;
+    border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    font-size: 14px; font-weight: 600;
+    color: #24406B;
+    background: linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.72) 100%);
+    border: 1px solid rgba(227,223,210,0.95);
+    box-shadow: 0 2px 6px rgba(31,41,55,0.08), inset 0 1px 0 rgba(255,255,255,0.9);
+    cursor: pointer;
+  }
+  .ts-icon-btn:hover { background: #FFFFFF; }
+  .ts-icon-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.6); }
+  .ts-bell-badge {
+    position: absolute; top: -3px; right: -3px;
+    min-width: 19px; height: 19px; padding: 0 5px;
+    border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #fff;
+    background: #B91C1C;
+    border: 2px solid #FAF8F3;
+  }
+
+  /* ---- Dropdowns (bell preview, mobile menu, help menu) ---- */
+  .ts-popover {
+    position: absolute; z-index: 60;
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(250,248,243,0.97) 100%);
+    border: 1px solid rgba(227,223,210,0.95);
+    box-shadow: 0 18px 44px rgba(31,41,55,0.2), inset 0 1px 0 rgba(255,255,255,0.9);
+    overflow: hidden;
+  }
+  .ts-popover-row { display: flex; gap: 10px; padding: 12px 16px; text-align: left; width: 100%; }
+  .ts-popover-row:hover { background: rgba(36,64,107,0.04); }
+  .ts-popover-row + .ts-popover-row { border-top: 1px solid rgba(227,223,210,0.7); }
+  .ts-unread-dot { width: 8px; height: 8px; margin-top: 7px; border-radius: 999px; flex-shrink: 0; background: #24406B; }
+  .ts-read-dot { width: 8px; height: 8px; margin-top: 7px; flex-shrink: 0; }
+
+  /* ---- Floating help button ---- */
+  .ts-help-fab {
+    position: fixed; right: 20px; bottom: 20px; z-index: 50;
+    height: 52px; padding: 0 18px 0 14px;
+    border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 15px; font-weight: 600;
+    color: #FAF8F3;
+    background: linear-gradient(180deg, #34558A 0%, #24406B 100%);
+    border: 1px solid rgba(255,255,255,0.18);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 10px 26px rgba(36,64,107,0.38);
+    cursor: pointer;
+  }
+  .ts-help-fab:hover { filter: brightness(1.08); }
+  .ts-help-fab:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.7), 0 10px 26px rgba(36,64,107,0.38); }
+
+  /* ---- Guided tour ---- */
+  .ts-tour-layer { position: fixed; inset: 0; z-index: 80; }
+  .ts-tour-spot {
+    position: fixed; border-radius: 14px;
+    box-shadow: 0 0 0 9999px rgba(15,23,42,0.58), 0 0 0 3px rgba(220,169,72,0.95);
+    transition: all 0.25s ease;
+    pointer-events: none;
+  }
+  .ts-tour-dim { position: fixed; inset: 0; background: rgba(15,23,42,0.58); }
+  .ts-tour-card {
+    position: fixed; z-index: 81;
+    width: min(340px, calc(100vw - 32px));
+    padding: 20px;
+    border-radius: 18px;
+    background: linear-gradient(180deg, #FFFFFF 0%, #FAF8F3 100%);
+    border: 1px solid rgba(227,223,210,0.95);
+    box-shadow: 0 22px 50px rgba(15,23,42,0.35);
+    transition: top 0.25s ease, left 0.25s ease;
+  }
+  @media (prefers-reduced-motion: reduce) { .ts-tour-spot, .ts-tour-card { transition: none; } }
+  .ts-tour-dots { display: flex; gap: 6px; }
+  .ts-tour-dots > span { width: 7px; height: 7px; border-radius: 999px; background: #E3DFD2; }
+  .ts-tour-dots > span[data-on="1"] { background: #24406B; width: 18px; }
+
+  /* ---- Readability for first-time users (student side only) ---- */
+  .ts-student .text-xs { font-size: 0.8125rem; line-height: 1.35rem; }
+  .ts-student .text-sm { line-height: 1.45rem; }
 
   .ts-sidebar-avatar {
     width: 34px; height: 34px;
@@ -1449,6 +1607,104 @@ export function CloseIcon() {
   );
 }
 
+/**
+ * A small "?" that explains one thing in a sentence or two.
+ *
+ * Hover shows it on a desktop; a tap pins it open on a phone, where hover
+ * does not exist; a tap elsewhere or Escape closes it. It is a real button,
+ * so it is reachable by keyboard and announced by screen readers, and it
+ * stops the click from reaching an enclosing <label> so tapping the "?" can
+ * never toggle the checkbox or focus the field it sits beside.
+ */
+export function HelpTip({ children, label = 'What does this mean?' }) {
+  const [pinned, setPinned] = useState(false);
+  const [hover, setHover] = useState(false);
+  const [shift, setShift] = useState(0);
+  const wrapRef = useRef(null);
+  const bubbleRef = useRef(null);
+  const open = pinned || hover;
+
+  useEffect(() => {
+    if (!pinned) return undefined;
+    const close = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setPinned(false);
+    };
+    const esc = (e) => e.key === 'Escape' && setPinned(false);
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [pinned]);
+
+  // Keep the bubble on screen: nudge it back in if it would hang off an edge.
+  useEffect(() => {
+    if (!open || !bubbleRef.current) return;
+    const r = bubbleRef.current.getBoundingClientRect();
+    const margin = 12;
+    if (r.left < margin) setShift(margin - r.left);
+    else if (r.right > window.innerWidth - margin) setShift(window.innerWidth - margin - r.right);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) setShift(0);
+  }, [open]);
+
+  return (
+    <span
+      ref={wrapRef}
+      className="ts-helptip"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <button
+        type="button"
+        className="ts-helptip-btn"
+        aria-label={label}
+        aria-expanded={open}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setPinned((v) => !v);
+        }}
+        onFocus={() => setHover(true)}
+        onBlur={() => setHover(false)}
+      >
+        ?
+      </button>
+      {open && (
+        <span
+          ref={bubbleRef}
+          role="tooltip"
+          className="ts-helptip-bubble"
+          style={{ transform: `translateX(calc(-50% + ${shift}px))` }}
+        >
+          {children}
+        </span>
+      )}
+    </span>
+  );
+}
+
+export function MenuIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M3.5 5.5h13M3.5 10h13M3.5 14.5h13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function QuestionIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-6 w-6" aria-hidden="true">
+      <circle cx="10" cy="10" r="7.3" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M7.9 7.9a2.2 2.2 0 1 1 3.2 2c-.7.4-1.1.9-1.1 1.6v.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="10" cy="14.1" r=".9" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function CameraIcon() {
   return (
     <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
@@ -1481,12 +1737,16 @@ export function UploadIcon() {
 // placeholder until that page exists.
 // ---------------------------------------------------------------------------
 
-const NAV_ITEMS = [
+export const NAV_ITEMS = [
   { key: 'home', href: '/portal', label: 'Home', Icon: HomeIcon },
-  { key: 'request', href: '/request-form', label: 'Request a form', Icon: PlusCircleIcon },
-  { key: 'track', href: '/track-requests', label: 'Track requests', Icon: TicketIcon },
+  { key: 'request', href: '/request-form', label: 'Request a document', Icon: PlusCircleIcon },
+  { key: 'track', href: '/track-requests', label: 'Track my requests', Icon: TicketIcon },
+  { key: 'notifications', href: '/notifications', label: 'Notifications', Icon: BellIcon },
   { key: 'guide', href: '/credential-guide', label: 'Credential Guide', Icon: BookIcon },
-  { key: 'ask', href: '#', label: 'Ask TrailSync', Icon: ChatIcon },
+  // Not built yet. Rendered as a labelled, non-navigating item rather than a
+  // link to "#": a menu entry that silently does nothing reads to a
+  // first-time user as the app being broken.
+  { key: 'ask', href: null, label: 'Ask TrailSync', Icon: ChatIcon, soon: true },
 ];
 
 export function initialsFor(me) {
@@ -1541,7 +1801,7 @@ export function Avatar({ user, src, className = '', alt = '' }) {
  * it) simply render the sidebar without the profile footer rather than
  * requiring every caller to pass a stub.
  */
-export function AppSidebar({ active, onLogout, me }) {
+export function AppSidebar({ active, onLogout, me, unreadCount = 0 }) {
   const profile = me?.profile;
   const idLine = [profile?.school_id_number, profile?.course].filter(Boolean).join(' · ');
 
@@ -1557,18 +1817,37 @@ export function AppSidebar({ active, onLogout, me }) {
         <span className="text-lg font-semibold" style={{ ...FONT_SERIF, color: '#FAF8F3' }}>TrailSync</span>
       </div>
 
-      <nav className="flex-1 space-y-2.5 px-3">
-        {NAV_ITEMS.map(({ key, href, label, Icon }) => (
-          <a
-            key={key}
-            href={href}
-            aria-current={key === active ? 'page' : undefined}
-            className={`ts-nav-item px-3 py-2.5 text-sm font-medium ${key === active ? 'ts-nav-item-active' : ''}`}
-          >
-            <Icon />
-            {label}
-          </a>
-        ))}
+      <nav className="flex-1 space-y-2.5 px-3" aria-label="Main">
+        {NAV_ITEMS.map(({ key, href, label, Icon, soon }) =>
+          soon ? (
+            <span
+              key={key}
+              data-tour={key}
+              className="ts-nav-item ts-nav-item-soon px-3 py-2.5 text-sm font-medium"
+              title="Coming soon"
+            >
+              <Icon />
+              {label}
+              <span className="ts-nav-soon">Soon</span>
+            </span>
+          ) : (
+            <a
+              key={key}
+              href={href}
+              data-tour={key}
+              aria-current={key === active ? 'page' : undefined}
+              className={`ts-nav-item px-3 py-2.5 text-sm font-medium ${key === active ? 'ts-nav-item-active' : ''}`}
+            >
+              <Icon />
+              {label}
+              {key === 'notifications' && unreadCount > 0 && (
+                <span className="ts-nav-count" aria-label={`${unreadCount} unread`}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </a>
+          ),
+        )}
       </nav>
 
       {me && (
@@ -1637,7 +1916,8 @@ const STAFF_NAV_ITEMS = [
   { key: 'dashboard', href: '/registrar/dashboard', label: 'Dashboard', Icon: GridIcon },
   { key: 'queue', href: '/registrar/queue', label: 'Processing Queue', Icon: DocumentIcon },
   { key: 'slots', href: '/registrar/release-slots', label: 'Release Slots', Icon: CalendarIcon },
-  { key: 'notifications', href: '#', label: 'Notifications', Icon: BellIcon },
+  // No Notifications here: that inbox is student-only. The one staff-facing
+  // alert (duplicate_flag) has its home on the Dashboard instead.
 ];
 
 export function RegistrarSidebar({ active, onLogout, me }) {

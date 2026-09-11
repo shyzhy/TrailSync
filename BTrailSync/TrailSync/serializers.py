@@ -12,6 +12,7 @@ from rest_framework import serializers
 from .models import (
     FormRequest,
     FormSubmission,
+    Notification,
     ReleaseSchedule,
     ReleaseSlot,
     RequestProxy,
@@ -59,6 +60,7 @@ def build_profile_payload(user):
             # Absolute, and the only avatar URL the frontend should use. null
             # means "no photo, show initials" - the one fallback everywhere.
             "profile_picture_url": absolute_media_url(p.profile_picture),
+            "tour_completed_at": p.tour_completed_at.isoformat() if p.tour_completed_at else None,
         }
     if hasattr(user, "staff_profile"):
         s = user.staff_profile
@@ -68,6 +70,30 @@ def build_profile_payload(user):
             "position": s.position,
         }
     return None
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    """One row of a student's notification inbox. Read-only: the only change
+    a student can make is marking it read, which has its own endpoint."""
+
+    request_code = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Notification
+        fields = [
+            "id",
+            "notification_type",
+            "title",
+            "message",
+            "is_read",
+            "read_at",
+            "created_at",
+            "request_code",
+        ]
+        read_only_fields = fields
+
+    def get_request_code(self, obj):
+        return obj.form_request.request_code if obj.form_request_id else None
 
 
 class MeSerializer(serializers.Serializer):
@@ -328,6 +354,15 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
                     "claimant_name": schedule.claimant_name,
                 }
             )
+        # The pickup date as staff actually set it. Without this, a release
+        # scheduled at a freeform time (no slot) never reached the student,
+        # whose ticket then said "Window 6 will confirm your date soon" about
+        # a date that had already been set. scheduled_release() is the one
+        # accessor that knows the precedence between the two sources.
+        when = obj.scheduled_release()
+        if when is not None:
+            data["release_date"] = when[0].isoformat()
+            data["release_time_start"] = when[1].isoformat(timespec="minutes") if when[1] else None
         return data
 
 
@@ -462,6 +497,9 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
             # on: what is owed, what was paid, who approved it, and how it
             # was eventually claimed.
             "is_rush",
+            # Staff-facing fraud signal. This serializer only ever reaches
+            # registrar endpoints; the student serializer omits it.
+            "duplicate_flag",
             "amount_due",
             "or_number",
             "payment_date",
