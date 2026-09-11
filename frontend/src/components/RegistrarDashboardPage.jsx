@@ -6,7 +6,7 @@ import {
   RegistrarMobileHeader,
   RegistrarSidebar,
   greetingForNow,
-  initialsFor,
+  Avatar,
   InboxIcon,
 } from './trailsyncUI.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
@@ -246,9 +246,11 @@ export default function RegistrarDashboardPage() {
                       key={r.id}
                       className="ts-row-hover ts-row-divider flex items-center gap-3 px-5 py-4"
                     >
-                      <span className="ts-avatar-sm">
-                        {initialsFor({ first_name: r.student_first_name, last_name: r.student_last_name })}
-                      </span>
+                      <Avatar
+                        className="ts-avatar-sm"
+                        src={r.student_profile_picture_url}
+                        user={{ first_name: r.student_first_name, last_name: r.student_last_name }}
+                      />
                       <div className="min-w-0 flex-1">
                         <p className="ts-ink truncate text-sm font-medium">
                           {r.student_first_name} {r.student_last_name}

@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal
 
 from django.contrib.auth.base_user import BaseUserManager
@@ -76,6 +77,19 @@ class User(AbstractUser):
     def __str__(self):
         return f"{self.email} - {self.get_full_name()}"
 
+def profile_picture_upload_to(instance, filename):
+    """Random, per-upload filename for a profile picture.
+
+    Random because MEDIA is served without authentication: a name derived
+    from the user id would let anyone walk the id space and collect every
+    student's photo. Per-upload because replacing a photo then yields a new
+    URL, so no browser can keep showing the old one from cache. Always .jpg,
+    since every avatar is re-encoded to JPEG on the way in (see avatars.py)
+    whatever format was uploaded.
+    """
+    return f"profile_pictures/{uuid.uuid4().hex}.jpg"
+
+
 class UserProfile(models.Model):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -106,6 +120,18 @@ class UserProfile(models.Model):
             ("Undergraduate", "Undergraduate"),
             ("Graduate", "Graduate"),
         ],
+        null=True,
+        blank=True,
+    )
+
+    # A real ImageField, not a path string: Django owns storage and serves a
+    # URL. Named without the ERD's "_path" suffix for the same reason as
+    # ReleaseSchedule.claimant_signature and SubmissionAttachment.file - the
+    # field manages the path itself. Written only through
+    # PATCH /api/me/avatar/, which validates and re-encodes the upload.
+    profile_picture = models.ImageField(
+        upload_to=profile_picture_upload_to,
+        max_length=255,
         null=True,
         blank=True,
     )

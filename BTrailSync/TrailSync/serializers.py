@@ -1,7 +1,9 @@
 import json
 import uuid
 from datetime import date, datetime
+from urllib.parse import urljoin
 
+from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
@@ -23,6 +25,24 @@ from .models import (
 )
 
 
+def absolute_media_url(file_field):
+    """Absolute URL for a stored file, or None when there is no file.
+
+    Every media URL the API returns goes through here. A relative "/media/..."
+    is useless to the browser, because the frontend is a different origin and
+    resolves it against the Vite server - which returns the app shell with a
+    200 rather than the file. This is what the frontend is meant to use as-is,
+    so it never has to assemble a file path itself.
+    """
+    if not file_field:
+        return None
+    try:
+        url = file_field.url
+    except ValueError:
+        return None
+    return urljoin(settings.BACKEND_BASE_URL.rstrip("/") + "/", url.lstrip("/"))
+
+
 def build_profile_payload(user):
     """Same {student profile} / {staff profile} shape LoginView returns,
     reused by /api/me/ so a page reload sees exactly what login saw."""
@@ -36,6 +56,9 @@ def build_profile_payload(user):
             "course": p.course,
             "year_level": p.year_level,
             "user_category": p.user_category,
+            # Absolute, and the only avatar URL the frontend should use. null
+            # means "no photo, show initials" - the one fallback everywhere.
+            "profile_picture_url": absolute_media_url(p.profile_picture),
         }
     if hasattr(user, "staff_profile"):
         s = user.staff_profile
@@ -321,6 +344,7 @@ class RegistrarRecentSubmissionSerializer(serializers.ModelSerializer):
     transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
     student_first_name = serializers.CharField(source="user.first_name", read_only=True)
     student_last_name = serializers.CharField(source="user.last_name", read_only=True)
+    student_profile_picture_url = serializers.SerializerMethodField()
 
     class Meta:
         model = FormRequest
@@ -330,9 +354,14 @@ class RegistrarRecentSubmissionSerializer(serializers.ModelSerializer):
             "request_status",
             "transaction_type",
             "created_at",
+            "student_profile_picture_url",
             "student_first_name",
             "student_last_name",
         ]
+
+    def get_student_profile_picture_url(self, obj):
+        profile = getattr(obj.user, "user_profile", None)
+        return absolute_media_url(profile.profile_picture) if profile else None
 
 
 class RegistrarReleaseSlotRowSerializer(serializers.ModelSerializer):
@@ -891,7 +920,7 @@ def serialize_attachments(form_request):
             {
                 "id": None,
                 "file_name": f.name.rsplit("/", 1)[-1],
-                "file_url": f.url,
+                "file_url": absolute_media_url(f),
                 "file_size": size,
                 "kind": "board_exam_photo",
                 "uploaded_at": submission.created_at.isoformat(),
@@ -903,7 +932,7 @@ def serialize_attachments(form_request):
             {
                 "id": att.id,
                 "file_name": att.file_name,
-                "file_url": att.file.url,
+                "file_url": absolute_media_url(att.file),
                 "file_size": att.file_size,
                 "kind": "attachment",
                 "uploaded_at": att.uploaded_at.isoformat(),

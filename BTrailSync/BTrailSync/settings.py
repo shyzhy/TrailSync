@@ -182,3 +182,10 @@ DEFAULT_FROM_EMAIL = 'TrailSync Registrar <no-reply@trailsync.local>'
 # not at this API server, since clicking a link is a browser GET and the
 # confirmation should render as a page, not raw JSON.
 FRONTEND_BASE_URL = config('FRONTEND_BASE_URL', default='http://localhost:5173')
+
+# Where uploaded media is actually served from, so the API can hand the
+# browser absolute URLs. The frontend runs on a different origin: a relative
+# "/media/..." resolves against the Vite dev server, which answers every
+# unknown path with the SPA's index.html (200, text/html) instead of the
+# file. Same pattern as FRONTEND_BASE_URL - set it per deployment.
+BACKEND_BASE_URL = config('BACKEND_BASE_URL', default='http://127.0.0.1:8000')

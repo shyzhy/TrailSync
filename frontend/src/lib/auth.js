@@ -46,6 +46,31 @@ export function saveSession({ access, refresh, user }, remember) {
   target.setItem(USER_KEY, JSON.stringify(user));
 }
 
+/**
+ * Replace the cached user with a fresh copy from the server, in whichever
+ * storage currently holds the session.
+ *
+ * Needed because not every page asks /api/me/ on load - the Credential Guide
+ * renders its sidebar straight from this cache - so a change made on the
+ * Profile page (a new photo, an edited name) would otherwise stay invisible
+ * there until the next login. Writing to the storage that already holds the
+ * access token keeps the "remember me" choice made at login intact.
+ */
+export function updateStoredUser(user) {
+  if (!user) return;
+  for (const store of [window.localStorage, window.sessionStorage]) {
+    try {
+      if (store.getItem(ACCESS_KEY)) {
+        store.setItem(USER_KEY, JSON.stringify(user));
+        return;
+      }
+    } catch {
+      // Storage can be unavailable in a locked-down context; the page's own
+      // state still reflects the change, it just won't outlive a reload.
+    }
+  }
+}
+
 export function clearSession() {
   ALL_KEYS.forEach((key) => {
     window.localStorage.removeItem(key);

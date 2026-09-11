@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 // Shared TrailSync visual system: the gradient-fade glass scene, the
 // skeuomorphic control styling, and the icons. Both LoginPage and
@@ -645,6 +645,62 @@ export const APP_CSS = `
 
   /* ---- Sidebar profile footer ---- */
   .ts-sidebar-footer { border-top: 1px solid rgba(255,255,255,0.12); }
+  /* A profile photo in any avatar slot. Sits inside the same circle as
+     the initials it replaces (the slot's own class supplies size and shape),
+     and object-fit: cover is what keeps a non-square image from stretching. */
+  .ts-avatar-photo {
+    display: block;
+    object-fit: cover;
+    background: #E3DFD2;
+  }
+
+  /* The large avatar at the top of the Profile page. */
+  .ts-avatar-xl {
+    position: relative;
+    width: 112px; height: 112px;
+    flex-shrink: 0;
+    border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 38px; font-weight: 600; letter-spacing: 0.01em;
+    color: #FAF8F3;
+    background: linear-gradient(180deg, #DCA948 0%, #B8872B 100%);
+    box-shadow:
+      0 0 0 4px rgba(255,255,255,0.85),
+      0 0 0 5px rgba(227,223,210,0.9),
+      0 10px 24px rgba(31,41,55,0.18),
+      inset 0 1px 0 rgba(255,255,255,0.4);
+  }
+  .ts-avatar-xl > img { width: 100%; height: 100%; border-radius: 999px; }
+
+  /* Glossy camera button pinned to the avatar's lower-right edge. */
+  .ts-avatar-edit {
+    position: absolute; right: -2px; bottom: -2px;
+    width: 36px; height: 36px;
+    border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    color: #FAF8F3;
+    background: linear-gradient(180deg, #34558A 0%, #24406B 100%);
+    border: 2px solid rgba(255,255,255,0.95);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 4px 10px rgba(36,64,107,0.35);
+    cursor: pointer;
+    transition: filter 0.15s ease, transform 0.15s ease;
+  }
+  .ts-avatar-edit:hover:not(:disabled) { filter: brightness(1.1); }
+  .ts-avatar-edit:active:not(:disabled) { transform: translateY(1px); }
+  .ts-avatar-edit:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.65), 0 4px 10px rgba(36,64,107,0.35); }
+  .ts-avatar-edit:disabled { cursor: progress; filter: saturate(0.7); }
+
+  /* Frosted veil over the avatar while an upload is in flight. */
+  .ts-avatar-busy {
+    position: absolute; inset: 0;
+    border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    color: #FAF8F3;
+    background: rgba(31,41,55,0.42);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+  }
+
   .ts-sidebar-avatar {
     width: 34px; height: 34px;
     border-radius: 999px;
@@ -1393,6 +1449,20 @@ export function CloseIcon() {
   );
 }
 
+export function CameraIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+      <path
+        d="M3 7.2A1.7 1.7 0 0 1 4.7 5.5h1.6l1.2-1.7h5l1.2 1.7h1.6A1.7 1.7 0 0 1 17 7.2v7.1A1.7 1.7 0 0 1 15.3 16H4.7A1.7 1.7 0 0 1 3 14.3V7.2Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <circle cx="10" cy="10.6" r="2.9" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 export function UploadIcon() {
   return (
     <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
@@ -1423,6 +1493,47 @@ export function initialsFor(me) {
   const a = (me?.first_name || '').charAt(0);
   const b = (me?.last_name || '').charAt(0);
   return (a + b).toUpperCase() || '?';
+}
+
+/** The photo URL for a user, straight from the API. Never assembled here. */
+export function avatarUrlFor(user) {
+  return user?.profile?.profile_picture_url || user?.profile_picture_url || null;
+}
+
+/**
+ * The one photo-or-initials avatar. Every place that shows who someone is
+ * renders this, so the fallback rule lives in exactly one spot.
+ *
+ * `className` is the slot's existing circle style (sidebar, list row, the
+ * Profile page's large avatar); the photo is drawn into that same circle, so
+ * swapping initials for a picture cannot shift the layout.
+ *
+ * Falls back to initials if the image fails to load - a photo removed from
+ * another device, say - rather than leaving a broken-image icon in a circle.
+ */
+export function Avatar({ user, src, className = '', alt = '' }) {
+  const url = src !== undefined ? src : avatarUrlFor(user);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
+
+  if (url && !failed) {
+    return (
+      <span className={className} style={{ padding: 0, overflow: 'hidden' }}>
+        <img
+          src={url}
+          alt={alt}
+          onError={() => setFailed(true)}
+          className="ts-avatar-photo"
+          style={{ width: '100%', height: '100%' }}
+        />
+      </span>
+    );
+  }
+  return (
+    <span className={className} aria-hidden={alt ? undefined : true}>
+      {initialsFor(user)}
+    </span>
+  );
 }
 
 /**
@@ -1469,7 +1580,7 @@ export function AppSidebar({ active, onLogout, me }) {
           aria-current={active === 'profile' ? 'page' : undefined}
           className={`ts-sidebar-footer ts-nav-item px-4 py-4 ${active === 'profile' ? 'ts-nav-item-active' : ''}`}
         >
-          <span className="ts-sidebar-avatar">{initialsFor(me)}</span>
+          <Avatar user={me} className="ts-sidebar-avatar" />
           <div className="min-w-0">
             <p className="truncate text-sm font-medium" style={{ color: '#FAF8F3' }}>
               {me.first_name} {me.last_name}
@@ -1563,7 +1674,7 @@ export function RegistrarSidebar({ active, onLogout, me }) {
 
       {me && (
         <div className="ts-staff-sidebar-footer flex items-center gap-2.5 px-4 py-4">
-          <span className="ts-sidebar-avatar">{initialsFor(me)}</span>
+          <Avatar user={me} className="ts-sidebar-avatar" />
           <div className="min-w-0">
             <p className="truncate text-sm font-medium" style={{ color: '#FAF8F3' }}>
               {me.first_name} {me.last_name}

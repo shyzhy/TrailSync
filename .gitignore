@@ -8,6 +8,10 @@ __pycache__/
 db.sqlite3
 staticfiles/
 
+# User uploads: student profile photos, board exam photos, requirement
+# attachments, claim signatures. Personal data, not source - never commit it.
+BTrailSync/media/
+
 # Environment / secrets
 .env
 .env.*

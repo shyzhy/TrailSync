@@ -10,6 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,6 +18,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .official_form import build_official_form_pdf
 from .receipts import build_claim_stub_pdf
+from .avatars import AvatarRejected, process_avatar
 from .models import (
     FormRequest,
     Notification,
@@ -198,6 +200,76 @@ class MeView(APIView):
         serializer = UpdateProfileSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        return Response(MeSerializer(request.user).data)
+
+
+class MeAvatarView(APIView):
+    """PATCH /api/me/avatar/ - set or replace the profile picture.
+    DELETE /api/me/avatar/ - remove it, reverting to initials everywhere.
+
+    Its own endpoint rather than a field on PATCH /api/me/: an image upload is
+    multipart, the Personal Information form is JSON, and mixing the two would
+    make every name edit a multipart request and every photo change carry the
+    whole form along with it.
+
+    The upload is re-validated and re-encoded here regardless of what the
+    browser already did (see avatars.process_avatar) - this endpoint can be
+    called directly, and the client's checks are a convenience, not a guard.
+
+    Students and alumni only. Staff accounts have a StaffProfile rather than a
+    UserProfile, so there is nowhere to store one; they keep their initials.
+    """
+
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def _profile_or_error(self, request):
+        profile = getattr(request.user, "user_profile", None)
+        if profile is None:
+            return None, Response(
+                {"detail": "Profile pictures are only available on student accounts."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return profile, None
+
+    def patch(self, request):
+        profile, error = self._profile_or_error(request)
+        if error:
+            return error
+
+        uploaded = request.FILES.get("image")
+        if uploaded is None:
+            return Response(
+                {"image": ["Choose an image to upload."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            processed = process_avatar(uploaded)
+        except AvatarRejected as exc:
+            return Response({"image": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Write the new file before removing the old one, so a failure
+        # halfway through leaves the student with the photo they had rather
+        # than with none.
+        previous = profile.profile_picture.name if profile.profile_picture else None
+        profile.profile_picture.save(processed.name, processed, save=False)
+        profile.save(update_fields=["profile_picture", "updated_at"])
+        if previous and previous != profile.profile_picture.name:
+            profile.profile_picture.storage.delete(previous)
+
+        return Response(MeSerializer(request.user).data)
+
+    def delete(self, request):
+        profile, error = self._profile_or_error(request)
+        if error:
+            return error
+
+        if profile.profile_picture:
+            # delete(save=False) removes the file from storage; the column is
+            # then cleared explicitly so the row never points at a missing file.
+            profile.profile_picture.delete(save=False)
+        profile.profile_picture = None
+        profile.save(update_fields=["profile_picture", "updated_at"])
         return Response(MeSerializer(request.user).data)
 
 
