@@ -87,6 +87,11 @@ class UserProfile(models.Model):
     # is profile-side, so registration has somewhere to put it.
     middle_name = models.CharField(max_length=150, blank=True, null=True)
 
+    # Needed to fill the printed Request for Credentials form, which asks
+    # for it. Nullable because every existing profile predates the field and
+    # nobody was ever asked - a default would be inventing a birthday.
+    birth_date = models.DateField(null=True, blank=True)
+
     course = models.CharField(max_length=150, blank=True, null=True)
     college = models.CharField(max_length=150, blank=True, null=True)
     year_level = models.CharField(max_length=50, blank=True, null=True)
@@ -478,6 +483,70 @@ class FormSubmission(models.Model):
 
     def __str__(self):
         return f"Submission for {self.form_request.request_code}"
+
+
+class SubmissionAttachment(models.Model):
+    """One student-uploaded file supporting a request's requirements.
+
+    THIS TABLE DID NOT EXIST before now, and its absence has been flagged
+    across several rounds of work: the Processing Queue's "Uploaded
+    Requirements" list could only ever show board_exam_photo, because that
+    single column was the only file the schema could hold. A real request can
+    carry several (an ID scan, a clearance slip, an authorisation letter),
+    which one column cannot represent.
+
+    Hangs off FormSubmission rather than FormRequest because these are part
+    of what the student submitted, which is precisely what FormSubmission
+    models. Cascade follows from that: deleting the submission deletes what
+    came with it.
+
+    board_exam_photo is deliberately NOT folded in here. It is a specific,
+    serializer-enforced requirement for one purpose, and the validation that
+    refuses a Board Exam request without it keys off that column; turning it
+    into an untyped row in a general list would lose that guarantee. This is
+    the open-ended list alongside it.
+    """
+
+    form_submission = models.ForeignKey(
+        FormSubmission,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    # max_length raised from Django's default 100: the upload_to prefix eats
+    # ~25 characters before the filename starts, and students upload things
+    # like "Certificate of Enrollment - 2nd Sem AY2024-2025 - scanned.pdf".
+    # Past 100 the save raises rather than truncating, so the default would
+    # reject real files.
+    file = models.FileField(upload_to="submission_attachments/%Y/%m/", max_length=255)
+
+    # The name the file had on the student's own machine. upload_to rewrites
+    # the stored path and Django uniquifies collisions, so without keeping
+    # this the queue would show staff a mangled filename instead of the one
+    # the student would recognise if asked about it.
+    file_name = models.CharField(max_length=255)
+    file_size = models.PositiveIntegerField(help_text="Size in bytes.")
+
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["uploaded_at"]
+
+    def __str__(self):
+        return f"{self.file_name} for {self.form_submission.form_request.request_code}"
+
+    def save(self, *args, **kwargs):
+        # Both derived from the file itself rather than trusted from the
+        # request body: a client could otherwise claim any size or name it
+        # liked, and staff read both off the review page.
+        if self.file:
+            if not self.file_name:
+                self.file_name = self.file.name.rsplit("/", 1)[-1]
+            if not self.file_size:
+                try:
+                    self.file_size = self.file.size
+                except (OSError, ValueError):
+                    self.file_size = 0
+        super().save(*args, **kwargs)
 
 
 class RequestProxy(models.Model):

@@ -16,6 +16,7 @@ from .models import (
     RequirementVerification,
     Role,
     StaffProfile,
+    SubmissionAttachment,
     TransactionType,
     User,
     UserProfile,
@@ -190,6 +191,7 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
     verification_remarks = serializers.SerializerMethodField()
     release_schedule = serializers.SerializerMethodField()
     receipt_available = serializers.SerializerMethodField()
+    uploaded_files = serializers.SerializerMethodField()
 
     class Meta:
         model = FormRequest
@@ -224,6 +226,10 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
             # staff logs the Cashier payment, so from Processing onward the
             # student has something to present at Window 6.
             "digital_stub_active",
+            # Read-only here. The only write path for attachments is the
+            # student's own submission (see CreateFormRequestSerializer);
+            # this serializer has no write path at all.
+            "uploaded_files",
         ]
         read_only_fields = fields
 
@@ -268,6 +274,9 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
 
     def get_receipt_available(self, obj):
         return obj.receipt_available()
+
+    def get_uploaded_files(self, obj):
+        return serialize_attachments(obj)
 
     def get_release_schedule(self, obj):
         slot = obj.release_slot
@@ -379,6 +388,7 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
     additional_notes = serializers.SerializerMethodField()
     requirements_status = serializers.SerializerMethodField()
     uploaded_files = serializers.SerializerMethodField()
+    attachment_count = serializers.SerializerMethodField()
     verification_remarks = serializers.SerializerMethodField()
     proxy = serializers.SerializerMethodField()
     student_full_name = serializers.SerializerMethodField()
@@ -405,6 +415,7 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
             "additional_notes",
             "requirements_status",
             "uploaded_files",
+            "attachment_count",
             "verification_remarks",
             "proxy",
             "student_full_name",
@@ -455,32 +466,34 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
         return self._form_data(obj).get("additional_notes") or ""
 
     def get_requirements_status(self, obj):
+        """Still the narrow, checkable rule: a Board Exam request needs its
+        2x2 photo.
+
+        Deliberately NOT widened to "has the student attached anything" now
+        that attachments exist. TransactionType.required_documents is free
+        text with no structured mapping to uploaded files, so there is no way
+        to tell whether the right documents arrived - only how many did. A
+        presence check would also retroactively mark every request filed
+        before this table existed as Incomplete, which is a verdict the
+        system cannot actually support. attachment_count carries the real
+        number so staff can judge for themselves.
+        """
         submission = getattr(obj, "submission", None)
         if self._form_data(obj).get("purpose") == FormSubmission.Purpose.BOARD_EXAM:
-            has_photo = bool(submission and submission.board_exam_photo)
-            return "Complete" if has_photo else "Incomplete"
+            return "Complete" if (submission and submission.board_exam_photo) else "Incomplete"
         return "Complete"
 
-    def get_uploaded_files(self, obj):
-        """The one real uploaded file this system tracks. Not a general
-        attachment list — see the class docstring and the chat note about
-        SUBMISSION_ATTACHMENTS not existing yet."""
+    def get_attachment_count(self, obj):
         submission = getattr(obj, "submission", None)
-        if not (submission and submission.board_exam_photo):
-            return []
-        f = submission.board_exam_photo
-        try:
-            size = f.size
-        except (FileNotFoundError, ValueError):
-            size = None
-        return [
-            {
-                "file_name": f.name.rsplit("/", 1)[-1],
-                "file_url": f.url,
-                "file_size": size,
-                "kind": "board_exam_photo",
-            }
-        ]
+        return submission.attachments.count() if submission else 0
+
+    def get_uploaded_files(self, obj):
+        """Every file the student uploaded with this request.
+
+        A real list now that SUBMISSION_ATTACHMENTS exists; until it did,
+        this could only ever return the single board_exam_photo column.
+        """
+        return serialize_attachments(obj)
 
     def get_verification_remarks(self, obj):
         latest = obj.verifications.first()
@@ -784,6 +797,63 @@ def _parse_iso_date(value):
         return None
 
 
+# Bounds on the student-uploaded requirements list. Not in the brief, but an
+# unbounded multi-file endpoint is a denial-of-service hole: without them one
+# request could fill the disk. Sized for what the form actually asks for -
+# a handful of scans - rather than as a hard policy.
+MAX_ATTACHMENTS = 5
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+
+def serialize_attachments(form_request):
+    """The uploaded-requirements list for one request, staff and student alike.
+
+    One function because both sides must see the same files - a student
+    querying "did my upload arrive?" and staff asking "what did they send?"
+    are the same question, and two implementations would eventually answer it
+    differently.
+
+    board_exam_photo is folded in here for display even though it lives in
+    its own column, because to anyone reading the list it is simply another
+    file the student uploaded. kind distinguishes them for callers that care.
+    """
+    rows = []
+
+    submission = getattr(form_request, "submission", None)
+    if submission is None:
+        return rows
+
+    if submission.board_exam_photo:
+        f = submission.board_exam_photo
+        try:
+            size = f.size
+        except (OSError, ValueError):
+            size = None
+        rows.append(
+            {
+                "id": None,
+                "file_name": f.name.rsplit("/", 1)[-1],
+                "file_url": f.url,
+                "file_size": size,
+                "kind": "board_exam_photo",
+                "uploaded_at": submission.created_at.isoformat(),
+            }
+        )
+
+    for att in submission.attachments.all():
+        rows.append(
+            {
+                "id": att.id,
+                "file_name": att.file_name,
+                "file_url": att.file.url,
+                "file_size": att.file_size,
+                "kind": "attachment",
+                "uploaded_at": att.uploaded_at.isoformat(),
+            }
+        )
+    return rows
+
+
 class CreateFormRequestSerializer(serializers.Serializer):
     """POST /api/form-requests/ body (always multipart/form-data, since a
     file may be attached even though most submissions carry none).
@@ -801,6 +871,17 @@ class CreateFormRequestSerializer(serializers.Serializer):
     form_data = serializers.CharField()
     proxy = serializers.CharField(required=False, allow_blank=True)
     board_exam_photo = serializers.FileField(required=False)
+
+    # Attachments are NOT declared as a serializer field. They arrive as a
+    # repeated multipart key, which only request.FILES.getlist can read - a
+    # declared FileField would silently keep just the last one. Pulled and
+    # checked in validate() instead.
+
+    def _attachments(self):
+        request = self.context.get("request")
+        if request is None:
+            return []
+        return request.FILES.getlist("attachments")
 
     def validate_form_data(self, raw):
         parsed = _parse_json_object(raw, "form_data")
@@ -851,6 +932,17 @@ class CreateFormRequestSerializer(serializers.Serializer):
                 "board_exam_photo"
             ] = "Please upload a white-background 2x2 photo for this request."
 
+        attachments = self._attachments()
+        if len(attachments) > MAX_ATTACHMENTS:
+            errors["attachments"] = f"Attach at most {MAX_ATTACHMENTS} files."
+        else:
+            oversized = [f.name for f in attachments if f.size > MAX_ATTACHMENT_BYTES]
+            if oversized:
+                limit_mb = MAX_ATTACHMENT_BYTES // (1024 * 1024)
+                errors["attachments"] = (
+                    f"These files are larger than {limit_mb}MB: {', '.join(oversized)}"
+                )
+
         proxy = attrs.get("proxy")
         if proxy is not None:
             if not (proxy.get("proxy_full_name") or "").strip():
@@ -883,11 +975,22 @@ class CreateFormRequestSerializer(serializers.Serializer):
             request_code=_generate_request_code(),
             requires_archive_retrieval=requires_archive,
         )
-        FormSubmission.objects.create(
+        submission = FormSubmission.objects.create(
             form_request=form_request,
             form_data=form_data,
             board_exam_photo=validated_data.get("board_exam_photo"),
         )
+
+        # Written only here, at submission time, by the student filing the
+        # request. There is deliberately no staff-facing write path: staff
+        # review what was uploaded, they do not upload on a student's behalf.
+        for uploaded in self._attachments():
+            SubmissionAttachment.objects.create(
+                form_submission=submission,
+                file=uploaded,
+                file_name=uploaded.name,
+                file_size=uploaded.size,
+            )
 
         proxy = validated_data.get("proxy")
         if proxy:

@@ -14,6 +14,7 @@ from TrailSync.models import (
     RequirementVerification,
     Role,
     StaffProfile,
+    SubmissionAttachment,
     TransactionType,
     User,
     UserProfile,
@@ -109,3 +110,4 @@ admin.site.register(ReleaseSchedule)
 admin.site.register(FaqEntry)
 admin.site.register(RequirementVerification)
 admin.site.register(Notification)
+admin.site.register(SubmissionAttachment)
