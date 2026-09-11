@@ -15,7 +15,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .receipts import build_claim_stub_pdf, build_receipt_pdf
+from .official_form import build_official_form_pdf
+from .receipts import build_claim_stub_pdf
 from .models import (
     FormRequest,
     Notification,
@@ -907,7 +908,7 @@ class FormRequestReceiptView(APIView):
             )
 
         return _pdf_response(
-            build_receipt_pdf(form_request), f"TrailSync-{form_request.request_code}.pdf"
+            build_official_form_pdf(form_request), f"TrailSync-{form_request.request_code}.pdf"
         )
 
 
