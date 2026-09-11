@@ -155,6 +155,23 @@ def _fit(text, font, size, max_width):
     return text + ellipsis
 
 
+def _wrap(text, font, size, max_width):
+    """Greedy word wrap. The receipt had no multi-line prose so nothing
+    needed this; the claim stub's instruction line is a real paragraph."""
+    words = (text or "").split()
+    lines, current = [], ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if current and pdfmetrics.stringWidth(candidate, font, size) > max_width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
+
+
 def _student_name(user, profile):
     parts = [user.first_name or ""]
     if profile is not None and profile.middle_name:
@@ -531,6 +548,164 @@ def build_receipt_pdf(form_request) -> bytes:
     c.setFillColor(GREY)
     c.setFont(fonts["sans"], 7)
     c.drawString(note_x, y - 63, f"USTP {EM_DASH} Cagayan de Oro {MIDDOT} Office of the Registrar")
+
+    c.showPage()
+    c.save()
+    return buffer.getvalue()
+
+
+CLAIM_STUB_INSTRUCTION = (
+    "Present this stub with a valid ID to claim your document at Window 6. "
+    "If someone else is claiming on your behalf, they must also bring a "
+    "notarized authorization letter and both parties' valid IDs."
+)
+
+
+def build_claim_stub_pdf(form_request) -> bytes:
+    """Render the student's claim stub as a standalone PDF.
+
+    Shares this module's whole setup with the receipt - page geometry, the
+    embedded DejaVu faces carrying the peso glyph, the colour constants and
+    the small-caps/label helpers - rather than standing up a second pipeline.
+    What differs is the shape: the receipt is a full-page form with a stub
+    attached, this is the stub on its own.
+
+    Laid out as a card in the upper third of an A4 page with a cut line under
+    it. A custom small page size would print unpredictably on the A4 paper
+    these offices stock, so the page stays A4 and the part worth keeping is
+    made obvious and separable instead.
+
+    Callers own authorisation and the digital_stub_active check.
+    """
+    fonts = _fonts()
+    user = form_request.user
+    profile = getattr(user, "user_profile", None)
+
+    buffer = io.BytesIO()
+    c = pdfcanvas.Canvas(buffer, pagesize=A4)
+    c.setTitle(f"TrailSync Claim Stub {EM_DASH} {form_request.request_code}")
+    c.setAuthor("USTP-CDO Office of the Registrar")
+    c.setSubject("Claim Stub")
+
+    y = PAGE_H - MARGIN
+
+    # ---------------------------------------------------------------- header
+    c.setFillColor(BLUE)
+    c.rect(LEFT, y - 3.5, CONTENT_W, 3.5, stroke=0, fill=1)
+    y -= 3.5 + 16
+
+    if LOGO_PATH.exists():
+        c.drawImage(
+            ImageReader(str(LOGO_PATH)), LEFT, y - 24, width=24, height=24,
+            mask="auto", preserveAspectRatio=True, anchor="sw",
+        )
+        wordmark_x = LEFT + 31
+    else:
+        wordmark_x = LEFT
+
+    c.setFillColor(BLUE)
+    c.setFont(fonts["serif_bold"], 17)
+    c.drawString(wordmark_x, y - 17, "TrailSync")
+
+    c.setFillColor(BLACK)
+    c.setFont(fonts["sans_bold"], 8.5)
+    c.drawRightString(RIGHT, y - 8, f"USTP {EM_DASH} Cagayan de Oro")
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 7.5)
+    c.drawRightString(RIGHT, y - 19, f"Office of the Registrar {MIDDOT} Window 6")
+
+    y -= 34
+    c.setStrokeColor(GOLD)
+    c.setLineWidth(1.1)
+    c.line(LEFT, y, RIGHT, y)
+    y -= 24
+
+    # ------------------------------------------------------------- the stub
+    # Height derived from the wrapped instruction rather than fixed, so the
+    # card closes just under its own content. A fixed height left a band of
+    # empty space that reads as a form field someone forgot to fill in.
+    instruction_lines = _wrap(CLAIM_STUB_INSTRUCTION, fonts["sans"], 8, CONTENT_W - 40)
+    stub_h = 176.0 + len(instruction_lines) * 11 + 14
+    stub_top = y
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(1.4)
+    c.rect(LEFT, stub_top - stub_h, CONTENT_W, stub_h, stroke=1, fill=0)
+    c.setFillColor(BLUE)
+    c.rect(LEFT, stub_top - 4, CONTENT_W, 4, stroke=0, fill=1)
+
+    inner = LEFT + 20
+    inner_w = CONTENT_W - 40
+    cursor = stub_top - 26
+
+    _caps(c, inner, cursor, "Claim Stub", fonts["sans_bold"], 8, BLUE)
+    cursor -= 10
+
+    _caps(c, inner, cursor - 8, "Tracking Number", fonts["sans"], 7, GREY)
+    c.setFillColor(BLUE)
+    c.setFont(fonts["serif_bold"], 26)
+    c.drawString(inner, cursor - 36, form_request.request_code)
+    cursor -= 52
+
+    c.setStrokeColor(HAIRLINE)
+    c.setLineWidth(0.6)
+    c.line(inner, cursor, RIGHT - 20, cursor)
+    cursor -= 18
+
+    # Two columns of identity/document facts.
+    col_w = (inner_w - 24) / 2
+    col2 = inner + col_w + 24
+    left_y = right_y = cursor
+    left_y = _field(c, inner, left_y, col_w, "Student Name", _student_name(user, profile), fonts)
+    left_y = _field(
+        c, inner, left_y, col_w, "School ID Number",
+        profile.school_id_number if profile else None, fonts,
+    )
+    right_y = _field(
+        c, col2, right_y, col_w, "Document to Claim", form_request.transaction_type.name, fonts
+    )
+
+    scheduled = form_request.scheduled_release()
+    if scheduled is not None:
+        release_date, release_time = scheduled
+        when = f"{release_date:%B %d, %Y}"
+        if release_time is not None:
+            when += f" {MIDDOT} {release_time:%I:%M %p}"
+    else:
+        # Never a blank field: an empty line reads as an error, where saying
+        # it is not scheduled yet tells the student what to do about it.
+        when = f"To be scheduled {EM_DASH} check back soon"
+    right_y = _field(c, col2, right_y, col_w, "Release Date / Time", when, fonts)
+
+    cursor = min(left_y, right_y) - 4
+
+    c.setStrokeColor(HAIRLINE)
+    c.setLineWidth(0.6)
+    c.line(inner, cursor, RIGHT - 20, cursor)
+    cursor -= 16
+
+    c.setFillColor(BLACK)
+    c.setFont(fonts["sans"], 8)
+    for line in instruction_lines:
+        c.drawString(inner, cursor, line)
+        cursor -= 11
+
+    y = stub_top - stub_h - 20
+
+    # ------------------------------------------------------------- cut line
+    c.setStrokeColor(HAIRLINE)
+    c.setLineWidth(0.8)
+    c.setDash(3, 3)
+    c.line(LEFT, y, RIGHT - 62, y)
+    c.setDash()
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 8)
+    c.drawRightString(RIGHT, y - 3, f"{SCISSORS}  cut here")
+    y -= 22
+
+    issued = _local(form_request.claim_stub_issued_at) or _local(timezone.now())
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 7)
+    c.drawString(LEFT, y, f"Issued {issued:%B %d, %Y at %I:%M %p} {MIDDOT} Generated by TrailSync.")
 
     c.showPage()
     c.save()

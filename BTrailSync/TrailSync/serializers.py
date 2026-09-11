@@ -220,6 +220,10 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
             # instead of the frontend keeping a second copy of the status
             # list that could drift out of sync with the backend's.
             "receipt_available",
+            # Whether the downloadable claim stub is live. Switched on when
+            # staff logs the Cashier payment, so from Processing onward the
+            # student has something to present at Window 6.
+            "digital_stub_active",
         ]
         read_only_fields = fields
 
@@ -377,6 +381,9 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
     uploaded_files = serializers.SerializerMethodField()
     verification_remarks = serializers.SerializerMethodField()
     proxy = serializers.SerializerMethodField()
+    student_full_name = serializers.SerializerMethodField()
+    approved_by_name = serializers.SerializerMethodField()
+    release_schedule = serializers.SerializerMethodField()
 
     class Meta:
         model = FormRequest
@@ -400,6 +407,17 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
             "uploaded_files",
             "verification_remarks",
             "proxy",
+            "student_full_name",
+            # Lifecycle state the review page renders and gates its actions
+            # on: what is owed, what was paid, who approved it, and how it
+            # was eventually claimed.
+            "is_rush",
+            "amount_due",
+            "or_number",
+            "payment_date",
+            "approved_by_name",
+            "registrar_approved_at",
+            "release_schedule",
         ]
 
     def _profile(self, obj):
@@ -478,6 +496,120 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
             "contact_number": proxy.contact_number,
         }
 
+    def get_student_full_name(self, obj):
+        """Pre-fills the Claimant Name field on the Release action, which is
+        the student themselves unless a proxy is collecting."""
+        p = self._profile(obj)
+        parts = [obj.user.first_name or ""]
+        if p is not None and p.middle_name:
+            parts.append(p.middle_name)
+        parts.append(obj.user.last_name or "")
+        return " ".join(x for x in parts if x).strip() or obj.user.email
+
+    def get_approved_by_name(self, obj):
+        approver = obj.registrar_approved_by
+        return approver.user.get_full_name() if approver else None
+
+    def get_release_schedule(self, obj):
+        """The booked window merged with the claim record, if either exists.
+
+        Staff confirm the date/time here before notifying the student that a
+        document is ready, so an unscheduled request has to be visibly
+        unscheduled rather than silently absent.
+        """
+        slot = obj.release_slot
+        schedule = getattr(obj, "release_schedule", None)
+        if slot is None and schedule is None:
+            return None
+
+        data = {}
+        if slot is not None:
+            data.update(
+                {
+                    "slot_date": slot.slot_date.isoformat(),
+                    "start_time": slot.start_time.isoformat(timespec="minutes"),
+                    "end_time": slot.end_time.isoformat(timespec="minutes"),
+                }
+            )
+        if schedule is not None:
+            data.update(
+                {
+                    "release_status": schedule.release_status,
+                    "claimed_at": schedule.claimed_at.isoformat() if schedule.claimed_at else None,
+                    "claimant_name": schedule.claimant_name,
+                    # What Mark Ready to Release actually stored. The review
+                    # page pre-fills its date/time/slot inputs from these so
+                    # staff adjust an existing booking rather than retyping
+                    # one that is already on file.
+                    "release_date": schedule.release_date.isoformat() if schedule.release_date else None,
+                    "release_time_start": (
+                        schedule.release_time_start.isoformat(timespec="minutes")
+                        if schedule.release_time_start
+                        else None
+                    ),
+                    "release_slot_id": schedule.release_slot_id,
+                }
+            )
+        return data
+
+
+class ApproveLogSerializer(serializers.Serializer):
+    """Payload for logging a Cashier payment (Approved -> Processing).
+
+    Both fields are required and neither is inferred from the printed PDF:
+    the form's Cashier box is filled in by hand on paper, and this is the
+    separate digital capture of what was written there.
+    """
+
+    or_number = serializers.CharField(max_length=50, allow_blank=False, trim_whitespace=True)
+    payment_date = serializers.DateField()
+
+
+class MarkReadySerializer(serializers.Serializer):
+    """Payload for Mark Ready to Release.
+
+    Staff set the handover time here rather than the step only reading a
+    value booked earlier. Two paths, deliberately allowed to coexist:
+
+      - release_slot chosen -> date and time are taken FROM that slot, so a
+        staff member cannot save a time that contradicts the window they
+        picked. That request then counts against the slot's capacity.
+      - no slot -> release_date and release_time_start are taken as typed,
+        and the booking consumes no slot capacity.
+
+    release_date is required either way: the whole point of the amendment is
+    that "Ready for Pickup" now always carries a date the student can be
+    told, so there is no path here that leaves one unset.
+    """
+
+    release_date = serializers.DateField()
+    release_time_start = serializers.TimeField(required=False, allow_null=True)
+    release_slot = serializers.PrimaryKeyRelatedField(
+        queryset=ReleaseSlot.objects.all(), required=False, allow_null=True
+    )
+
+    def validate(self, attrs):
+        slot = attrs.get("release_slot")
+        if slot is not None:
+            # The slot is the authority on its own timing; whatever the date
+            # picker sent is overwritten rather than trusted, so the two can
+            # never disagree in the stored row.
+            attrs["release_date"] = slot.slot_date
+            attrs["release_time_start"] = slot.start_time
+        return attrs
+
+
+class ReleaseRequestSerializer(serializers.Serializer):
+    """Payload for the terminal Release action.
+
+    proxy_acknowledged is only meaningful when the request has a
+    RequestProxy; the view enforces that, since whether it is required
+    depends on the instance rather than the payload.
+    """
+
+    claimant_name = serializers.CharField(max_length=150, allow_blank=False, trim_whitespace=True)
+    proxy_acknowledged = serializers.BooleanField(required=False, default=False)
+
 
 class VerifyRequestSerializer(serializers.Serializer):
     remarks = serializers.CharField(required=False, allow_blank=True)
@@ -518,7 +650,14 @@ class ReleaseSlotDetailSerializer(serializers.ModelSerializer):
         rows = []
         for fr in obj.form_requests.select_related("transaction_type", "user", "release_schedule"):
             schedule = getattr(fr, "release_schedule", None)
-            claimed = bool(schedule and schedule.claimed_at)
+            # Prefer the stored release_status now that ReleaseSchedule has
+            # one; fall back to the old claimed_at derivation for rows
+            # written before that column existed, which the migration only
+            # backfilled where a claim timestamp was actually present.
+            if schedule is not None and schedule.release_status:
+                claimed = schedule.release_status == "Claimed"
+            else:
+                claimed = bool(schedule and schedule.claimed_at)
             rows.append(
                 {
                     "form_request_id": fr.id,
@@ -526,10 +665,6 @@ class ReleaseSlotDetailSerializer(serializers.ModelSerializer):
                     "student_first_name": fr.user.first_name,
                     "student_last_name": fr.user.last_name,
                     "transaction_type": fr.transaction_type.name,
-                    # Derived, not stored: "Claimed" once an actual claim
-                    # event exists, "Scheduled" otherwise. No new
-                    # ReleaseSchedule row is created just to hold this —
-                    # that model stays reserved for the real claim event.
                     "status": "Claimed" if claimed else "Scheduled",
                 }
             )
@@ -561,7 +696,18 @@ class AssignableRequestSerializer(serializers.ModelSerializer):
 
 
 class AssignSlotSerializer(serializers.Serializer):
-    form_request = serializers.PrimaryKeyRelatedField(queryset=FormRequest.objects.filter(request_status="Ready"))
+    form_request = serializers.PrimaryKeyRelatedField(
+        # Schedulable from the moment payment is logged. Staff confirm the
+        # booked window as part of Mark Ready to Release, so requiring Ready
+        # first would mean nothing could ever be scheduled before the point
+        # the schedule is needed.
+        queryset=FormRequest.objects.filter(
+            request_status__in=[
+                FormRequest.RequestStatus.PROCESSING,
+                FormRequest.RequestStatus.READY,
+            ]
+        )
+    )
 
 
 class RecentFormRequestSerializer(serializers.ModelSerializer):

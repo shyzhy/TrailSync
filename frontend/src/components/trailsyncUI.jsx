@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+
 // Shared TrailSync visual system: the gradient-fade glass scene, the
 // skeuomorphic control styling, and the icons. Both LoginPage and
 // CreateAccountPage import from here so the two screens can't drift apart.
@@ -549,6 +551,53 @@ export const APP_CSS = `
     color: #4A5262;
     border: 1px solid rgba(91,100,116,0.32);
   }
+  /* Recessed surface for a read-only figure sitting inside a card - the
+     amount owed, a booked release window. Inset shadow rather than a border
+     so it reads as carved into the card instead of stacked on top of it. */
+  .ts-well {
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(227,223,210,0.34) 0%, rgba(250,248,243,0.55) 100%);
+    border: 1px solid rgba(227,223,210,0.9);
+    box-shadow: inset 0 2px 5px rgba(31,41,55,0.07), inset 0 -1px 0 rgba(255,255,255,0.7);
+  }
+
+  /* Approved - Ready to Print. Institutional blue, because this is the one
+     stage that is waiting on the student rather than on the office. */
+  .ts-pill-blue {
+    background: linear-gradient(180deg, rgba(36,64,107,0.22) 0%, rgba(36,64,107,0.10) 100%);
+    color: #1E3559;
+    border: 1px solid rgba(36,64,107,0.38);
+  }
+  .ts-pill-danger {
+    background: linear-gradient(180deg, rgba(220,38,38,0.20) 0%, rgba(185,28,28,0.10) 100%);
+    color: #991B1B;
+    border: 1px solid rgba(185,28,28,0.35);
+  }
+
+  /* Toast: confirmation after a lifecycle transition. Fixed to the viewport
+     foot so it stays visible after an action scrolls the page, and given the
+     same glass construction as .ts-card rather than a flat notification bar. */
+  .ts-toast {
+    position: fixed; left: 50%; bottom: 24px; z-index: 60;
+    transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px;
+    max-width: min(92vw, 460px);
+    padding: 12px 18px;
+    border-radius: 14px;
+    font-size: 14px; font-weight: 500;
+    color: #F7F5EF;
+    background: linear-gradient(180deg, rgba(47,52,61,0.97) 0%, rgba(31,35,42,0.97) 100%);
+    border: 1px solid rgba(255,255,255,0.14);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 12px 30px rgba(20,24,31,0.42);
+    animation: ts-toast-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+  .ts-toast-accent { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; background: #7AAD99; }
+  .ts-toast-error .ts-toast-accent { background: #E2857F; }
+  @keyframes ts-toast-in {
+    from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) { .ts-toast { animation: none; } }
 
   .ts-row-hover:hover { background: rgba(36,64,107,0.03); }
 
@@ -1553,5 +1602,29 @@ export function RegistrarMobileHeader({ onLogout }) {
         </button>
       </div>
     </header>
+  );
+}
+
+
+/**
+ * Transient confirmation after a lifecycle transition.
+ *
+ * role="status" rather than an alert: these confirm something the user just
+ * did deliberately, so a screen reader should mention it without cutting off
+ * whatever it is currently reading.
+ */
+export function Toast({ message, tone = 'success', onDismiss }) {
+  useEffect(() => {
+    if (!message) return undefined;
+    const timer = setTimeout(() => onDismiss?.(), 4200);
+    return () => clearTimeout(timer);
+  }, [message, onDismiss]);
+
+  if (!message) return null;
+  return (
+    <div role="status" aria-live="polite" className={`ts-toast ${tone === 'error' ? 'ts-toast-error' : ''}`}>
+      <span className="ts-toast-accent" aria-hidden="true" />
+      <span>{message}</span>
+    </div>
   );
 }

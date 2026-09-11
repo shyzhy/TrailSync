@@ -10,16 +10,17 @@ import {
   InboxIcon,
 } from './trailsyncUI.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { STATUS } from '../lib/requestStatus.js';
 
 const LOGIN_PATH = '/';
 
-// request_status -> the pill this dashboard shows. No dedicated
-// release_status/verification vocabulary exists (see backend notes), so
-// both cards derive their labels from the one canonical status field —
-// same principle TicketCard already uses on the student side.
+// Today's release rows read in claim terms rather than lifecycle terms:
+// at a release window the only question is whether the person has turned up
+// yet, so Ready reads as "Waiting" and Released as "Claimed".
 const RELEASE_ROW_PILL = {
-  Ready: { label: 'Waiting', className: 'ts-pill-processing' },
-  Released: { label: 'Claimed', className: 'ts-pill-ready' },
+  [STATUS.PROCESSING]: { label: 'Processing', className: 'ts-pill-processing' },
+  [STATUS.READY]: { label: 'Waiting', className: 'ts-pill-blue' },
+  [STATUS.RELEASED]: { label: 'Claimed', className: 'ts-pill-ready' },
 };
 
 function formatRelativeTime(iso) {
@@ -182,11 +183,11 @@ export default function RegistrarDashboardPage() {
               </div>
 
               <div className="ts-card ts-card-hoverable p-5">
-                <span className="ts-tag ts-tag-sage">Verified</span>
+                <span className="ts-tag ts-tag-sage">Approved</span>
                 <p className="ts-stat-number mt-4 text-3xl font-semibold" style={FONT_SERIF}>
                   {summary?.verified_today_count ?? 0}
                 </p>
-                <p className="ts-soft mt-1 text-sm">Verified Today</p>
+                <p className="ts-soft mt-1 text-sm">Approved Today</p>
               </div>
 
               <div className="ts-card ts-card-hoverable p-5">

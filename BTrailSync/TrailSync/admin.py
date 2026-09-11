@@ -7,6 +7,7 @@ from TrailSync.models import (
     FaqEntry,
     FormRequest,
     FormSubmission,
+    Notification,
     ReleaseSchedule,
     ReleaseSlot,
     RequestProxy,
@@ -107,3 +108,4 @@ admin.site.register(RequestProxy)
 admin.site.register(ReleaseSchedule)
 admin.site.register(FaqEntry)
 admin.site.register(RequirementVerification)
+admin.site.register(Notification)

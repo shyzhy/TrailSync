@@ -9,19 +9,18 @@ import {
   SearchIcon,
 } from './trailsyncUI.jsx';
 import TicketCard from './TicketCard.jsx';
+import { LIFECYCLE, STATUS, studentStatusLabel } from '../lib/requestStatus.js';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 
 const LOGIN_PATH = '/';
 
-// Matches FormRequest.RequestStatus exactly — "All" is a UI-only value the
-// backend maps to "no status filter" (see api/form-requests/ ?status=).
+// Built from the shared lifecycle so a new stage cannot go missing here.
+// "All" is a UI-only value the backend maps to "no status filter" (see
+// api/form-requests/ ?status=).
 const FILTER_TABS = [
   { value: 'All', label: 'All' },
-  { value: 'Submitted', label: 'Submitted' },
-  { value: 'Verified', label: 'Verified' },
-  { value: 'Ready', label: 'Ready for Release' },
-  { value: 'Released', label: 'Released' },
-  { value: 'Rejected', label: 'Rejected' },
+  ...LIFECYCLE.map((value) => ({ value, label: studentStatusLabel(value) })),
+  { value: STATUS.REJECTED, label: studentStatusLabel(STATUS.REJECTED) },
 ];
 
 function TicketSkeleton() {

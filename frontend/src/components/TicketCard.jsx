@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { DownloadIcon, FONT_SERIF } from './trailsyncUI.jsx';
+import { LIFECYCLE, STATUS, STEP_LABEL } from '../lib/requestStatus.js';
 import { authFetch } from '../lib/auth.js';
 
 const PESO = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
@@ -10,11 +11,12 @@ function formatAmount(value) {
   return Number.isNaN(n) ? null : PESO.format(n);
 }
 
-// Index into the 4-stage progress: Submitted -> Verified -> Ready -> Released.
-// Rejected is handled separately (a single red indicator, not a position on
-// this line) since a rejected request didn't "progress" to a step, it exited.
-const STEP_ORDER = ['Submitted', 'Verified', 'Ready', 'Released'];
-const STEP_LABELS = { Submitted: 'Submitted', Verified: 'Verified', Ready: 'Ready', Released: 'Released' };
+// The progress line walks the shared lifecycle, so adding a stage on the
+// backend shows up here without this file needing to know about it. Rejected
+// is handled separately (a single red indicator, not a position on the line)
+// since a rejected request didn't progress to a step, it exited.
+const STEP_ORDER = LIFECYCLE;
+const STEP_LABELS = STEP_LABEL;
 
 export function formatShortDate(iso) {
   try {
@@ -56,38 +58,39 @@ function StepProgress({ status }) {
  * way of showing a request, not a table-row alternative.
  */
 export default function TicketCard({ request, expanded, onToggle }) {
-  const isRejected = request.request_status === 'Rejected';
-  const [receiptState, setReceiptState] = useState('idle'); // 'idle' | 'loading' | 'error'
+  const isRejected = request.request_status === STATUS.REJECTED;
+  // null | 'receipt' | 'claim-stub' while downloading, or 'error'.
+  const [docState, setDocState] = useState(null);
   const amountDue = formatAmount(request.amount_due);
 
   /**
-   * Pull the printable form and hand it to the browser as a file.
+   * Pull one of this request's PDFs and hand it to the browser as a file.
    *
-   * Fetched rather than linked because the endpoint is JWT-guarded, and a
+   * Fetched rather than linked because both endpoints are JWT-guarded, and a
    * plain href cannot carry an Authorization header. The blob is then
    * clicked through a throwaway anchor rather than window.open'd: opening a
    * tab after an await has already lost the user-gesture context, so popup
    * blockers swallow it silently in Safari and Firefox.
    */
-  async function downloadReceipt() {
-    setReceiptState('loading');
+  async function downloadDocument(kind, filename) {
+    setDocState(kind);
     try {
-      const res = await authFetch(`/api/form-requests/${request.id}/receipt/`);
+      const res = await authFetch(`/api/form-requests/${request.id}/${kind}/`);
       if (!res.ok) throw new Error(String(res.status));
 
       const url = URL.createObjectURL(await res.blob());
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `TrailSync-${request.request_code}.pdf`;
+      anchor.download = filename;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
       // Held briefly rather than revoked inline: some browsers abort the
       // save if the object URL disappears before they have read the blob.
       setTimeout(() => URL.revokeObjectURL(url), 10000);
-      setReceiptState('idle');
+      setDocState(null);
     } catch {
-      setReceiptState('error');
+      setDocState('error');
     }
   }
 
@@ -136,7 +139,7 @@ export default function TicketCard({ request, expanded, onToggle }) {
 
       {expanded && (
         <div className="ts-ticket-detail w-full">
-          {request.request_status === 'Ready' && (
+          {request.request_status === STATUS.READY && (
             <div className="ts-banner ts-banner-pending mb-3 px-3.5 py-2.5 text-sm">
               {request.release_schedule ? (
                 <>
@@ -203,6 +206,9 @@ export default function TicketCard({ request, expanded, onToggle }) {
             )}
           </div>
 
+          {/* Exactly one of these is ever live: the print-and-pay form stops
+              being generated the moment payment is logged, which is the same
+              moment the claim stub switches on. */}
           {request.receipt_available && (
             <div className="ts-ticket-actions">
               <p className="ts-soft text-xs">
@@ -210,19 +216,38 @@ export default function TicketCard({ request, expanded, onToggle }) {
               </p>
               <button
                 type="button"
-                onClick={downloadReceipt}
-                disabled={receiptState === 'loading'}
+                onClick={() => downloadDocument('receipt', `TrailSync-${request.request_code}.pdf`)}
+                disabled={docState === 'receipt'}
                 className="ts-btn-primary inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 text-sm font-medium"
               >
                 <DownloadIcon />
-                {receiptState === 'loading' ? 'Preparing…' : 'Download Receipt'}
+                {docState === 'receipt' ? 'Preparing…' : 'Download Receipt'}
               </button>
             </div>
           )}
 
-          {receiptState === 'error' && (
+          {request.digital_stub_active && (
+            <div className="ts-ticket-actions">
+              <p className="ts-soft text-xs">
+                Your payment is logged. Bring this stub and a valid ID to Window 6.
+              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  downloadDocument('claim-stub', `TrailSync-ClaimStub-${request.request_code}.pdf`)
+                }
+                disabled={docState === 'claim-stub'}
+                className="ts-btn-primary inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 text-sm font-medium"
+              >
+                <DownloadIcon />
+                {docState === 'claim-stub' ? 'Preparing…' : 'Download Claim Stub'}
+              </button>
+            </div>
+          )}
+
+          {docState === 'error' && (
             <p className="mt-2 text-xs" style={{ color: '#B91C1C' }}>
-              Couldn&rsquo;t generate the form just now. Please try again.
+              Couldn&rsquo;t generate that document just now. Please try again.
             </p>
           )}
         </div>

@@ -222,16 +222,35 @@ class ReleaseSlot(models.Model):
 class FormRequest(models.Model):
     """A student/alumni's request for one document, tracked through to release."""
 
-    # NOT YET UPDATED to the 9-stage map — see the migration-review note in
-    # chat. Only 7 stages were named (Pending Verification, Blocked, Verified,
-    # Approved/Ready to Print, Processing, Ready for Pickup, Released) and
-    # this enum still reflects the earlier 5-value flow so nothing silently
-    # breaks DashboardSummaryView's counts, TrackRequestsPage's filter tabs,
-    # or TicketCard's 4-dot progress line, all of which key off these exact
-    # values today.
     class RequestStatus(models.TextChoices):
-        SUBMITTED = "Submitted", "Submitted"
-        VERIFIED = "Verified", "Verified"
+        """The request lifecycle, in order.
+
+        Stored values are kept short and URL-safe (they travel through query
+        strings on the Processing Queue filter) while the human labels carry
+        the wording the feature docs use - the same split that "Ready" ->
+        "Ready for Pickup" already used before this change.
+
+        APPROVED replaced an earlier "Verified" value when the lifecycle was
+        filled in, and a data migration rewrote existing rows. The name
+        changed because the step means more than "the requirements check
+        out": it is where the Registrar signs off, the fee is assessed, and
+        the student can print the Cashier form. Verification as an EVENT is
+        still recorded separately in RequirementVerification.
+
+        PROCESSING is entered only once staff has logged a real Cashier
+        payment (or_number + payment_date). That payment happens in person
+        and cannot be captured digitally at the moment it occurs, so this
+        transition is a staff attestation rather than a system observation.
+
+        There is deliberately no "Blocked" member. A blocked request is one
+        whose clearance_check_result is "Not Cleared" (see
+        blocked_by_clearance) - a separate axis from lifecycle position, and
+        folding it in here would lose the stage the request was blocked at.
+        """
+
+        SUBMITTED = "Submitted", "Pending Verification"
+        APPROVED = "Approved", "Approved - Ready to Print"
+        PROCESSING = "Processing", "Processing"
         READY = "Ready", "Ready for Pickup"
         RELEASED = "Released", "Released"
         REJECTED = "Rejected", "Rejected"
@@ -371,22 +390,44 @@ class FormRequest(models.Model):
             copies = 1
         return fee * max(1, copies)
 
-    def receipt_available(self):
-        """True once this request has been approved by the Registrar, which
-        is the earliest point the printable form has real content to carry —
-        before approval there's no amount due and no approving signatory.
+    def scheduled_release(self):
+        """(date, time_start) for this request's handover, or None.
 
-        Keyed off the CURRENT 5-value RequestStatus enum, where "Verified"
-        is the approval step (see RegistrarQueueVerifyView). If the 9-stage
-        map from the feature docs ever lands, this set is the one place that
-        needs revisiting — the API and the UI both gate on this method
-        rather than each hardcoding their own status list.
+        Reads ReleaseSchedule first, since that is what Mark Ready to Release
+        writes and what staff may have adjusted by hand. Falls back to the
+        booked ReleaseSlot for requests assigned a slot on the Release Slots
+        page but not yet marked ready, so the student can see a window before
+        staff has confirmed it.
+
+        One accessor because four places need this - the claim stub PDF, the
+        notification text, the review page and the student's ticket - and
+        each working out its own precedence is how they drift apart.
         """
-        return self.request_status in {
-            self.RequestStatus.VERIFIED,
-            self.RequestStatus.READY,
-            self.RequestStatus.RELEASED,
-        }
+        schedule = getattr(self, "release_schedule", None)
+        if schedule is not None and schedule.release_date:
+            return schedule.release_date, schedule.release_time_start
+        if self.release_slot is not None:
+            return self.release_slot.slot_date, self.release_slot.start_time
+        return None
+
+    def receipt_available(self):
+        """True only while the request sits at Approved - Ready to Print.
+
+        Deliberately a single stage rather than "approved or later". The
+        document is a print-and-pay form carrying a blank Cashier section;
+        once staff has logged the payment the request moves to Processing and
+        that form has nothing left to do, so it stops being generated instead
+        of lingering as a stale artefact someone could carry back to a window.
+
+        Consequence worth knowing: the tear-off claim stub lives on that same
+        PDF, so it stops being re-downloadable after payment is logged. A
+        student who loses the paper between the Cashier and Window 6 has to
+        be looked up by request_code at the window instead.
+
+        The API and the UI both gate on this one method rather than each
+        keeping a copy of the status list that could drift.
+        """
+        return self.request_status == self.RequestStatus.APPROVED
 
     def blocked_by_clearance(self):
         """True if this request's clearance result should hard-block any
@@ -487,6 +528,44 @@ class ReleaseSchedule(models.Model):
         on_delete=models.CASCADE,
         related_name="release_schedule",
     )
+    # Where this claim record sits. Until now "Claimed vs Scheduled" was
+    # derived from whether claimed_at was set, which reads the same but
+    # cannot distinguish "not claimed yet" from "claim recorded without a
+    # timestamp". Named release_status per the ERD; the request row's own
+    # request_status = "Released" is the lifecycle-level counterpart.
+    release_status = models.CharField(
+        max_length=20,
+        choices=[
+            ("Scheduled", "Scheduled"),
+            ("Claimed", "Claimed"),
+        ],
+        default="Scheduled",
+    )
+    # When the handover is booked for. Always populated by Mark Ready to
+    # Release, whether staff picked an existing slot or typed a freeform
+    # time, so every consumer - the claim stub PDF, the notification text,
+    # the student's tracking view - reads these same two fields and never
+    # has to know which path was taken.
+    release_date = models.DateField(null=True, blank=True)
+    release_time_start = models.TimeField(null=True, blank=True)
+
+    # The slot those values were taken from, when one was chosen. NULL means
+    # a freeform time that deliberately does not consume slot capacity -
+    # Window 6 can tell someone to come by outside the published windows
+    # without that eating a bookable place.
+    #
+    # SET_NULL rather than PROTECT (which FormRequest.release_slot uses):
+    # release_date and release_time_start are stored directly, so deleting a
+    # slot should drop the linkage while leaving the booking itself intact,
+    # not block the delete.
+    release_slot = models.ForeignKey(
+        ReleaseSlot,
+        on_delete=models.SET_NULL,
+        related_name="release_schedules",
+        null=True,
+        blank=True,
+    )
+
     claimed_at = models.DateTimeField(null=True, blank=True)
     claimant_name = models.CharField(max_length=150, null=True, blank=True)
     # A real uploaded signature image rather than a manually-managed path
@@ -579,3 +658,59 @@ class RequirementVerification(models.Model):
 
     def __str__(self):
         return f"{self.verification_status} - {self.form_request.request_code}"
+
+
+class Notification(models.Model):
+    """A message to a student about one of their requests.
+
+    THIS TABLE DID NOT EXIST before the lifecycle work. The brief referred to
+    "NOTIFICATIONS rows" as if they were already in the schema alongside
+    or_number and claimed_at, but nothing here or in any migration defined
+    one - so it is created here rather than the lifecycle transitions
+    silently skipping the notify step.
+
+    Kept to in-app records on purpose. The brief also mentions these
+    "trigger push via DEVICE_TOKENS"; there is no DEVICE_TOKENS table and no
+    push infrastructure in this project, and inventing a delivery guarantee
+    the system cannot honour would be worse than storing the message and
+    letting a real transport read from here later. Every row written at a
+    lifecycle transition is exactly the payload such a transport would send.
+
+    form_request is nullable so account-level messages (an approved staff
+    registration, say) can live in the same inbox later without a second
+    table; every row this codebase writes today does reference a request.
+    """
+
+    class NotificationType(models.TextChoices):
+        APPROVED = "Approved", "Approved - Ready to Print"
+        PROCESSING = "Processing", "Processing"
+        READY = "Ready", "Ready for Pickup"
+        RELEASED = "Released", "Released"
+        REJECTED = "Rejected", "Rejected"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    form_request = models.ForeignKey(
+        FormRequest,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+        null=True,
+        blank=True,
+    )
+    notification_type = models.CharField(max_length=20, choices=NotificationType.choices)
+    title = models.CharField(max_length=150)
+    message = models.TextField()
+
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.notification_type} -> {self.user.email}"

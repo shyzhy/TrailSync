@@ -16,19 +16,20 @@ import {
 } from './trailsyncUI.jsx';
 import MiniCalendar from './MiniCalendar.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { LIFECYCLE, STATUS, statusPillClass, studentStatusLabel } from '../lib/requestStatus.js';
 
 const LOGIN_PATH = '/';
 
-// request_status -> the pill label/color the spec defines. Submitted and
-// Verified are both still in the registrar's hands, so both read as
-// "Processing" to the student — the underlying value is what the summary
-// endpoint's active_requests_count already buckets the same way.
-const STATUS_PILL = {
-  Submitted: { label: 'Processing', className: 'ts-pill-processing' },
-  Verified: { label: 'Processing', className: 'ts-pill-processing' },
-  Ready: { label: 'Ready for pickup', className: 'ts-pill-ready' },
-  Released: { label: 'Released', className: 'ts-pill-released' },
-};
+// Student-facing wording for each stage, from the shared lifecycle. The
+// stages are no longer collapsed: "Ready to Print" is an instruction to the
+// student (go pay) and "Processing" means the office has their money and is
+// working on it — telling them apart is the whole point of the new stage.
+const STATUS_PILL = Object.fromEntries(
+  [...LIFECYCLE, STATUS.REJECTED].map((value) => [
+    value,
+    { label: studentStatusLabel(value), className: statusPillClass(value) },
+  ]),
+);
 
 function formatDate(iso) {
   try {
