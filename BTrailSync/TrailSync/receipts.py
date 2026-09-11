@@ -33,6 +33,8 @@ from decimal import Decimal
 from pathlib import Path
 
 from django.utils import timezone
+
+from .models import COMPLETION_OF_INC_FEE, RUSH_FEE
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
@@ -336,6 +338,46 @@ def _write_in_line(c, x, y, width, label, fonts, label_width=86.0):
     c.line(x + label_width, y - 2.5, x + width, y - 2.5)
 
 
+def _fee_breakdown(form_request, fonts):
+    """A one-line account of how amount_due was arrived at.
+
+    Mirrors FormRequest.compute_amount_due; kept in words rather than
+    recomputing the arithmetic, since the authoritative number is whatever
+    was stamped on the row at approval time.
+    """
+    transaction_type = form_request.transaction_type
+    fee = transaction_type.fee_amount
+    if fee is None:
+        return ""
+
+    submission = getattr(form_request, "submission", None)
+    data = (submission.form_data if submission else None) or {}
+
+    def _count(key):
+        try:
+            return max(1, int(data.get(key)))
+        except (TypeError, ValueError):
+            return 1
+
+    copies = _count("number_of_copies")
+    parts = []
+    if transaction_type.pricing_unit == "per_page":
+        pages = _count("number_of_pages")
+        parts.append(
+            f"{format_money(fee)} per page {MIDDOT} {pages} page{'' if pages == 1 else 's'}"
+            f" {MIDDOT} {copies} cop{'y' if copies == 1 else 'ies'}"
+        )
+    else:
+        parts.append(f"{format_money(fee)} each {MIDDOT} {copies} cop{'y' if copies == 1 else 'ies'}")
+
+    if form_request.is_rush:
+        parts.append(f"rush {format_money(RUSH_FEE)}")
+    if data.get("purpose") == "For Completion of INC":
+        parts.append(f"completion of INC {format_money(COMPLETION_OF_INC_FEE)}")
+
+    return "  +  ".join(parts)
+
+
 def build_receipt_pdf(form_request) -> bytes:
     """Render one FormRequest's Cashier form and claim stub to PDF bytes.
 
@@ -518,12 +560,15 @@ def build_receipt_pdf(form_request) -> bytes:
 
     _caps(c, LEFT + 16, y - 18, "Amount Due", fonts["sans_bold"], 8, BLACK)
 
-    fee = form_request.transaction_type.fee_amount
-    if fee is not None and copies:
+    # Show how the total was reached. This used to read "X each, N copies"
+    # for everything, which is wrong for a document priced by the page and
+    # silently omitted the rush and INC add-ons - so a student could not
+    # reconcile the number they were being asked to pay.
+    breakdown = _fee_breakdown(form_request, fonts)
+    if breakdown:
         c.setFillColor(GREY)
         c.setFont(fonts["sans"], 7.5)
-        unit = "copy" if str(copies) == "1" else "copies"
-        c.drawString(LEFT + 16, y - 32, f"{format_money(fee)} each {MIDDOT} {copies} {unit}")
+        c.drawString(LEFT + 16, y - 32, _fit(breakdown, fonts["sans"], 7.5, CONTENT_W - 200))
 
     amount_text = format_money(form_request.amount_due)
     if amount_text:

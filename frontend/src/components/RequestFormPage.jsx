@@ -25,7 +25,41 @@ const LOGIN_PATH = '/';
 const DASHBOARD_PATH = '/portal';
 
 const STEP_LABELS = ['Select Service', 'Form Details', 'Proxy Assignment', 'Review & Submit'];
-const PURPOSE_OPTIONS = ['Employment', 'Further studies', 'Scholarship', 'Board Exam', 'Other'];
+// Part 3 of FM-USTP-RGTR-09, verbatim and in the form's own order.
+const PURPOSE_OPTIONS = [
+  'For Evaluation',
+  'For Employment',
+  'For Scholarship',
+  'For Personal File',
+  'For Passport',
+  'For Advanced Studies',
+  'For Board Exam',
+  'For Ranking',
+  'For Completion of INC',
+  'Others',
+];
+
+// Sub-selections that belong to one document type each, from Part 2. They
+// are submission detail rather than separate documents, so they ride along
+// in form_data instead of being their own transaction types.
+const CAV_AGENCIES = ['DFA', 'CHED', 'DEP-ED', 'PNP', 'POEA', 'BFP', 'BJMP', 'Others'];
+
+const CERTIFICATION_SUBTYPES = [
+  'CAR',
+  'GPA',
+  'Endorsement',
+  'Officially enrolled',
+  'Subjects enrolled',
+  'USTP Conversion',
+  'English Medium of Instruction',
+  'Authorization Letter',
+  'Letter of No Objection',
+  'Graduated',
+  'Earned units',
+  'Grading System',
+  'Subjects w/ grades',
+  'Others',
+];
 const RELATIONSHIP_OPTIONS = ['Parent', 'Sibling', 'Spouse', 'Friend', 'Other'];
 
 // Pattern-matched rather than keyed by id, since TRANSACTION_TYPES is fetched
@@ -154,6 +188,11 @@ export default function RequestFormPage() {
   const [purpose, setPurpose] = useState('');
   const [purposeOther, setPurposeOther] = useState('');
   const [numberOfCopies, setNumberOfCopies] = useState(1);
+  const [numberOfPages, setNumberOfPages] = useState('');
+  const [cavAgency, setCavAgency] = useState('');
+  const [certificationSubtypes, setCertificationSubtypes] = useState([]);
+  const [semesterTaken, setSemesterTaken] = useState('');
+  const [subjectCode, setSubjectCode] = useState('');
   const [semester, setSemester] = useState('');
   const [additionalNotes, setAdditionalNotes] = useState('');
   const [graduationDate, setGraduationDate] = useState('');
@@ -228,14 +267,27 @@ export default function RequestFormPage() {
 
   // Reactive per-step validity — this is what actually disables Next/Submit,
   // not just an error message shown after a blocked click.
+  // What the chosen document implies: whether it is priced by the page, and
+  // whether it carries its own sub-selection. selectedType is derived above.
+  const isPerPage = selectedType?.pricing_unit === 'per_page';
+  const needsCavAgency = selectedType?.name === 'CAV Certification';
+  const needsCertificationSubtypes = selectedType?.name === 'Certification';
+  const isIncCompletion = purpose === 'For Completion of INC';
+
   const step1Valid = Boolean(transactionTypeId);
   const step2Valid =
     Boolean(purpose) &&
-    (purpose !== 'Other' || purposeOther.trim().length > 0) &&
+    (purpose !== 'Others' || purposeOther.trim().length > 0) &&
     Number(numberOfCopies) >= 1 &&
     Boolean(semester) &&
     (!isAlumni || Boolean(graduationDate)) &&
-    (purpose !== 'Board Exam' || Boolean(boardExamPhoto));
+    (purpose !== 'For Board Exam' || Boolean(boardExamPhoto)) &&
+    // Mirrors the server's rules so the Next button cannot walk a student
+    // into a 400 they can only discover after submitting.
+    (!isPerPage || Number(numberOfPages) >= 1) &&
+    (!needsCavAgency || Boolean(cavAgency)) &&
+    (!needsCertificationSubtypes || certificationSubtypes.length > 0) &&
+    (!isIncCompletion || (semesterTaken.trim().length > 0 && subjectCode.trim().length > 0));
   const step3Valid =
     !proxyEnabled || (proxyFullName.trim().length > 0 && Boolean(proxyRelationship) && proxyContactNumber.trim().length > 0);
   const step4Valid = confirmAccurate;
@@ -251,12 +303,21 @@ export default function RequestFormPage() {
     try {
       const formData = {
         purpose,
-        purpose_other: purpose === 'Other' ? purposeOther.trim() : '',
+        purpose_other: purpose === 'Others' ? purposeOther.trim() : '',
         number_of_copies: Number(numberOfCopies),
         semester,
         additional_notes: additionalNotes.trim(),
       };
       if (isAlumni) formData.graduation_date = graduationDate;
+      // Only sent when the document or purpose actually asks for it, so a
+      // submission never carries answers to questions it was not posed.
+      if (isPerPage) formData.number_of_pages = Number(numberOfPages);
+      if (needsCavAgency) formData.cav_agency = cavAgency;
+      if (needsCertificationSubtypes) formData.certification_subtypes = certificationSubtypes;
+      if (isIncCompletion) {
+        formData.semester_taken = semesterTaken.trim();
+        formData.subject_code = subjectCode.trim();
+      }
 
       const fd = new FormData();
       fd.append('transaction_type', transactionTypeId);
@@ -482,7 +543,7 @@ export default function RequestFormPage() {
                       </span>
                     </div>
 
-                    {purpose === 'Other' && (
+                    {purpose === 'Others' && (
                       <input
                         type="text"
                         value={purposeOther}
@@ -492,7 +553,43 @@ export default function RequestFormPage() {
                       />
                     )}
 
-                    {purpose === 'Board Exam' && (
+                    {/* The one purpose on the form that carries its own fee
+                        and its own two questions. */}
+                    {isIncCompletion && (
+                      <div className="ts-well mt-3 space-y-3 px-3.5 py-3.5">
+                        <p className="ts-soft text-xs leading-relaxed">
+                          Completion of INC carries an additional ₱175.00 fee.
+                        </p>
+                        <div>
+                          <label htmlFor="semesterTaken" className="ts-ink mb-1.5 block text-sm font-medium">
+                            Semester Taken &amp; S.Y.<RequiredMark />
+                          </label>
+                          <input
+                            id="semesterTaken"
+                            type="text"
+                            value={semesterTaken}
+                            onChange={(e) => setSemesterTaken(e.target.value)}
+                            placeholder="e.g. 1st Semester, SY 2023-2024"
+                            className="ts-input w-full px-3.5 py-2.5 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="subjectCode" className="ts-ink mb-1.5 block text-sm font-medium">
+                            Subject Code<RequiredMark />
+                          </label>
+                          <input
+                            id="subjectCode"
+                            type="text"
+                            value={subjectCode}
+                            onChange={(e) => setSubjectCode(e.target.value)}
+                            placeholder="e.g. IT321"
+                            className="ts-input w-full px-3.5 py-2.5 text-sm"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {purpose === 'For Board Exam' && (
                       <div className="mt-3">
                         <label
                           htmlFor="boardExamPhoto"
@@ -524,6 +621,76 @@ export default function RequestFormPage() {
                     )}
                   </div>
 
+                  {/* Sub-selections belonging to one document type each. The
+                      form asks these as checkboxes within the document, not as
+                      separate documents. */}
+                  {needsCavAgency && (
+                    <div>
+                      <label htmlFor="cavAgency" className="ts-ink mb-1.5 block text-sm font-medium">
+                        CAV Certification for
+                        <RequiredMark />
+                      </label>
+                      <div className="relative">
+                        <select
+                          id="cavAgency"
+                          value={cavAgency}
+                          onChange={(e) => setCavAgency(e.target.value)}
+                          className="ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm"
+                        >
+                          <option value="">Select the receiving agency</option>
+                          {CAV_AGENCIES.map((a) => (
+                            <option key={a} value={a}>
+                              {a}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="ts-soft pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
+                          <ChevronIcon />
+                        </span>
+                      </div>
+                      <p className="ts-soft mt-1.5 text-xs">
+                        Which agency the authenticated documents are being sent to.
+                      </p>
+                    </div>
+                  )}
+
+                  {needsCertificationSubtypes && (
+                    <div>
+                      <p className="ts-ink mb-1.5 block text-sm font-medium">
+                        What should the certification state?
+                        <RequiredMark />
+                      </p>
+                      <div className="ts-well grid grid-cols-1 gap-x-4 gap-y-2 px-3.5 py-3.5 sm:grid-cols-2">
+                        {CERTIFICATION_SUBTYPES.map((sub) => {
+                          const checked = certificationSubtypes.includes(sub);
+                          return (
+                            <label key={sub} className="flex cursor-pointer select-none items-start gap-2.5 text-sm">
+                              <span className="ts-checkbox-wrap mt-0.5">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() =>
+                                    setCertificationSubtypes((prev) =>
+                                      checked ? prev.filter((x) => x !== sub) : [...prev, sub]
+                                    )
+                                  }
+                                  className="ts-checkbox-input"
+                                />
+                                <span className="ts-checkbox-well" aria-hidden="true">
+                                  <svg viewBox="0 0 12 10" fill="none" className="ts-checkbox-check">
+                                    <path d="M1 5.2 4.3 8.5 11 1.5" stroke="#FAF8F3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                </span>
+                              </span>
+                              <span className="ts-soft">{sub}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <p className="ts-soft mt-1.5 text-xs">Select every item the certification needs to cover.</p>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                     <div>
                       <label htmlFor="numberOfCopies" className="ts-ink mb-1.5 block text-sm font-medium">
@@ -538,7 +705,34 @@ export default function RequestFormPage() {
                         onChange={(e) => setNumberOfCopies(e.target.value)}
                         className="ts-input w-full px-3.5 py-2.5 text-sm"
                       />
+                      <p className="ts-soft mt-1.5 text-xs">How many separate copies you need.</p>
                     </div>
+
+                    {/* Only for documents the registrar charges by the page.
+                        Pages and copies are different questions: two copies
+                        of a ten-page transcript is charged for twenty pages. */}
+                    {isPerPage && (
+                      <div>
+                        <label htmlFor="numberOfPages" className="ts-ink mb-1.5 block text-sm font-medium">
+                          Number of Pages
+                          <RequiredMark />
+                        </label>
+                        <input
+                          id="numberOfPages"
+                          type="number"
+                          min="1"
+                          value={numberOfPages}
+                          onChange={(e) => setNumberOfPages(e.target.value)}
+                          placeholder="e.g. 4"
+                          className="ts-input w-full px-3.5 py-2.5 text-sm"
+                        />
+                        <p className="ts-soft mt-1.5 text-xs">
+                          {selectedType?.name} is charged per page
+                          {selectedType?.fee_amount ? ` (₱${Number(selectedType.fee_amount).toFixed(2)} each)` : ''}.
+                          Ask the registrar if you are unsure how many pages yours runs to.
+                        </p>
+                      </div>
+                    )}
 
                     <div>
                       <label htmlFor="semester" className="ts-ink mb-1.5 block text-sm font-medium">
@@ -746,7 +940,7 @@ export default function RequestFormPage() {
                     <div className="ts-review-row flex items-start justify-between gap-4">
                       <div>
                         <p className="ts-review-label">Purpose of Request</p>
-                        <p className="ts-review-value">{purpose === 'Other' ? purposeOther : purpose}</p>
+                        <p className="ts-review-value">{purpose === 'Others' ? purposeOther : purpose}</p>
                       </div>
                       <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
                         Edit
@@ -762,6 +956,56 @@ export default function RequestFormPage() {
                         Edit
                       </button>
                     </div>
+
+                    {isPerPage && (
+                      <div className="ts-review-row flex items-start justify-between gap-4">
+                        <div>
+                          <p className="ts-review-label">Number of Pages</p>
+                          <p className="ts-review-value">{numberOfPages}</p>
+                        </div>
+                        <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
+                          Edit
+                        </button>
+                      </div>
+                    )}
+
+                    {needsCavAgency && (
+                      <div className="ts-review-row flex items-start justify-between gap-4">
+                        <div>
+                          <p className="ts-review-label">CAV Certification for</p>
+                          <p className="ts-review-value">{cavAgency}</p>
+                        </div>
+                        <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
+                          Edit
+                        </button>
+                      </div>
+                    )}
+
+                    {needsCertificationSubtypes && (
+                      <div className="ts-review-row flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="ts-review-label">Certification Type</p>
+                          <p className="ts-review-value">{certificationSubtypes.join(', ')}</p>
+                        </div>
+                        <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
+                          Edit
+                        </button>
+                      </div>
+                    )}
+
+                    {isIncCompletion && (
+                      <div className="ts-review-row flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="ts-review-label">Completion of INC</p>
+                          <p className="ts-review-value">
+                            {semesterTaken} · {subjectCode}
+                          </p>
+                        </div>
+                        <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
+                          Edit
+                        </button>
+                      </div>
+                    )}
 
                     <div className="ts-review-row flex items-start justify-between gap-4">
                       <div>
@@ -785,7 +1029,7 @@ export default function RequestFormPage() {
                       </div>
                     )}
 
-                    {purpose === 'Board Exam' && boardExamPhoto && (
+                    {purpose === 'For Board Exam' && boardExamPhoto && (
                       <div className="ts-review-row flex items-start justify-between gap-4">
                         <div>
                           <p className="ts-review-label">Board Exam Photo</p>

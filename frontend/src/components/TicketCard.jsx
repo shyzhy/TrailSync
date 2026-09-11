@@ -161,7 +161,7 @@ export default function TicketCard({ request, expanded, onToggle }) {
             <div>
               <p className="ts-review-label">Purpose</p>
               <p className="ts-review-value">
-                {request.purpose === 'Other' ? request.purpose_other || 'Other' : request.purpose || '—'}
+                {request.purpose === 'Others' ? request.purpose_other || 'Others' : request.purpose || '—'}
               </p>
             </div>
             <div>

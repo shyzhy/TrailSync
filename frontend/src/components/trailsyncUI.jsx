@@ -568,6 +568,14 @@ export const APP_CSS = `
     color: #1E3559;
     border: 1px solid rgba(36,64,107,0.38);
   }
+  /* Verified: Front Desk has signed off and it is with the Registrar.
+     Teal rather than a second use of gold or blue, so the three
+     "in the office's hands" stages stay tellable apart at a glance. */
+  .ts-pill-teal {
+    background: linear-gradient(180deg, rgba(45,106,110,0.24) 0%, rgba(45,106,110,0.11) 100%);
+    color: #235457;
+    border: 1px solid rgba(45,106,110,0.4);
+  }
   .ts-pill-danger {
     background: linear-gradient(180deg, rgba(220,38,38,0.20) 0%, rgba(185,28,28,0.10) 100%);
     color: #991B1B;

@@ -333,13 +333,27 @@ export default function RequestReviewPage({ requestId }) {
                   <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
                     <Field label="Transaction Type">{request.transaction_type}</Field>
                     <Field label="Number of Copies">{request.number_of_copies}</Field>
+                    {request.number_of_pages != null && (
+                      <Field label="Number of Pages">{request.number_of_pages}</Field>
+                    )}
+                    {(request.submission_extras || []).map((extra) => (
+                      <Field key={extra.label} label={extra.label}>{extra.value}</Field>
+                    ))}
                     <Field label="Purpose">
-                      {request.purpose === 'Other' ? request.purpose_other || 'Other' : request.purpose}
+                      {request.purpose === 'Others' ? request.purpose_other || 'Others' : request.purpose}
                     </Field>
                     <Field label="Semester / Year">{request.semester}</Field>
                     {amountDue && <Field label="Amount Due">{amountDue}</Field>}
                     {request.or_number && <Field label="O.R. Number">{request.or_number}</Field>}
                     {request.payment_date && <Field label="Payment Date">{formatDate(request.payment_date)}</Field>}
+                    {request.verified_by_name && (
+                      <Field label="Verified By">
+                        {request.verified_by_name}
+                        <span className="ts-soft block text-xs font-normal">
+                          Front Desk Personnel
+                        </span>
+                      </Field>
+                    )}
                     {request.approved_by_name && (
                       <Field label="Approved By">
                         {request.approved_by_name}
@@ -408,11 +422,12 @@ export default function RequestReviewPage({ requestId }) {
                   </div>
                 )}
 
-                {/* Pending Verification -> Verify & Approve / Reject */}
+                {/* Pending Verification -> Front Desk verification (first of the
+                    form's two signatures). No fee is assessed here. */}
                 {currentStatus === STATUS.SUBMITTED && (
                   <ActionCard
-                    title="Review Requirements"
-                    description="Approving assesses the fee and lets the student print their Cashier form."
+                    title="Front Desk Verification"
+                    description="Check the requirements and clearance. The Registrar assesses the fee separately, after this."
                   >
                     <label htmlFor="reviewRemarks" className="ts-ink mb-1.5 block text-sm font-medium">
                       Review Remarks
@@ -433,13 +448,72 @@ export default function RequestReviewPage({ requestId }) {
                           runTransition('verify', `/api/registrar/queue/${request.id}/verify/`, {
                             method: 'POST',
                             body: { remarks: remarks.trim() },
-                            successMessage: 'Request approved — the student can now print and pay.',
+                            successMessage: 'Requirements verified — sent to the Registrar for approval.',
                           })
                         }
                         className="ts-btn-sage flex items-center justify-center gap-2 py-2.5 text-sm font-medium"
                       >
                         {actionLoading === 'verify' && <Spinner />}
-                        Verify &amp; Approve
+                        Verify Requirements
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || !remarks.trim()}
+                        onClick={() =>
+                          runTransition('reject', `/api/registrar/queue/${request.id}/reject/`, {
+                            method: 'POST',
+                            body: { remarks: remarks.trim() },
+                            successMessage: 'Request rejected — the student has been notified.',
+                          })
+                        }
+                        className="ts-btn-outline-danger flex items-center justify-center gap-2 py-2.5 text-sm font-medium"
+                      >
+                        {actionLoading === 'reject' && <Spinner />}
+                        Reject with Remarks
+                      </button>
+                    </div>
+                  </ActionCard>
+                )}
+
+                {/* Verified -> Registrar approval (the form's second signature).
+                    This is where the fee is assessed. */}
+                {currentStatus === STATUS.VERIFIED && (
+                  <ActionCard
+                    title="Registrar Approval"
+                    description="Approving assesses the fee and lets the student print their Cashier form."
+                  >
+                    {request.verified_by_name && (
+                      <div className="ts-well mb-4 px-3.5 py-2.5">
+                        <p className="ts-review-label">Verified By</p>
+                        <p className="ts-ink mt-0.5 text-sm font-semibold">{request.verified_by_name}</p>
+                        <p className="ts-soft text-xs">Front Desk Personnel</p>
+                      </div>
+                    )}
+                    <label htmlFor="approvalRemarks" className="ts-ink mb-1.5 block text-sm font-medium">
+                      Remarks <span className="ts-soft font-normal">(optional)</span>
+                    </label>
+                    <textarea
+                      id="approvalRemarks"
+                      rows={2}
+                      value={remarks}
+                      onChange={(e) => setRemarks(e.target.value)}
+                      placeholder="Add a note, or a reason if declining..."
+                      className="ts-input w-full px-3.5 py-2.5 text-sm"
+                    />
+                    <div className="mt-4 flex flex-col gap-2.5">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          runTransition('approve', `/api/registrar/queue/${request.id}/approve/`, {
+                            method: 'POST',
+                            successMessage: 'Approved — the student can now print and pay.',
+                          })
+                        }
+                        className="ts-btn-primary flex items-center justify-center gap-2 py-2.5 text-sm font-medium"
+                      >
+                        {actionLoading === 'approve' && <Spinner />}
+                        Approve &amp; Assess Fee
                       </button>
                       <button
                         type="button"

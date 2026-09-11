@@ -14,6 +14,7 @@
 
 export const STATUS = {
   SUBMITTED: 'Submitted',
+  VERIFIED: 'Verified',
   APPROVED: 'Approved',
   PROCESSING: 'Processing',
   READY: 'Ready',
@@ -28,6 +29,7 @@ export const STATUS = {
  */
 export const LIFECYCLE = [
   STATUS.SUBMITTED,
+  STATUS.VERIFIED,
   STATUS.APPROVED,
   STATUS.PROCESSING,
   STATUS.READY,
@@ -37,6 +39,7 @@ export const LIFECYCLE = [
 /** Staff-facing labels — the full wording from the feature docs. */
 export const STATUS_LABEL = {
   [STATUS.SUBMITTED]: 'Pending Verification',
+  [STATUS.VERIFIED]: 'Verified',
   [STATUS.APPROVED]: 'Approved - Ready to Print',
   [STATUS.PROCESSING]: 'Processing',
   [STATUS.READY]: 'Ready for Pickup',
@@ -51,6 +54,9 @@ export const STATUS_LABEL = {
  */
 export const STUDENT_STATUS_LABEL = {
   [STATUS.SUBMITTED]: 'Submitted',
+  // Front Desk has cleared the requirements and it is with the Registrar.
+  // "Verified" would read to a student as "finished"; it is not.
+  [STATUS.VERIFIED]: 'Under Review',
   [STATUS.APPROVED]: 'Ready to Print',
   [STATUS.PROCESSING]: 'Processing',
   [STATUS.READY]: 'Ready for Pickup',
@@ -61,6 +67,7 @@ export const STUDENT_STATUS_LABEL = {
 /** Compact labels for the progress line, where space is tight. */
 export const STEP_LABEL = {
   [STATUS.SUBMITTED]: 'Submitted',
+  [STATUS.VERIFIED]: 'Verified',
   [STATUS.APPROVED]: 'Approved',
   [STATUS.PROCESSING]: 'Processing',
   [STATUS.READY]: 'Ready',
@@ -69,6 +76,7 @@ export const STEP_LABEL = {
 
 export const STATUS_PILL_CLASS = {
   [STATUS.SUBMITTED]: 'ts-pill-released',
+  [STATUS.VERIFIED]: 'ts-pill-teal',
   [STATUS.APPROVED]: 'ts-pill-blue',
   [STATUS.PROCESSING]: 'ts-pill-processing',
   [STATUS.READY]: 'ts-pill-ready',
