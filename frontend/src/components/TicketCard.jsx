@@ -1,4 +1,14 @@
-import { FONT_SERIF } from './trailsyncUI.jsx';
+import { useState } from 'react';
+import { DownloadIcon, FONT_SERIF } from './trailsyncUI.jsx';
+import { authFetch } from '../lib/auth.js';
+
+const PESO = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
+
+function formatAmount(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isNaN(n) ? null : PESO.format(n);
+}
 
 // Index into the 4-stage progress: Submitted -> Verified -> Ready -> Released.
 // Rejected is handled separately (a single red indicator, not a position on
@@ -47,6 +57,39 @@ function StepProgress({ status }) {
  */
 export default function TicketCard({ request, expanded, onToggle }) {
   const isRejected = request.request_status === 'Rejected';
+  const [receiptState, setReceiptState] = useState('idle'); // 'idle' | 'loading' | 'error'
+  const amountDue = formatAmount(request.amount_due);
+
+  /**
+   * Pull the printable form and hand it to the browser as a file.
+   *
+   * Fetched rather than linked because the endpoint is JWT-guarded, and a
+   * plain href cannot carry an Authorization header. The blob is then
+   * clicked through a throwaway anchor rather than window.open'd: opening a
+   * tab after an await has already lost the user-gesture context, so popup
+   * blockers swallow it silently in Safari and Firefox.
+   */
+  async function downloadReceipt() {
+    setReceiptState('loading');
+    try {
+      const res = await authFetch(`/api/form-requests/${request.id}/receipt/`);
+      if (!res.ok) throw new Error(String(res.status));
+
+      const url = URL.createObjectURL(await res.blob());
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `TrailSync-${request.request_code}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      // Held briefly rather than revoked inline: some browsers abort the
+      // save if the object URL disappears before they have read the blob.
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setReceiptState('idle');
+    } catch {
+      setReceiptState('error');
+    }
+  }
 
   return (
     <div className="ts-ticket">
@@ -126,6 +169,12 @@ export default function TicketCard({ request, expanded, onToggle }) {
               <p className="ts-review-label">Semester / Year</p>
               <p className="ts-review-value">{request.semester || '—'}</p>
             </div>
+            {amountDue && (
+              <div>
+                <p className="ts-review-label">Amount Due</p>
+                <p className="ts-review-value">{amountDue}</p>
+              </div>
+            )}
             {request.graduation_date && (
               <div>
                 <p className="ts-review-label">Graduation Date</p>
@@ -153,6 +202,29 @@ export default function TicketCard({ request, expanded, onToggle }) {
               </div>
             )}
           </div>
+
+          {request.receipt_available && (
+            <div className="ts-ticket-actions">
+              <p className="ts-soft text-xs">
+                Print this form, pay at the Cashier, then present it at Window 6.
+              </p>
+              <button
+                type="button"
+                onClick={downloadReceipt}
+                disabled={receiptState === 'loading'}
+                className="ts-btn-primary inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 text-sm font-medium"
+              >
+                <DownloadIcon />
+                {receiptState === 'loading' ? 'Preparing…' : 'Download Receipt'}
+              </button>
+            </div>
+          )}
+
+          {receiptState === 'error' && (
+            <p className="mt-2 text-xs" style={{ color: '#B91C1C' }}>
+              Couldn&rsquo;t generate the form just now. Please try again.
+            </p>
+          )}
         </div>
       )}
     </div>

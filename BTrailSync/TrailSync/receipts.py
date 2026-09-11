@@ -1,0 +1,537 @@
+"""Server-side PDF generation for the printable Cashier / claim form.
+
+Deliberately NOT WeasyPrint, despite it being the natural HTML/CSS-to-PDF
+pick and the one the brief suggested: WeasyPrint renders through native GTK
+libraries (libgobject, Pango, cairo) that pip cannot supply on Windows. It
+pip-installs cleanly and then fails at import with "cannot load library
+libgobject-2.0-0" unless a system-wide GTK runtime is present. It is not
+present on this project's dev machine, and requiring one would have to be
+reproduced on whatever host this eventually deploys to. ReportLab is pure
+Python with no native dependencies, so `pip install` really is all it takes
+on any platform.
+
+Layout is drawn directly onto the canvas rather than flowed through
+platypus. This document has a fixed, form-like structure that must always
+land on exactly one page — it gets printed, written on by hand at the
+Cashier, then torn along the stub line — so absolute positioning is the
+right tool here. There is no variable-length content needing to reflow, and
+the few fields that could overrun their column are truncated to fit rather
+than allowed to push the claim stub onto a second page.
+
+This is the one place in TrailSync that deliberately abandons the
+skeuomorphic / liquid-glass design language. Backdrop blur, soft shadows and
+translucent panels are screen-only affordances that either vanish or turn to
+mud on paper, so this reads as an official printed document instead: black
+text on white with ruled boxes, keeping institutional blue and muted gold
+only as accent bars and rules so it stays recognisably TrailSync.
+"""
+
+from __future__ import annotations
+
+import io
+from decimal import Decimal
+from pathlib import Path
+
+from django.utils import timezone
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas as pdfcanvas
+
+ASSET_DIR = Path(__file__).resolve().parent / "assets"
+FONT_DIR = ASSET_DIR / "fonts"
+LOGO_PATH = ASSET_DIR / "trailsync-logo.png"
+
+# A4 rather than Letter. Philippine universities and government offices
+# standardise on A4, and this form is handled at three separate desks
+# (student, Cashier, Window 6), so it needs to match the paper already in
+# their trays. Chosen once here and never mixed.
+PAGE_W, PAGE_H = A4
+MARGIN = 42.0
+CONTENT_W = PAGE_W - 2 * MARGIN
+LEFT = MARGIN
+RIGHT = PAGE_W - MARGIN
+
+BLUE = colors.HexColor("#24406B")
+GOLD = colors.HexColor("#B8872B")
+BLACK = colors.HexColor("#111111")
+GREY = colors.HexColor("#6B7280")
+HAIRLINE = colors.HexColor("#9CA3AF")
+
+PESO = "₱"
+EM_DASH = "—"
+MIDDOT = "·"
+SCISSORS = "✂"
+
+_FONTS_LOADED = False
+_EMBEDDED_OK = False
+
+
+def _load_fonts():
+    """Register the bundled DejaVu faces, once per process.
+
+    ReportLab's built-in Type1 faces (Helvetica et al.) use WinAnsiEncoding,
+    which has no glyph for the Philippine peso sign — it would silently
+    print as a black box on the single number the student has to hand money
+    over for. DejaVu carries U+20B1 and is bundled into assets/fonts rather
+    than read out of the Windows font directory, because that path does not
+    exist on a Linux host and Arial/Calibri are not redistributable anyway.
+
+    If registration fails for any reason the document still renders, using
+    the built-in faces and spelling the currency "PHP" instead — a fallback
+    that degrades the typography but never prints an unreadable amount.
+    """
+    global _FONTS_LOADED, _EMBEDDED_OK
+    if _FONTS_LOADED:
+        return
+    _FONTS_LOADED = True
+    faces = {
+        "TS-Sans": "DejaVuSans.ttf",
+        "TS-Sans-Bold": "DejaVuSans-Bold.ttf",
+        "TS-Serif": "DejaVuSerif.ttf",
+        "TS-Serif-Bold": "DejaVuSerif-Bold.ttf",
+    }
+    try:
+        for name, filename in faces.items():
+            pdfmetrics.registerFont(TTFont(name, str(FONT_DIR / filename)))
+        _EMBEDDED_OK = True
+    except Exception:
+        _EMBEDDED_OK = False
+
+
+def _fonts():
+    _load_fonts()
+    if _EMBEDDED_OK:
+        return {
+            "sans": "TS-Sans",
+            "sans_bold": "TS-Sans-Bold",
+            "serif": "TS-Serif",
+            "serif_bold": "TS-Serif-Bold",
+        }
+    return {
+        "sans": "Helvetica",
+        "sans_bold": "Helvetica-Bold",
+        "serif": "Times-Roman",
+        "serif_bold": "Times-Bold",
+    }
+
+
+def format_money(value):
+    """Render a peso amount, or None when there is nothing to render.
+
+    Returns None rather than a zero for a missing amount so callers can draw
+    a blank write-in rule instead — a document type with no published fee is
+    a real case, and printing 0.00 would tell the student they owe nothing.
+    """
+    if value is None:
+        return None
+    _load_fonts()
+    symbol = PESO if _EMBEDDED_OK else "PHP "
+    return f"{symbol}{Decimal(value).quantize(Decimal('0.01')):,.2f}"
+
+
+def _local(dt):
+    """Project a stored datetime into local time, tolerating naive values
+    (what comes back when a deployment runs with USE_TZ off)."""
+    if dt is None:
+        return None
+    try:
+        return timezone.localtime(dt)
+    except (ValueError, TypeError):
+        return dt
+
+
+def _fit(text, font, size, max_width):
+    """Truncate to fit a fixed column, since nothing here may reflow onto a
+    second page. The ellipsis signals the value was cut, not merely short."""
+    text = "" if text is None else str(text)
+    if pdfmetrics.stringWidth(text, font, size) <= max_width:
+        return text
+    ellipsis = "…"
+    while text and pdfmetrics.stringWidth(text + ellipsis, font, size) > max_width:
+        text = text[:-1]
+    return text + ellipsis
+
+
+def _student_name(user, profile):
+    parts = [user.first_name or ""]
+    if profile is not None and profile.middle_name:
+        parts.append(profile.middle_name)
+    parts.append(user.last_name or "")
+    return " ".join(p for p in parts if p).strip() or user.email
+
+
+def _caps(c, x, y, text, font, size, color, spacing=0.8):
+    """Letterspaced small caps, used for every label on the form.
+
+    Drawn through a text object rather than canvas.drawString because
+    character spacing is only exposed on PDFTextObject in this ReportLab
+    version — the canvas has no setCharSpace. Tracking matters here: at 6.5pt
+    an unspaced uppercase label turns into a grey smear once it is printed
+    and photocopied, which these forms will be.
+    """
+    obj = c.beginText(x, y)
+    obj.setFont(font, size)
+    obj.setFillColor(color)
+    obj.setCharSpace(spacing)
+    obj.textOut(text.upper())
+    # Reset tracking back to zero BEFORE the object is emitted. Character
+    # spacing is a PDF text-state parameter, so the Tc operator this text
+    # object writes survives past its own ET and silently applies to every
+    # later string on the page - while the canvas goes on believing spacing
+    # is still 0. Left unreset it shifted each subsequent drawRightString by
+    # (spacing x character count), pushing right-aligned text and truncated
+    # column values out past the margin.
+    obj.setCharSpace(0)
+    c.drawText(obj)
+
+
+def _caps_width(text, font, size, spacing=0.8):
+    """Rendered width of a _caps() label.
+
+    pdfmetrics.stringWidth measures glyph advances only and knows nothing
+    about tracking, so anything sized against a letterspaced label has to add
+    it back - PDF applies the spacing after every glyph, the last one
+    included.
+    """
+    return pdfmetrics.stringWidth(text.upper(), font, size) + spacing * len(text)
+
+
+def _section_bar(c, x, y, width, title, fonts, height=15.0):
+    """A reversed-out blue header bar. Returns the y of its bottom edge."""
+    c.setFillColor(BLUE)
+    c.rect(x, y - height, width, height, stroke=0, fill=1)
+    _caps(c, x + 7, y - height + 4.8, title, fonts["sans_bold"], 7.5, colors.white)
+    return y - height
+
+
+def _field(c, x, y, width, label, value, fonts):
+    """One label-over-value pair. Returns the y to draw the next one at."""
+    _caps(c, x, y, label, fonts["sans"], 6.5, GREY, spacing=0.7)
+    c.setFillColor(BLACK)
+    c.setFont(fonts["sans_bold"], 9)
+    c.drawString(x, y - 11.5, _fit(value or EM_DASH, fonts["sans_bold"], 9, width))
+    return y - 25
+
+
+def _write_in_line(c, x, y, width, label, fonts, label_width=86.0):
+    """A labelled blank rule, to be completed by hand at the Cashier."""
+    c.setFillColor(BLACK)
+    c.setFont(fonts["sans"], 8.5)
+    c.drawString(x, y, label)
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(0.6)
+    c.line(x + label_width, y - 2.5, x + width, y - 2.5)
+
+
+def build_receipt_pdf(form_request) -> bytes:
+    """Render one FormRequest's Cashier form and claim stub to PDF bytes.
+
+    Callers own authorisation and the FormRequest.receipt_available() check —
+    this renders whatever it is handed and enforces neither.
+    """
+    fonts = _fonts()
+    user = form_request.user
+    profile = getattr(user, "user_profile", None)
+    submission = getattr(form_request, "submission", None)
+    form_data = (submission.form_data if submission else None) or {}
+
+    purpose = form_data.get("purpose")
+    if purpose == "Other":
+        purpose = form_data.get("purpose_other") or "Other"
+
+    buffer = io.BytesIO()
+    c = pdfcanvas.Canvas(buffer, pagesize=A4)
+    c.setTitle(f"TrailSync Request Form {EM_DASH} {form_request.request_code}")
+    c.setAuthor("USTP-CDO Office of the Registrar")
+    c.setSubject("Request for Credentials - Official Form")
+
+    y = PAGE_H - MARGIN
+
+    # ---------------------------------------------------------------- header
+    c.setFillColor(BLUE)
+    c.rect(LEFT, y - 3.5, CONTENT_W, 3.5, stroke=0, fill=1)
+    y -= 3.5 + 16
+
+    if LOGO_PATH.exists():
+        c.drawImage(
+            ImageReader(str(LOGO_PATH)),
+            LEFT,
+            y - 24,
+            width=24,
+            height=24,
+            mask="auto",
+            preserveAspectRatio=True,
+            anchor="sw",
+        )
+        wordmark_x = LEFT + 31
+    else:
+        wordmark_x = LEFT
+
+    c.setFillColor(BLUE)
+    c.setFont(fonts["serif_bold"], 17)
+    c.drawString(wordmark_x, y - 17, "TrailSync")
+
+    c.setFillColor(BLACK)
+    c.setFont(fonts["sans_bold"], 8.5)
+    c.drawRightString(RIGHT, y - 8, f"USTP {EM_DASH} Cagayan de Oro")
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 7.5)
+    c.drawRightString(RIGHT, y - 19, f"Office of the Registrar {MIDDOT} Window 6")
+
+    y -= 34
+    c.setStrokeColor(GOLD)
+    c.setLineWidth(1.1)
+    c.line(LEFT, y, RIGHT, y)
+    y -= 17
+
+    c.setFillColor(BLACK)
+    c.setFont(fonts["serif_bold"], 13.5)
+    c.drawCentredString(PAGE_W / 2, y, f"Request for Credentials {EM_DASH} Official Form")
+    y -= 12
+
+    generated = _local(timezone.now())
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 7.5)
+    c.drawCentredString(PAGE_W / 2, y, f"Generated {generated.strftime('%B %d, %Y at %I:%M %p')}")
+    y -= 18
+
+    # -------------------------------------------------------------- tracking
+    box_h = 52.0
+    c.setStrokeColor(BLUE)
+    c.setLineWidth(1.4)
+    c.rect(LEFT, y - box_h, CONTENT_W, box_h, stroke=1, fill=0)
+
+    _caps(c, LEFT + 12, y - 17, "Tracking Number", fonts["sans"], 7, GREY)
+    c.setFillColor(BLUE)
+    c.setFont(fonts["serif_bold"], 24)
+    c.drawString(LEFT + 12, y - 41, form_request.request_code)
+
+    if form_request.is_rush:
+        # Gold rather than a red that is not in the palette; still the
+        # loudest thing on the page, which is the point — it changes how the
+        # Cashier and Window 6 prioritise the paper in front of them.
+        label = "Rush Request"
+        pad = 13.0
+        # Sized from the measured label rather than a fixed width, so the
+        # badge cannot clip its own text.
+        badge_w = _caps_width(label, fonts["sans_bold"], 9, spacing=1.0) + pad * 2
+        badge_h = 22.0
+        badge_x = RIGHT - 12 - badge_w
+        badge_y = y - 37
+        c.setFillColor(GOLD)
+        c.setStrokeColor(GOLD)
+        c.roundRect(badge_x, badge_y, badge_w, badge_h, 3, stroke=1, fill=1)
+        _caps(c, badge_x + pad, badge_y + 7.5, label, fonts["sans_bold"], 9, colors.white, spacing=1.0)
+    y -= box_h + 15
+
+    # ------------------------------------------- student info / request info
+    gutter = 18.0
+    col_w = (CONTENT_W - gutter) / 2
+    col2_x = LEFT + col_w + gutter
+
+    bar_y = _section_bar(c, LEFT, y, col_w, "Student Information", fonts)
+    _section_bar(c, col2_x, y, col_w, "Request Details", fonts)
+
+    left_y = bar_y - 15
+    right_y = left_y
+
+    left_y = _field(c, LEFT, left_y, col_w, "Full Name", _student_name(user, profile), fonts)
+    left_y = _field(
+        c, LEFT, left_y, col_w, "School ID Number",
+        profile.school_id_number if profile else None, fonts,
+    )
+    left_y = _field(c, LEFT, left_y, col_w, "Course", profile.course if profile else None, fonts)
+    left_y = _field(
+        c, LEFT, left_y, col_w, "Year Level", profile.year_level if profile else None, fonts
+    )
+
+    copies = form_data.get("number_of_copies")
+    right_y = _field(
+        c, col2_x, right_y, col_w, "Transaction Type", form_request.transaction_type.name, fonts
+    )
+    right_y = _field(
+        c, col2_x, right_y, col_w, "Number of Copies",
+        str(copies) if copies is not None else None, fonts,
+    )
+    right_y = _field(c, col2_x, right_y, col_w, "Purpose of Request", purpose, fonts)
+    right_y = _field(
+        c, col2_x, right_y, col_w, "Semester / Academic Year", form_data.get("semester"), fonts
+    )
+    right_y = _field(
+        c, col2_x, right_y, col_w, "Date Requested",
+        _local(form_request.created_at).strftime("%B %d, %Y"), fonts,
+    )
+
+    y = min(left_y, right_y) - 6
+
+    # ------------------------------------------------------------ amount due
+    amount_h = 50.0
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(1.4)
+    c.rect(LEFT, y - amount_h, CONTENT_W, amount_h, stroke=1, fill=0)
+    c.setFillColor(GOLD)
+    c.rect(LEFT, y - amount_h, 4, amount_h, stroke=0, fill=1)
+
+    _caps(c, LEFT + 16, y - 18, "Amount Due", fonts["sans_bold"], 8, BLACK)
+
+    fee = form_request.transaction_type.fee_amount
+    if fee is not None and copies:
+        c.setFillColor(GREY)
+        c.setFont(fonts["sans"], 7.5)
+        unit = "copy" if str(copies) == "1" else "copies"
+        c.drawString(LEFT + 16, y - 32, f"{format_money(fee)} each {MIDDOT} {copies} {unit}")
+
+    amount_text = format_money(form_request.amount_due)
+    if amount_text:
+        c.setFillColor(BLACK)
+        c.setFont(fonts["sans_bold"], 20)
+        c.drawRightString(RIGHT - 16, y - 34, amount_text)
+    else:
+        # No published fee for this document type: leave a rule for the
+        # Cashier to write the figure on rather than assert a number.
+        c.setFillColor(GREY)
+        c.setFont(fonts["sans"], 8)
+        c.drawRightString(RIGHT - 16, y - 20, "to be assessed at the Cashier")
+        c.setStrokeColor(BLACK)
+        c.setLineWidth(0.8)
+        c.line(RIGHT - 150, y - 36, RIGHT - 16, y - 36)
+    y -= amount_h + 16
+
+    # -------------------------------------------------- approval / signature
+    c.setFillColor(BLACK)
+    c.setFont(fonts["sans_bold"], 9)
+    c.drawString(LEFT, y, "Approved by the Office of the Registrar")
+    y -= 30
+
+    approver = form_request.registrar_approved_by
+    sig_w = 210.0
+    if approver is not None:
+        # The approving staff member's name set above the rule, standing in
+        # for the "auto-applied signature" — a rendered name plus the
+        # electronic note below, never a fabricated handwriting image.
+        c.setFillColor(BLACK)
+        c.setFont(fonts["serif"], 12)
+        c.drawString(LEFT + 6, y + 7, approver.user.get_full_name())
+
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(0.8)
+    c.line(LEFT, y, LEFT + sig_w, y)
+
+    if approver is not None:
+        c.setFillColor(BLACK)
+        c.setFont(fonts["sans_bold"], 8.5)
+        c.drawString(LEFT, y - 11, approver.user.get_full_name())
+        c.setFillColor(GREY)
+        c.setFont(fonts["sans"], 7.5)
+        detail = f"{approver.position or 'Registrar Staff'} {MIDDOT} {approver.employee_id}"
+        c.drawString(LEFT, y - 21, detail)
+    else:
+        # Approved before attribution was recorded, or the staff record was
+        # since removed — the office signs for it rather than a name being
+        # invented to fill the line.
+        c.setFillColor(BLACK)
+        c.setFont(fonts["sans_bold"], 8.5)
+        c.drawString(LEFT, y - 11, "Office of the Registrar")
+        c.setFillColor(GREY)
+        c.setFont(fonts["sans"], 7.5)
+        c.drawString(LEFT, y - 21, f"USTP {EM_DASH} Cagayan de Oro")
+
+    approved_at = _local(form_request.registrar_approved_at)
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 7)
+    c.drawRightString(RIGHT, y - 11, "DATE APPROVED")
+    c.setFillColor(BLACK)
+    c.setFont(fonts["sans_bold"], 8.5)
+    c.drawRightString(
+        RIGHT, y - 22,
+        approved_at.strftime("%B %d, %Y at %I:%M %p") if approved_at else EM_DASH,
+    )
+    y -= 34
+
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 6.5)
+    c.drawString(
+        LEFT, y,
+        "Electronically approved and generated by TrailSync. Valid without a handwritten signature.",
+    )
+    y -= 16
+
+    # ----------------------------------------------------------- cashier box
+    cashier_h = 92.0
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(1.6)
+    c.rect(LEFT, y - cashier_h, CONTENT_W, cashier_h, stroke=1, fill=0)
+
+    _section_bar(c, LEFT + 1.6, y - 1.6, CONTENT_W - 3.2, "For Cashier Use Only", fonts)
+
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 6.5)
+    c.drawString(
+        LEFT + 12, y - 29,
+        "To be completed by hand at the Cashier. Present this form at Window 6 once paid.",
+    )
+
+    line_y = y - 48
+    half = (CONTENT_W - 24 - 26) / 2
+    _write_in_line(c, LEFT + 12, line_y, half, "O.R. Number:", fonts, label_width=62)
+    _write_in_line(c, LEFT + 12 + half + 26, line_y, half, "Payment Date:", fonts, label_width=68)
+    _write_in_line(
+        c, LEFT + 12, line_y - 28, CONTENT_W - 24, "Cashier Signature:", fonts, label_width=90
+    )
+    body_bottom = y - cashier_h
+
+    # ------------------------------------------------- cut line + claim stub
+    # Anchored to the foot of the page rather than flowed on directly below
+    # the Cashier box. The stub is meant to be torn off, and a tear line
+    # partway up a sheet leaves an awkward flap on a document that then has
+    # to sit in a Cashier's tray; whatever vertical slack the body did not
+    # use collects as white space above the cut instead. The min() keeps the
+    # cut below the Cashier box if this form ever grows more fields.
+    stub_h = 76.0
+    y = min(MARGIN + stub_h + 20, body_bottom - 22)
+
+    c.setStrokeColor(HAIRLINE)
+    c.setLineWidth(0.8)
+    c.setDash(3, 3)
+    c.line(LEFT, y, RIGHT - 62, y)
+    c.setDash()
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 8)
+    c.drawRightString(RIGHT, y - 3, f"{SCISSORS}  cut here")
+    y -= 20
+
+    c.setStrokeColor(BLACK)
+    c.setLineWidth(1.0)
+    c.rect(LEFT, y - stub_h, CONTENT_W, stub_h, stroke=1, fill=0)
+    c.setFillColor(BLUE)
+    c.rect(LEFT, y - stub_h, CONTENT_W, 3, stroke=0, fill=1)
+
+    _caps(c, LEFT + 12, y - 17, "Claim Stub", fonts["sans_bold"], 7.5, BLUE)
+    c.setFillColor(BLACK)
+    c.setFont(fonts["serif_bold"], 16)
+    c.drawString(LEFT + 12, y - 38, form_request.request_code)
+
+    c.setFillColor(BLACK)
+    c.setFont(fonts["sans"], 8.5)
+    c.drawString(LEFT + 12, y - 52, _fit(_student_name(user, profile), fonts["sans"], 8.5, 240))
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 8)
+    c.drawString(
+        LEFT + 12, y - 64, _fit(form_request.transaction_type.name, fonts["sans"], 8, 240)
+    )
+
+    note_x = LEFT + 278
+    c.setFillColor(BLACK)
+    c.setFont(fonts["sans_bold"], 8)
+    c.drawString(note_x, y - 38, "Present this stub with a valid ID")
+    c.drawString(note_x, y - 49, "to claim your document at Window 6.")
+    c.setFillColor(GREY)
+    c.setFont(fonts["sans"], 7)
+    c.drawString(note_x, y - 63, f"USTP {EM_DASH} Cagayan de Oro {MIDDOT} Office of the Registrar")
+
+    c.showPage()
+    c.save()
+    return buffer.getvalue()

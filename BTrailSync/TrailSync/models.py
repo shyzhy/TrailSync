@@ -309,6 +309,29 @@ class FormRequest(models.Model):
     claim_stub_issued_at = models.DateTimeField(null=True, blank=True)
     digital_stub_active = models.BooleanField(default=False)
 
+    # Registrar approval attribution, for the printable Cashier form's
+    # signature block. RequirementVerification already records who verified
+    # a request and when, but that's a log of verification EVENTS (a request
+    # can be rejected, revised, and re-verified); these two columns are the
+    # single authoritative "this is the approval the printed form is
+    # attesting to". updated_at can't stand in for the timestamp — it moves
+    # on any later write to the row, so a form reprinted next week would
+    # show a different "date approved" than the one the student first took
+    # to the Cashier.
+    #
+    # Named registrar_approved_by (column: registrar_approved_by_id) rather
+    # than the ERD's registrar_approved_by_staff_profile_id, matching how
+    # clearance_checked_by is already done a few fields up — the whole file
+    # uses the short form for StaffProfile FKs.
+    registrar_approved_by = models.ForeignKey(
+        StaffProfile,
+        on_delete=models.SET_NULL,
+        related_name="registrar_approvals",
+        null=True,
+        blank=True,
+    )
+    registrar_approved_at = models.DateTimeField(null=True, blank=True)
+
     # Staff-facing fraud signal only — never surfaced to the student.
     duplicate_flag = models.BooleanField(default=False)
 
@@ -320,6 +343,50 @@ class FormRequest(models.Model):
 
     def __str__(self):
         return f"{self.request_code} - {self.user.email}"
+
+    def compute_amount_due(self):
+        """What this request costs at the Cashier: the document's fee times
+        the number of copies asked for.
+
+        Called when Registrar approves, not at submission — the fee is
+        whatever TransactionType charges at approval time, and stamping it
+        onto the row means a later admin edit to the fee can't retroactively
+        change what an already-printed form said the student owed.
+
+        Returns None when the document type has no published fee, which is a
+        real case (fee_amount is nullable): the form then prints a blank
+        line to be written in by hand rather than a misleading 0.00.
+        """
+        fee = self.transaction_type.fee_amount
+        if fee is None:
+            return None
+
+        submission = getattr(self, "submission", None)
+        raw_copies = ((submission.form_data if submission else None) or {}).get("number_of_copies")
+        try:
+            copies = int(raw_copies)
+        except (TypeError, ValueError):
+            # number_of_copies lives in the free-form form_data JSON, so it
+            # can be missing or a string; one copy is the safe reading.
+            copies = 1
+        return fee * max(1, copies)
+
+    def receipt_available(self):
+        """True once this request has been approved by the Registrar, which
+        is the earliest point the printable form has real content to carry —
+        before approval there's no amount due and no approving signatory.
+
+        Keyed off the CURRENT 5-value RequestStatus enum, where "Verified"
+        is the approval step (see RegistrarQueueVerifyView). If the 9-stage
+        map from the feature docs ever lands, this set is the one place that
+        needs revisiting — the API and the UI both gate on this method
+        rather than each hardcoding their own status list.
+        """
+        return self.request_status in {
+            self.RequestStatus.VERIFIED,
+            self.RequestStatus.READY,
+            self.RequestStatus.RELEASED,
+        }
 
     def blocked_by_clearance(self):
         """True if this request's clearance result should hard-block any

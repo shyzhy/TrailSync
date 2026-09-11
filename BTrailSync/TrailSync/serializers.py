@@ -189,6 +189,7 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
     proxy = serializers.SerializerMethodField()
     verification_remarks = serializers.SerializerMethodField()
     release_schedule = serializers.SerializerMethodField()
+    receipt_available = serializers.SerializerMethodField()
 
     class Meta:
         model = FormRequest
@@ -213,6 +214,12 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
             # duplicate_flag) is intentionally NOT listed here.
             "amount_due",
             "payment_date",
+            # Whether the printable Cashier form can be generated yet. The
+            # API decides this, not the UI - the Download Receipt button and
+            # the receipt endpoint's own gate then agree by construction,
+            # instead of the frontend keeping a second copy of the status
+            # list that could drift out of sync with the backend's.
+            "receipt_available",
         ]
         read_only_fields = fields
 
@@ -254,6 +261,9 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
         # current verification, per the model's default ordering.
         latest = obj.verifications.first()
         return latest.remarks if latest else None
+
+    def get_receipt_available(self, obj):
+        return obj.receipt_available()
 
     def get_release_schedule(self, obj):
         slot = obj.release_slot

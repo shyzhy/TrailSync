@@ -5,6 +5,7 @@ from django.contrib.auth import authenticate
 from django.core.mail import send_mail
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.db import models
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, status
@@ -14,6 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from .receipts import build_receipt_pdf
 from .models import (
     FormRequest,
     ReleaseSlot,
@@ -598,8 +600,26 @@ class RegistrarQueueVerifyView(APIView):
             verified_by=staff_profile,
             remarks=serializer.validated_data.get("remarks") or None,
         )
+        # Approval is the point the printable Cashier form becomes real:
+        # it needs an amount to pay and a signatory to attest to it, and
+        # neither exists before now. Both are stamped onto the row here
+        # rather than computed at print time so that reprinting a form
+        # always reproduces the same document the student first carried to
+        # the Cashier, even if the fee schedule or staff roster changes
+        # later.
         form_request.request_status = FormRequest.RequestStatus.VERIFIED
-        form_request.save(update_fields=["request_status", "updated_at"])
+        form_request.registrar_approved_by = staff_profile
+        form_request.registrar_approved_at = timezone.now()
+        form_request.amount_due = form_request.compute_amount_due()
+        form_request.save(
+            update_fields=[
+                "request_status",
+                "registrar_approved_by",
+                "registrar_approved_at",
+                "amount_due",
+                "updated_at",
+            ]
+        )
 
         return Response(RegistrarQueueRowSerializer(form_request).data)
 
@@ -731,3 +751,60 @@ class RegistrarAssignSlotView(APIView):
         form_request.save(update_fields=["release_slot", "updated_at"])
 
         return Response(ReleaseSlotDetailSerializer(slot).data)
+
+
+class FormRequestReceiptView(APIView):
+    """GET /api/form-requests/<pk>/receipt/ - the printable Cashier form.
+
+    Two independent gates, both enforced here rather than by hiding the
+    button. The UI not rendering a link is a convenience, never the control:
+    this endpoint is the only thing standing between an arbitrary
+    authenticated user and someone else's name, school ID and course.
+
+    WHO: the request's own student, or approved registrar staff. Anyone else
+    gets 404 rather than 403 - a 403 on a specific id would confirm that
+    request exists and let a logged-in student enumerate the request table by
+    walking primary keys. Staff are allowed because they field "my printout
+    got lost" at the window and need to reprint it.
+
+    WHEN: only once the request has actually been approved. Before that there
+    is no amount due and no approving signatory, so the document would be an
+    official-looking form asserting things that are not true yet. That case
+    is a 403 with a reason, since the caller is legitimately allowed to see
+    this request - it just is not printable yet.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        form_request = get_object_or_404(
+            FormRequest.objects.select_related(
+                "user__user_profile",
+                "transaction_type",
+                "submission",
+                "registrar_approved_by__user",
+            ),
+            pk=pk,
+        )
+
+        is_owner = form_request.user_id == request.user.id
+        if not (is_owner or IsApprovedRegistrarStaff().has_permission(request, self)):
+            raise Http404
+
+        if not form_request.receipt_available():
+            return Response(
+                {
+                    "detail": (
+                        "This form is not available yet. It can be printed once the "
+                        "Office of the Registrar has approved your request."
+                    ),
+                    "request_status": form_request.request_status,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        response = HttpResponse(build_receipt_pdf(form_request), content_type="application/pdf")
+        response["Content-Disposition"] = (
+            f'attachment; filename="TrailSync-{form_request.request_code}.pdf"'
+        )
+        return response

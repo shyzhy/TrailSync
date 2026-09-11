@@ -143,7 +143,17 @@ CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='', cast=Csv())
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# Asia/Manila, not Django's default UTC. Everything this system prints or
+# counts is local to a Cagayan de Oro service window: the official form
+# timestamps an approval the student and Cashier can be standing there for,
+# the registrar dashboard counts "Verified Today", and release slots are
+# booked against wall-clock office hours. On UTC all three sat 8 hours
+# behind — an approval at 12:29 PM Manila printed as 04:29 AM, and "today"
+# rolled over at 8 AM local rather than midnight.
+#
+# USE_TZ stays True, so the database keeps storing UTC and only the
+# presentation layer shifts; no stored timestamp is rewritten by this.
+TIME_ZONE = 'Asia/Manila'
 
 USE_I18N = True
 

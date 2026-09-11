@@ -834,6 +834,21 @@ export const APP_CSS = `
   }
 
   .ts-ticket-detail { border-top: 1px solid #E3DFD2; padding: 1.1rem 1.5rem 1.25rem; }
+  /* Footer row of the expanded ticket: the helper line and the Download
+     Receipt action. Stacks on phones so the button keeps a full-width tap
+     target instead of being squeezed beside the text. */
+  .ts-ticket-actions {
+    margin-top: 1rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid #E3DFD2;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+  }
+  @media (min-width: 640px) {
+    .ts-ticket-actions { flex-direction: row; align-items: center; justify-content: space-between; gap: 1.25rem; }
+  }
 
   /* ---- Generic neutral tag pill — catalog fee/processing badges and
      "common purpose" tags, distinct from the semantic status .ts-pill-*
