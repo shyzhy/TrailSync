@@ -182,18 +182,24 @@ STATIC_URL = 'static/'
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-# Email — change-email verification links get "sent" through here. Console
-# backend prints the message to the runserver log instead of actually
-# delivering it, so the flow is real and testable without SMTP credentials.
-# Swap for a real backend (SMTP, SES, etc.) before this goes to production.
-# DEVELOPMENT ONLY: prints every email (including account activation links)
-# to the runserver console instead of sending it. Production must set
-# EMAIL_BACKEND to django.core.mail.backends.smtp.EmailBackend (or a provider's
-# backend) together with EMAIL_HOST, EMAIL_PORT, EMAIL_USE_TLS,
-# EMAIL_HOST_USER, EMAIL_HOST_PASSWORD and a DEFAULT_FROM_EMAIL on a domain
-# that is set up to send mail. No provider has been chosen yet.
+# Email — account activation and change-email links are sent through here.
+# Everything comes from .env, so credentials never live in this file. With
+# EMAIL_BACKEND unset, the console backend prints each message to the
+# runserver log instead of delivering it (handy with no credentials at all).
+# Currently configured in .env for Gmail SMTP with an app password; Gmail caps
+# sending at roughly 500 messages a day, so a dedicated email service is the
+# step up if TrailSync outgrows that.
 EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
-DEFAULT_FROM_EMAIL = 'TrailSync Registrar <no-reply@trailsync.local>'
+EMAIL_HOST = config('EMAIL_HOST', default='localhost')
+EMAIL_PORT = config('EMAIL_PORT', default=25, cast=int)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=False, cast=bool)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+# Gmail rewrites any From address that isn't the authenticated account, so
+# this must be the same address as EMAIL_HOST_USER.
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='TrailSync Registrar <no-reply@trailsync.local>')
+# Fail a stuck connection instead of hanging the signup request forever.
+EMAIL_TIMEOUT = 20
 
 # The React app's own origin — verification links (change-email) point here,
 # not at this API server, since clicking a link is a browser GET and the
