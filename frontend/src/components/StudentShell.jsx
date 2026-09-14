@@ -15,9 +15,9 @@ import {
 import { authFetch, updateStoredUser } from '../lib/auth.js';
 
 /**
- * The chrome every student page shares: sidebar, top bar with the
- * notification bell, a labelled "Menu" on phones, the floating "Need help?"
- * button, and the first-time walkthrough.
+ * The chrome every student page shares: the sidebar (tablet and desktop), a
+ * bottom navigation bar with a title header (phones), the notification bell,
+ * the floating "Need help?" button, and the first-time walkthrough.
  *
  * One component rather than the same five lines pasted into every page,
  * because all of these have to be present on EVERY student screen - a bell
@@ -182,87 +182,149 @@ function NotificationBell({ unreadCount, setUnreadCount }) {
 }
 
 // ---------------------------------------------------------------------------
-// Phone menu
+// Phone navigation
 // ---------------------------------------------------------------------------
 
 /**
- * On phones the sidebar is hidden, and until now there was no other way to
- * reach most of the app from a phone - Request, Track, the Credential Guide
- * and Profile were all sidebar-only. Labelled "Menu" in words rather than a
- * bare three-line icon, which a first-time user may not recognise.
+ * Which of the sidebar's items get a tab of their own.
+ *
+ * Five is the ceiling: at 360px each tab is 72px, and a sixth would put the
+ * labels below the size anyone can read. The two that don't fit - the
+ * Credential Guide and the (unbuilt) chatbot - live behind "More", along
+ * with the profile and log out that the sidebar keeps in its footer.
  */
-function MobileMenu({ active, me, unreadCount, onLogout }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  const close = useCallback(() => setOpen(false), []);
-  useDismiss(open, close, ref);
+const BOTTOM_NAV_KEYS = ['home', 'request', 'track', 'notifications'];
+const MORE_KEYS = ['guide', 'ask'];
+
+/** Short enough to fit a tab without truncating; the page keeps its full name. */
+const TAB_LABEL = {
+  home: 'Home',
+  request: 'Request',
+  track: 'Track',
+  notifications: 'Notifications',
+};
+
+function MoreSheet({ active, me, onLogout, onClose }) {
+  const items = MORE_KEYS.map((key) => NAV_ITEMS.find((i) => i.key === key)).filter(Boolean);
+
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   return (
-    <div className="relative lg:hidden" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="ts-icon-btn"
-        aria-haspopup="true"
-        aria-expanded={open}
-        data-tour="menu"
-      >
-        {open ? <CloseIcon /> : <MenuIcon />}
-        Menu
-      </button>
-      {open && (
-        <nav className="ts-popover right-0 mt-2 w-64 py-1" aria-label="Main">
-          {NAV_ITEMS.map(({ key, href, label, Icon, soon }) =>
-            soon ? (
-              <span key={key} className="ts-popover-row ts-soft items-center text-base" style={{ opacity: 0.6 }}>
-                <Icon />
-                {label}
-                <span className="ml-auto text-xs font-semibold uppercase tracking-wide">Soon</span>
-              </span>
-            ) : (
-              <a
-                key={key}
-                href={href}
-                aria-current={key === active ? 'page' : undefined}
-                className={`ts-popover-row items-center text-base ${key === active ? 'ts-ink font-semibold' : 'ts-ink'}`}
-                style={key === active ? { background: 'rgba(36,64,107,0.06)' } : undefined}
-              >
-                <Icon />
-                {label}
-                {key === 'notifications' && unreadCount > 0 && (
-                  <span className="ts-nav-count">{unreadCount > 99 ? '99+' : unreadCount}</span>
-                )}
-              </a>
-            ),
-          )}
-          {me && (
-            <a href="/profile" className="ts-popover-row ts-ink items-center text-base">
-              <Avatar user={me} className="ts-avatar-sm" />
-              My profile
+    <>
+      <div className="ts-sheet-overlay" onClick={onClose} />
+      <div className="ts-sheet" role="dialog" aria-modal="true" aria-label="More">
+        <div className="ts-sheet-grip" aria-hidden="true" />
+        {items.map(({ key, href, label, Icon, soon }) =>
+          soon ? (
+            <span key={key} className="ts-sheet-row ts-soft" style={{ opacity: 0.65 }}>
+              <Icon />
+              {label}
+              <span className="ml-auto text-xs font-semibold uppercase tracking-wide">Soon</span>
+            </span>
+          ) : (
+            <a
+              key={key}
+              href={href}
+              aria-current={key === active ? 'page' : undefined}
+              className="ts-sheet-row"
+              style={key === active ? { background: 'rgba(36,64,107,0.06)', fontWeight: 600 } : undefined}
+            >
+              <Icon />
+              {label}
             </a>
-          )}
-          <button type="button" onClick={onLogout} className="ts-popover-row ts-ink items-center text-base">
-            <LogoutIcon />
-            Log out
-          </button>
-        </nav>
-      )}
-    </div>
+          ),
+        )}
+        {me && (
+          <a
+            href="/profile"
+            aria-current={active === 'profile' ? 'page' : undefined}
+            className="ts-sheet-row"
+            style={active === 'profile' ? { background: 'rgba(36,64,107,0.06)', fontWeight: 600 } : undefined}
+          >
+            <Avatar user={me} className="ts-avatar-sm" />
+            My profile
+          </a>
+        )}
+        <button type="button" onClick={onLogout} className="ts-sheet-row">
+          <LogoutIcon />
+          Log out
+        </button>
+      </div>
+    </>
   );
 }
 
-function StudentTopBar({ active, me, unreadCount, setUnreadCount, onLogout }) {
+/**
+ * The phone's main navigation, fixed to the bottom of the viewport.
+ *
+ * A thumb reaches the bottom of a phone screen far more easily than a menu
+ * button in the top corner, and the bar states outright what the app can do
+ * instead of hiding it one tap deep.
+ */
+function BottomNav({ active, me, unreadCount, onLogout }) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const tabs = BOTTOM_NAV_KEYS.map((key) => NAV_ITEMS.find((i) => i.key === key)).filter(Boolean);
+  const moreIsActive = MORE_KEYS.includes(active) || active === 'profile';
+
+  return (
+    <>
+      {moreOpen && (
+        <MoreSheet active={active} me={me} onLogout={onLogout} onClose={() => setMoreOpen(false)} />
+      )}
+      <nav className="ts-bottom-nav" aria-label="Main">
+        {tabs.map(({ key, href, Icon }) => (
+          <a
+            key={key}
+            href={href}
+            data-tour={key}
+            aria-current={key === active ? 'page' : undefined}
+            className={`ts-bottom-nav-item ${key === active ? 'ts-bottom-nav-item-active' : ''}`}
+          >
+            <Icon />
+            <span>{TAB_LABEL[key]}</span>
+            {key === 'notifications' && unreadCount > 0 && (
+              <span className="ts-bottom-nav-count" aria-label={`${unreadCount} unread`}>
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </a>
+        ))}
+        <button
+          type="button"
+          onClick={() => setMoreOpen((v) => !v)}
+          aria-haspopup="dialog"
+          aria-expanded={moreOpen}
+          // The tour points here when the item it wants lives in this sheet.
+          data-tour="menu"
+          className={`ts-bottom-nav-item ${moreIsActive || moreOpen ? 'ts-bottom-nav-item-active' : ''}`}
+        >
+          <MenuIcon />
+          <span>More</span>
+        </button>
+      </nav>
+    </>
+  );
+}
+
+/**
+ * The phone header: which page you are on, and the bell. The brand mark it
+ * used to show belongs to the sidebar, which a phone doesn't have - and a
+ * logo repeated on every screen tells a student nothing about where they
+ * are. On tablet and desktop the sidebar carries the title's job, so the bar
+ * holds only the bell.
+ */
+function StudentTopBar({ title, unreadCount, setUnreadCount }) {
   return (
     <header className="ts-topbar">
-      <div className="flex items-center justify-between gap-3 px-5 py-3 lg:justify-end lg:px-10 lg:pt-5 lg:pb-0">
-        <a href="/portal" className="flex items-center gap-2 lg:hidden" aria-label="TrailSync home">
-          <img src="/trailsync-logo.png" alt="" aria-hidden="true" style={{ height: '32px', width: 'auto', margin: '-6px 0' }} />
-          <span className="ts-ink text-lg font-semibold" style={FONT_SERIF}>TrailSync</span>
-        </a>
-        <div className="flex items-center gap-2">
-          <MobileMenu active={active} me={me} unreadCount={unreadCount} onLogout={onLogout} />
-          <NotificationBell unreadCount={unreadCount} setUnreadCount={setUnreadCount} />
-        </div>
+      <div className="flex items-center justify-between gap-3 px-5 py-3 md:justify-end md:px-10 md:pt-5 md:pb-0">
+        <p className="ts-ink truncate text-lg font-semibold md:hidden" style={FONT_SERIF}>
+          {title}
+        </p>
+        <NotificationBell unreadCount={unreadCount} setUnreadCount={setUnreadCount} />
       </div>
     </header>
   );
@@ -380,10 +442,13 @@ const TOUR_STEPS = [
 
 function visibleTarget(selectors) {
   for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (!el) continue;
-    const r = el.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0) return el;
+    // querySelectorAll, not querySelector: the sidebar and the bottom bar
+    // both carry data-tour="home" etc, and only one of them is on screen at
+    // any width. Taking the first match would spotlight the hidden one.
+    for (const el of document.querySelectorAll(sel)) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return el;
+    }
   }
   return null;
 }
@@ -472,7 +537,7 @@ function GuidedTour({ onClose }) {
         <p className="ts-soft mt-1.5 text-base leading-relaxed">{step.body}</p>
         {viaMenu && (
           <p className="ts-soft mt-2 text-sm">
-            On your phone, you&rsquo;ll find this inside <strong className="ts-ink">Menu</strong>.
+            On your phone, you&rsquo;ll find this under <strong className="ts-ink">More</strong>.
           </p>
         )}
 
@@ -515,7 +580,15 @@ function GuidedTour({ onClose }) {
  * @param onMeChange Called with the updated user after the tour is marked
  *                   done, so the page's own copy of `me` stays in step.
  */
-export default function StudentShell({ active, me, onLogout, offerTour = false, onMeChange, children }) {
+export default function StudentShell({
+  active,
+  title,
+  me,
+  onLogout,
+  offerTour = false,
+  onMeChange,
+  children,
+}) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [tourOpen, setTourOpen] = useState(false);
   const offeredRef = useRef(false);
@@ -558,22 +631,19 @@ export default function StudentShell({ active, me, onLogout, offerTour = false, 
 
   return (
     <ShellContext.Provider value={{ unreadCount, setUnreadCount, startTour, refreshUnread }}>
-      <div className="ts-app-shell ts-student lg:flex" style={FONT_SANS}>
+      <div className="ts-app-shell ts-student md:flex" style={FONT_SANS}>
         <style>{APP_CSS}</style>
         <AppSidebar active={active} onLogout={onLogout} me={me} unreadCount={unreadCount} />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <StudentTopBar
-            active={active}
-            me={me}
-            unreadCount={unreadCount}
-            setUnreadCount={setUnreadCount}
-            onLogout={onLogout}
-          />
+        {/* ts-student-main carries the bottom padding that keeps the fixed
+            phone nav from covering the end of a page. */}
+        <div className="ts-student-main flex min-w-0 flex-1 flex-col">
+          <StudentTopBar title={title} unreadCount={unreadCount} setUnreadCount={setUnreadCount} />
           {children}
           {/* Room to scroll the last button clear of the floating help button. */}
           <div className="h-24" aria-hidden="true" />
         </div>
         <HelpButton onStartTour={startTour} />
+        <BottomNav active={active} me={me} unreadCount={unreadCount} onLogout={onLogout} />
         {tourOpen && <GuidedTour onClose={finishTour} />}
       </div>
     </ShellContext.Provider>

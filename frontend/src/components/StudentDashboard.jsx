@@ -130,7 +130,7 @@ export default function StudentDashboard() {
   );
 
   return (
-    <StudentShell active="home" me={me} onLogout={handleLogout} onMeChange={setMe} offerTour={status === 'ready'}>
+    <StudentShell active="home" title="Home" me={me} onLogout={handleLogout} onMeChange={setMe} offerTour={status === 'ready'}>
       <main className="mx-auto w-full max-w-6xl flex-1 px-6 pb-8 pt-4 sm:pb-10 sm:pt-6 lg:pt-3 lg:px-10">
         <div className="lg:flex lg:items-start lg:gap-8">
           <div className="min-w-0 flex-1">
@@ -245,7 +245,7 @@ export default function StudentDashboard() {
               <div className="flex items-center justify-between">
                 <h2 className="ts-ink text-lg font-semibold" style={FONT_SERIF}>Recent requests</h2>
                 {recent && recent.length > 0 && (
-                  <a href="/track-requests" className="ts-link text-sm font-medium">
+                  <a href="/track-requests" className="ts-link ts-tap text-sm font-medium">
                     See all
                   </a>
                 )}

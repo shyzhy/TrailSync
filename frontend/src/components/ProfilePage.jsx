@@ -435,7 +435,7 @@ export default function ProfilePage() {
   };
 
   return (
-    <StudentShell active="profile" me={me} onLogout={handleLogout} onMeChange={setMe}>
+    <StudentShell active="profile" title="Profile" me={me} onLogout={handleLogout} onMeChange={setMe}>
       <main className="mx-auto w-full max-w-3xl flex-1 px-6 pb-8 pt-4 sm:pb-10 sm:pt-6 lg:pt-3 lg:px-10">
         <h1 className="ts-ink text-3xl font-semibold tracking-tight" style={FONT_SERIF}>
           Profile
@@ -468,7 +468,9 @@ export default function ProfilePage() {
                   {/* Plain positioning box: the circle and its ring come from
                       the Avatar's own ts-avatar-xl, and the veil and camera
                       button pin to this. */}
-                  <div className="relative" style={{ width: 112, height: 112 }}>
+                  {/* Sized by .ts-avatar-xl, which shrinks to 96px on a
+                      phone - a fixed inline 112 would ignore that. */}
+                  <div className="relative ts-avatar-frame">
                     <Avatar
                       user={me}
                       src={avatarPreview || avatarUrlFor(me)}
@@ -500,7 +502,7 @@ export default function ProfilePage() {
                     aria-hidden="true"
                   />
                   {avatarUrlFor(me) && !avatarBusy && (
-                    <button type="button" onClick={handleRemoveAvatar} className="ts-link text-xs font-medium">
+                    <button type="button" onClick={handleRemoveAvatar} className="ts-link ts-tap text-xs font-medium">
                       Remove photo
                     </button>
                   )}
@@ -564,7 +566,7 @@ export default function ProfilePage() {
                     setEmailSentMessage('');
                     setConfirmingEmail(false);
                   }}
-                  className="ts-link shrink-0 text-sm font-medium"
+                  className="ts-link ts-tap shrink-0 text-sm font-medium"
                 >
                   Change email
                 </button>

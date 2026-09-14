@@ -209,7 +209,7 @@ export default function NotificationsPage() {
   };
 
   return (
-    <StudentShell active="notifications" me={me} onLogout={handleLogout} onMeChange={setMe}>
+    <StudentShell active="notifications" title="Notifications" me={me} onLogout={handleLogout} onMeChange={setMe}>
       <NotificationsBody />
     </StudentShell>
   );

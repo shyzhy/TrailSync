@@ -89,10 +89,15 @@ export default function CredentialDetailCard({ transactionType, showRequestButto
             <p className="ts-soft mt-0.5 text-xs">You pay at the Cashier once the Registrar approves your request.</p>
           )}
         </div>
-        <div>
-          <p className="ts-review-label">Usually takes</p>
-          <p className="ts-review-value mt-1">{t.processing_time || '—'}</p>
-        </div>
+        {/* Hidden rather than showing a bare dash: several types have no
+            processing time recorded, and an empty labelled row on a phone
+            reads as something failing to load. */}
+        {t.processing_time && (
+          <div>
+            <p className="ts-review-label">Usually takes</p>
+            <p className="ts-review-value mt-1">{t.processing_time}</p>
+          </div>
+        )}
       </div>
 
       {t.special_notes && (

@@ -680,6 +680,9 @@ export const APP_CSS = `
       inset 0 1px 0 rgba(255,255,255,0.4);
   }
   .ts-avatar-xl > img { width: 100%; height: 100%; border-radius: 999px; }
+  /* Positioning box for the avatar plus its camera button; matches
+     .ts-avatar-xl at both sizes. */
+  .ts-avatar-frame { width: 112px; height: 112px; }
 
   /* Glossy camera button pinned to the avatar's lower-right edge. */
   .ts-avatar-edit {
@@ -830,6 +833,136 @@ export const APP_CSS = `
   }
   .ts-help-fab:hover { filter: brightness(1.08); }
   .ts-help-fab:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.7), 0 10px 26px rgba(36,64,107,0.38); }
+
+
+  /* ---- Phone bottom navigation (<768px) -------------------------------
+     Replaces the sidebar below the tablet breakpoint. Same glass treatment
+     as the sidebar's active item, so the app still looks like one thing.
+     56px tall plus the device's own safe area, which is what the content
+     spacer below is sized against. */
+  .ts-bottom-nav {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 40;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    background: linear-gradient(180deg, #35548F 0%, #24406B 55%, #17294A 100%);
+    border-top: 1px solid rgba(255,255,255,0.14);
+    box-shadow: 0 -10px 26px -14px rgba(15,23,42,0.6);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .ts-bottom-nav-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    /* Comfortably past the 44px thumb target even before the safe area. */
+    min-height: 56px;
+    padding: 7px 4px 9px;
+    color: rgba(250,248,243,0.62);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .ts-bottom-nav-item > span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    /* Shrinks a little on a 360px Android so "Notifications" still fits
+       without being cut; never grows past 11px. */
+    font-size: clamp(10px, 2.85vw, 11px);
+    line-height: 1.15;
+  }
+  .ts-bottom-nav-item-active {
+    color: #FAF8F3;
+    background: linear-gradient(180deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.04) 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.35);
+  }
+  .ts-bottom-nav-item-active::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 22%; right: 22%;
+    height: 3px;
+    border-radius: 0 0 3px 3px;
+    background: linear-gradient(90deg, #E4B45C, #B8872B);
+  }
+  .ts-bottom-nav-item:focus-visible { outline: none; box-shadow: inset 0 0 0 3px rgba(184,135,43,0.65); }
+  .ts-bottom-nav-count {
+    position: absolute;
+    top: 4px; left: 50%; margin-left: 4px;
+    min-width: 17px; height: 17px; padding: 0 4px;
+    border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: #fff;
+    background: #B91C1C;
+    border: 2px solid #24406B;
+  }
+  @media (min-width: 768px) { .ts-bottom-nav { display: none; } }
+
+  /* Nothing at the end of a page should hide behind the fixed bar. */
+  @media (max-width: 767px) {
+    .ts-student-main { padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)); }
+  }
+
+  /* ---- "More" sheet: the nav items that don't fit five across ---- */
+  .ts-sheet-overlay { position: fixed; inset: 0; z-index: 70; background: rgba(15,23,42,0.45); }
+  .ts-sheet {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 71;
+    border-radius: 18px 18px 0 0;
+    background: linear-gradient(180deg, #FFFFFF 0%, #FAF8F3 100%);
+    border-top: 1px solid rgba(227,223,210,0.95);
+    box-shadow: 0 -20px 46px rgba(15,23,42,0.3);
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+    animation: ts-sheet-up 180ms ease-out;
+  }
+  @keyframes ts-sheet-up { from { transform: translateY(12%); opacity: 0.6; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .ts-sheet { animation: none; } }
+  .ts-sheet-grip {
+    width: 40px; height: 4px; border-radius: 999px;
+    background: rgba(91,100,116,0.28);
+    margin: 10px auto 4px;
+  }
+  .ts-sheet-row {
+    display: flex; align-items: center; gap: 12px;
+    width: 100%; min-height: 52px; padding: 12px 20px;
+    text-align: left; color: #1F2937; font-size: 15px; font-weight: 500;
+  }
+  .ts-sheet-row + .ts-sheet-row { border-top: 1px solid rgba(227,223,210,0.7); }
+  .ts-sheet-row:active { background: rgba(36,64,107,0.06); }
+
+  /* ---- Horizontally swipeable filter rows ----------------------------
+     Chips scroll sideways on a phone instead of wrapping onto three rows
+     and pushing the list itself below the fold. This is the ONLY thing in
+     the app meant to scroll horizontally. */
+  .ts-tab-scroller {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    /* Room for the chips' focus ring, which would otherwise be clipped. */
+    padding: 3px 0;
+    /* Lets a chip row run to the screen edge, so it reads as scrollable. */
+    margin-inline: -1.5rem;
+    padding-inline: 1.5rem;
+    scroll-padding-inline: 1.5rem;
+  }
+  .ts-tab-scroller::-webkit-scrollbar { display: none; }
+  .ts-tab-scroller > * { flex: 0 0 auto; }
+  @media (min-width: 768px) {
+    .ts-tab-scroller {
+      flex-wrap: wrap;
+      overflow-x: visible;
+      margin-inline: 0;
+      padding-inline: 0;
+    }
+  }
+
 
   /* ---- Guided tour ---- */
   .ts-tour-layer { position: fixed; inset: 0; z-index: 80; }
@@ -1369,6 +1502,87 @@ export const APP_CSS = `
   .ts-btn-outline-danger:active:not(:disabled) { transform: translateY(1px); }
   .ts-btn-outline-danger:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.6); }
   .ts-btn-outline-danger:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* =====================================================================
+     PHONE OVERRIDES — deliberately last in this sheet.
+     Everything here overrides a rule defined above it. A media query adds
+     no specificity, so source order is what makes these win.
+     ===================================================================== */
+  /* ---- Phone touch targets ---- */
+  @media (max-width: 767px) {
+    .ts-filter-tab { min-height: 44px; }
+    .ts-icon-btn { height: 44px; min-width: 44px; }
+    .ts-help-fab {
+      /* Clear of the bottom bar rather than floating on top of it. */
+      right: 16px;
+      bottom: calc(56px + 14px + env(safe-area-inset-bottom, 0px));
+      height: 48px;
+    }
+    /* A phone-width modal that stops short of the edges wastes the screen
+       and reads as cramped; these become full-height sheets instead.
+       Above the bottom nav (40) and the help button (50): a full-screen
+       sheet with the tab bar still floating on top of it looks broken, and
+       the tabs would be tappable through what is meant to be a modal. */
+    .ts-modal-overlay { padding: 0; align-items: flex-end; z-index: 60; }
+    .ts-modal-panel {
+      max-width: none;
+      height: 100dvh;
+      max-height: 100dvh;
+      border-radius: 0;
+      border-left: none;
+      border-right: none;
+    }
+    .ts-modal-close { top: 0.75rem; right: 0.75rem; width: 40px; height: 40px; }
+  }
+
+  /* ---- Ticket stub stacks on very narrow phones ----------------------
+     Below ~400px the 104px stub leaves too little for the document name
+     and the progress line, so the stub becomes a header strip instead. */
+  @media (max-width: 400px) {
+    .ts-ticket-clickable { flex-direction: column; }
+    .ts-ticket-stub {
+      width: 100%;
+      flex-direction: row;
+      align-items: baseline;
+      justify-content: space-between;
+      padding: 0.6rem 1rem;
+      text-align: left;
+    }
+    .ts-ticket-stub-label { margin-top: 0; }
+    .ts-ticket-body {
+      border-left: none;
+      border-top: 2px dashed rgba(31,41,55,0.18);
+      padding: 0.9rem 1rem;
+    }
+    /* The seam notches are drawn for a vertical perforation. */
+    .ts-ticket-body::before, .ts-ticket-body::after { display: none; }
+  }
+
+  @media (max-width: 767px) {
+    /* The "?" chips are 20px by design - they sit inside a label and a
+       bigger circle would shout. This gives them a 46px hit area without
+       changing how they look. */
+    .ts-helptip-btn::after { content: ''; position: absolute; inset: -13px; }
+
+    /* Standalone text links and quiet buttons ("See all", "Remove photo",
+       "Change email", "Try again") were sized for a mouse. Only ones that
+       stand alone on their own line are padded out - an inline-flex link in
+       the middle of a sentence would stop wrapping and overflow. */
+    a.ts-tap, button.ts-tap {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+    }
+
+    /* The avatar is the biggest thing on the Profile page; at 112px it
+       takes a fifth of a 360px screen before any of the account details
+       are read. */
+    .ts-avatar-xl, .ts-avatar-frame { width: 96px; height: 96px; }
+    .ts-avatar-xl { font-size: 32px; }
+    /* Bigger for a thumb, and pushed further out so it covers less of a
+       photo that is itself smaller on a phone. */
+    .ts-avatar-edit { width: 44px; height: 44px; right: -6px; bottom: -6px; }
+  }
 `;
 
 export function DocumentIcon() {
@@ -1806,29 +2020,32 @@ export function AppSidebar({ active, onLogout, me, unreadCount = 0 }) {
   const idLine = [profile?.school_id_number, profile?.course].filter(Boolean).join(' · ');
 
   return (
-    <aside className="ts-sidebar hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-64 lg:flex-none lg:flex-col">
-      <div className="flex items-center gap-2 px-6 pb-8 pt-7">
+    // From 768px up. Between 768 and 1023 it narrows to icons only, which
+    // keeps the app's shape on a tablet without eating a third of the width;
+    // below 768 it is replaced entirely by the bottom bar (StudentShell).
+    <aside className="ts-sidebar hidden md:sticky md:top-0 md:flex md:h-screen md:w-[76px] md:flex-none md:flex-col lg:w-64">
+      <div className="flex items-center gap-2 px-4 pb-8 pt-7 md:justify-center lg:justify-start lg:px-6">
         <img
           src="/trailsync-logo.png"
           alt=""
           aria-hidden="true"
           style={{ height: '30px', width: 'auto', margin: '-6px 0' }}
         />
-        <span className="text-lg font-semibold" style={{ ...FONT_SERIF, color: '#FAF8F3' }}>TrailSync</span>
+        <span className="hidden text-lg font-semibold lg:inline" style={{ ...FONT_SERIF, color: '#FAF8F3' }}>TrailSync</span>
       </div>
 
-      <nav className="flex-1 space-y-2.5 px-3" aria-label="Main">
+      <nav className="flex-1 space-y-2.5 px-2 lg:px-3" aria-label="Main">
         {NAV_ITEMS.map(({ key, href, label, Icon, soon }) =>
           soon ? (
             <span
               key={key}
               data-tour={key}
-              className="ts-nav-item ts-nav-item-soon px-3 py-2.5 text-sm font-medium"
-              title="Coming soon"
+              className="ts-nav-item ts-nav-item-soon justify-center px-3 py-2.5 text-sm font-medium lg:justify-start"
+              title={`${label} — coming soon`}
             >
               <Icon />
-              {label}
-              <span className="ts-nav-soon">Soon</span>
+              <span className="hidden lg:inline">{label}</span>
+              <span className="ts-nav-soon hidden lg:inline">Soon</span>
             </span>
           ) : (
             <a
@@ -1836,10 +2053,13 @@ export function AppSidebar({ active, onLogout, me, unreadCount = 0 }) {
               href={href}
               data-tour={key}
               aria-current={key === active ? 'page' : undefined}
-              className={`ts-nav-item px-3 py-2.5 text-sm font-medium ${key === active ? 'ts-nav-item-active' : ''}`}
+              title={label}
+              className={`ts-nav-item justify-center px-3 py-2.5 text-sm font-medium lg:justify-start ${key === active ? 'ts-nav-item-active' : ''}`}
             >
               <Icon />
-              {label}
+              {/* The label is the accessible name at every width; on a
+                  tablet it is only visually hidden, not dropped. */}
+              <span className="sr-only lg:not-sr-only">{label}</span>
               {key === 'notifications' && unreadCount > 0 && (
                 <span className="ts-nav-count" aria-label={`${unreadCount} unread`}>
                   {unreadCount > 99 ? '99+' : unreadCount}
@@ -1857,10 +2077,11 @@ export function AppSidebar({ active, onLogout, me, unreadCount = 0 }) {
         <a
           href="/profile"
           aria-current={active === 'profile' ? 'page' : undefined}
-          className={`ts-sidebar-footer ts-nav-item px-4 py-4 ${active === 'profile' ? 'ts-nav-item-active' : ''}`}
+          title="My profile"
+          className={`ts-sidebar-footer ts-nav-item justify-center px-4 py-4 lg:justify-start ${active === 'profile' ? 'ts-nav-item-active' : ''}`}
         >
           <Avatar user={me} className="ts-sidebar-avatar" />
-          <div className="min-w-0">
+          <div className="hidden min-w-0 lg:block">
             <p className="truncate text-sm font-medium" style={{ color: '#FAF8F3' }}>
               {me.first_name} {me.last_name}
             </p>
@@ -1873,10 +2094,15 @@ export function AppSidebar({ active, onLogout, me, unreadCount = 0 }) {
         </a>
       )}
 
-      <div className="px-3 pb-6">
-        <button type="button" onClick={onLogout} className="ts-nav-item w-full px-3 py-2.5 text-sm font-medium">
+      <div className="px-2 pb-6 lg:px-3">
+        <button
+          type="button"
+          onClick={onLogout}
+          title="Log out"
+          className="ts-nav-item w-full justify-center px-3 py-2.5 text-sm font-medium lg:justify-start"
+        >
           <LogoutIcon />
-          Log out
+          <span className="sr-only lg:not-sr-only">Log out</span>
         </button>
       </div>
     </aside>

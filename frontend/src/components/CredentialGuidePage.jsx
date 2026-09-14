@@ -87,7 +87,7 @@ export default function CredentialGuidePage() {
   }, [types, search, activePurpose]);
 
   return (
-    <StudentShell active="guide" me={me} onLogout={handleLogout} onMeChange={setMe}>
+    <StudentShell active="guide" title="Credential Guide" me={me} onLogout={handleLogout} onMeChange={setMe}>
       <main className="mx-auto w-full max-w-5xl flex-1 px-6 pb-8 pt-4 sm:pb-10 sm:pt-6 lg:pt-3 lg:px-10">
         <h1 className="ts-ink text-3xl font-semibold tracking-tight" style={FONT_SERIF}>
           Credential Guide
@@ -118,7 +118,7 @@ export default function CredentialGuidePage() {
         {purposeOptions.length > 0 && (
           <p className="ts-soft mt-5 text-sm font-medium">What do you need it for?</p>
         )}
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="ts-tab-scroller mt-2" role="group" aria-label="Filter by purpose">
           <button
             type="button"
             onClick={() => setActivePurpose('All')}
@@ -149,7 +149,7 @@ export default function CredentialGuidePage() {
           </div>
         )}
 
-        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
           {status === 'loading' &&
             Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="ts-card space-y-3 p-5">

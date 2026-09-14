@@ -120,7 +120,7 @@ export default function TrackRequestsPage() {
   };
 
   return (
-    <StudentShell active="track" me={me} onLogout={handleLogout} onMeChange={setMe}>
+    <StudentShell active="track" title="Track my requests" me={me} onLogout={handleLogout} onMeChange={setMe}>
       <main className="mx-auto w-full max-w-4xl flex-1 px-6 pb-8 pt-4 sm:pb-10 sm:pt-6 lg:pt-3 lg:px-10">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -149,7 +149,9 @@ export default function TrackRequestsPage() {
           </div>
         </div>
 
-        <div className="mt-6 flex flex-wrap gap-2">
+        {/* Swipes sideways on a phone. Wrapped, eight stage chips take three
+            rows and push the requests themselves off the screen. */}
+        <div className="ts-tab-scroller mt-6" role="group" aria-label="Filter by stage">
           {FILTER_TABS.map((tab) => (
             <button
               key={tab.value}

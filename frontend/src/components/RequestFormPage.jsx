@@ -160,22 +160,27 @@ function MissingHint({ items }) {
   );
 }
 
+/**
+ * Four numbered badges. All four labels side by side need ~340px of text,
+ * which does not fit a phone without wrapping into an unreadable stack - so
+ * below 768px only the badges are drawn, and the step you are actually on is
+ * named underneath.
+ */
 function Stepper({ current }) {
   return (
-    <div className="mb-9 flex items-start">
+    <div className="mb-9">
+      <div className="flex items-start">
       {STEP_LABELS.map((label, i) => {
         const num = i + 1;
         const state = num < current ? 'done' : num === current ? 'current' : 'upcoming';
         return (
           <div key={label} className={`flex items-center ${num < STEP_LABELS.length ? 'flex-1' : ''}`}>
-            {/* Four fixed 84px columns plus connectors came to 384px, wider
-                than a 375px phone once the page gutters were counted. */}
-            <div className="flex w-[68px] flex-col items-center sm:w-[84px]">
+            <div className="flex w-11 flex-col items-center md:w-[84px]">
               <span className={`ts-step-badge ts-step-badge-${state}`}>
                 {state === 'done' ? <CheckIcon /> : num}
               </span>
               <span
-                className={`mt-2 text-center text-xs leading-snug ${
+                className={`mt-2 hidden text-center text-xs leading-snug md:block ${
                   state === 'current' ? 'ts-ink font-semibold' : 'ts-soft'
                 }`}
               >
@@ -188,6 +193,12 @@ function Stepper({ current }) {
           </div>
         );
       })}
+      </div>
+
+      <p className="ts-ink mt-3 text-center text-sm font-semibold md:hidden">
+        <span className="ts-soft font-normal">Step {current} of {STEP_LABELS.length}: </span>
+        {STEP_LABELS[current - 1]}
+      </p>
     </div>
   );
 }
@@ -408,7 +419,7 @@ export default function RequestFormPage() {
   // ---- Success screen ----
   if (result) {
     return (
-      <StudentShell active="request" me={me} onLogout={handleLogout} onMeChange={setMe}>
+      <StudentShell active="request" title="Request a document" me={me} onLogout={handleLogout} onMeChange={setMe}>
       <main className="mx-auto w-full max-w-2xl flex-1 px-6 pb-8 pt-4 sm:pb-10 sm:pt-6 lg:pt-3 lg:px-10">
           <div className="ts-card p-8 text-center sm:p-10">
             <div className="flex justify-center">
@@ -454,7 +465,7 @@ export default function RequestFormPage() {
   }
 
   return (
-    <StudentShell active="request" me={me} onLogout={handleLogout} onMeChange={setMe}>
+    <StudentShell active="request" title="Request a document" me={me} onLogout={handleLogout} onMeChange={setMe}>
       <main className="mx-auto w-full max-w-3xl flex-1 px-6 pb-8 pt-4 sm:pb-10 sm:pt-6 lg:pt-3 lg:px-10">
         <Stepper current={step} />
 
@@ -471,7 +482,9 @@ export default function RequestFormPage() {
           <div className="ts-card space-y-4 p-6 sm:p-8">
             <div className="ts-skeleton h-6 w-64" />
             <div className="ts-skeleton h-4 w-96" />
-            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* One card per row on a phone: two 170px cards cannot hold a
+                document name and its description without clipping. */}
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="ts-skeleton h-28 w-full" />
               <div className="ts-skeleton h-28 w-full" />
               <div className="ts-skeleton h-28 w-full" />
@@ -958,7 +971,11 @@ export default function RequestFormPage() {
 
                 {proxyEnabled && (
                   <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    <div className="ts-card p-6">
+                    {/* Source order puts the form first, which is right for
+                        two columns. Stacked, the requirements have to come
+                        first - reading what the person must bring after
+                        typing their details is reading it too late. */}
+                    <div className="ts-card order-2 p-6 lg:order-1">
                       <h2 className="ts-ink text-sm font-semibold">About the person picking it up</h2>
                       <div className="mt-4 space-y-4">
                         <div>
@@ -1023,7 +1040,7 @@ export default function RequestFormPage() {
                         people's IDs, and no proof of relationship at all. A
                         first-timer following the old wording would have been
                         turned away at the window. */}
-                    <div className="ts-warning-card p-6">
+                    <div className="ts-warning-card order-1 p-6 lg:order-2">
                       <div className="flex items-center gap-2">
                         <WarningIcon />
                         <h2 className="text-sm font-semibold">They must bring all three</h2>
