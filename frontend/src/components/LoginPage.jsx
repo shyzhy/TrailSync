@@ -8,6 +8,7 @@ import {
   GlassScene,
   WarningIcon,
 } from './trailsyncUI.jsx';
+import ResendEmailButton from './ResendEmailButton.jsx';
 import { STAFF_LOGIN_PATH, STUDENT_LOGIN_PATH, getAccessToken, getStoredUser, saveSession } from '../lib/auth.js';
 import { NETWORK_ERROR, SERVER_ERROR, friendlyMessage } from '../lib/friendlyErrors.js';
 
@@ -64,6 +65,26 @@ function ClockIcon() {
   );
 }
 
+function MailIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <rect x="3" y="5" width="14" height="10.5" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="m3.8 6.2 6.2 4.6 6.2-4.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/**
+ * Where a successfully signed-in student should land: onboarding if their
+ * profile still has gaps (it resumes at the first one), otherwise the app.
+ * Staff have no onboarding.
+ */
+export function homeFor(user, fallback) {
+  const onboarding = user?.profile?.onboarding;
+  if (onboarding && !onboarding.complete) return '/onboarding';
+  return fallback;
+}
+
 function LockIcon() {
   return (
     <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
@@ -99,6 +120,7 @@ function LoginNotice({ notice }) {
   const styles = {
     wrong: { className: 'ts-notice-wrong', Icon: WarningIcon, role: 'alert' },
     pending: { className: 'ts-notice-pending', Icon: ClockIcon, role: 'status' },
+    unverified: { className: 'ts-notice-pending', Icon: MailIcon, role: 'status' },
     suspended: { className: 'ts-notice-suspended', Icon: LockIcon, role: 'alert' },
     'other-portal': { className: 'ts-notice-info', Icon: SwitchIcon, role: 'status' },
     error: { className: 'ts-notice-wrong', Icon: WarningIcon, role: 'alert' },
@@ -113,6 +135,7 @@ function LoginNotice({ notice }) {
       <div className="min-w-0 text-sm leading-relaxed">
         <p className="font-semibold">{notice.title}</p>
         {notice.body && <p className="mt-0.5">{notice.body}</p>}
+        {notice.resendEmail && <ResendEmailButton email={notice.resendEmail} variant="link" className="mt-1" />}
         {notice.href && (
           <a href={notice.href} className="mt-1.5 inline-flex min-h-[44px] items-center font-semibold underline underline-offset-2">
             {notice.linkLabel} &rarr;
@@ -140,7 +163,7 @@ function LoginForm({ audience }) {
   useEffect(() => {
     const user = getStoredUser();
     if (getAccessToken() && user && config.roles.includes(user.role)) {
-      window.location.replace(config.home);
+      window.location.replace(homeFor(user, config.home));
     }
   }, [config]);
 
@@ -182,6 +205,15 @@ function LoginForm({ audience }) {
             title: 'Your account is waiting for approval',
             body: 'Your password is correct. An administrator still needs to approve this staff account — you’ll be able to log in as soon as they do.',
           });
+        } else if (response.status === 403 && data.code === 'email_unverified') {
+          // Right password, account not confirmed yet: not an error to fix
+          // here, but an email to go and open - with a way to get a new one.
+          setNotice({
+            kind: 'unverified',
+            title: 'Please confirm your email before logging in',
+            body: `We sent a confirmation link to ${data.email || 'your email'}. Open it to activate your account — it works for 24 hours.`,
+            resendEmail: data.email,
+          });
         } else if (response.status === 403 && /suspended/i.test(detail)) {
           setNotice({
             kind: 'suspended',
@@ -209,7 +241,7 @@ function LoginForm({ audience }) {
 
       // "Keep me logged in" controls whether the session survives closing the tab.
       saveSession(data, remember);
-      window.location.href = config.home;
+      window.location.href = homeFor(data.user, config.home);
     } catch {
       setNotice({ kind: 'error', title: NETWORK_ERROR });
     } finally {

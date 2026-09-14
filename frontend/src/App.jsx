@@ -2,6 +2,8 @@ import LandingPage from './components/LandingPage.jsx';
 import StudentLoginPage, { RegistrarLoginPage } from './components/LoginPage.jsx';
 import ReleaseCalendarPage from './components/ReleaseCalendarPage.jsx';
 import CreateAccountPage from './components/CreateAccountPage.jsx';
+import ActivatePage from './components/ActivatePage.jsx';
+import OnboardingPage from './components/OnboardingPage.jsx';
 import StudentDashboard from './components/StudentDashboard.jsx';
 import RequestFormPage from './components/RequestFormPage.jsx';
 import TrackRequestsPage from './components/TrackRequestsPage.jsx';
@@ -34,6 +36,8 @@ export default function App() {
   if (pathname === '/login' || pathname === '/login/') return <Page><StudentLoginPage /></Page>;
   if (pathname.startsWith('/registrar/login')) return <Page><RegistrarLoginPage /></Page>;
   if (pathname.startsWith('/create-account')) return <Page><CreateAccountPage /></Page>;
+  if (pathname.startsWith('/activate')) return <Page><ActivatePage /></Page>;
+  if (pathname.startsWith('/onboarding')) return <Page><OnboardingPage /></Page>;
   if (pathname.startsWith('/request-form')) return <Page><RequestFormPage /></Page>;
   if (pathname.startsWith('/track-requests')) return <Page><TrackRequestsPage /></Page>;
   if (pathname.startsWith('/profile')) return <Page><ProfilePage /></Page>;

@@ -123,6 +123,17 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+    # Only views that opt in with ScopedRateThrottle are limited. These are
+    # the unauthenticated ones that send email or check a link, where an
+    # unlimited endpoint is a free mail cannon or a token-guessing target.
+    # Counts live in Django's cache: the default local-memory cache is
+    # per-process, so production (several workers) needs a shared cache such
+    # as Redis for these limits to mean anything.
+    'DEFAULT_THROTTLE_RATES': {
+        'register': '10/hour',
+        'activation_resend': '5/hour',
+        'activation': '30/hour',
+    },
 }
 
 SIMPLE_JWT = {
@@ -175,7 +186,13 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # backend prints the message to the runserver log instead of actually
 # delivering it, so the flow is real and testable without SMTP credentials.
 # Swap for a real backend (SMTP, SES, etc.) before this goes to production.
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+# DEVELOPMENT ONLY: prints every email (including account activation links)
+# to the runserver console instead of sending it. Production must set
+# EMAIL_BACKEND to django.core.mail.backends.smtp.EmailBackend (or a provider's
+# backend) together with EMAIL_HOST, EMAIL_PORT, EMAIL_USE_TLS,
+# EMAIL_HOST_USER, EMAIL_HOST_PASSWORD and a DEFAULT_FROM_EMAIL on a domain
+# that is set up to send mail. No provider has been chosen yet.
+EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
 DEFAULT_FROM_EMAIL = 'TrailSync Registrar <no-reply@trailsync.local>'
 
 # The React app's own origin — verification links (change-email) point here,

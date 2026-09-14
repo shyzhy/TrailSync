@@ -656,6 +656,15 @@ export default function StudentShell({
 
   const startTour = useCallback(() => setTourOpen(true), []);
 
+  // No student page is usable with a half-built profile - the request form
+  // prints from it - so anyone who gets here before finishing setup goes
+  // back to the step they were on. Read from each page's fresh /api/me/ as
+  // well as the cached copy, so it cannot be skipped by a stale cache.
+  useEffect(() => {
+    const onboarding = me?.profile?.onboarding;
+    if (onboarding && !onboarding.complete) window.location.replace('/onboarding');
+  }, [me]);
+
   return (
     <ShellContext.Provider value={{ unreadCount, setUnreadCount, startTour, refreshUnread, notify }}>
       <div className="ts-app-shell ts-student md:flex" style={FONT_SANS}>

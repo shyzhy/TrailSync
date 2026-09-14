@@ -13,6 +13,7 @@ from rest_framework import generics, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -33,7 +34,10 @@ from .models import (
     TransactionType,
     User,
 )
+from .activation import activation_token, send_activation_email, user_from_uid
 from .serializers import (
+    ONBOARDING_STEPS,
+    ActivateAccountSerializer,
     ApproveLogSerializer,
     ChangeEmailConfirmSerializer,
     ChangeEmailRequestSerializer,
@@ -45,6 +49,7 @@ from .serializers import (
     NotificationSerializer,
     RecentFormRequestSerializer,
     RegisterSerializer,
+    ResendActivationSerializer,
     RegistrarQueueRowSerializer,
     RegistrarRecentSubmissionSerializer,
     RegistrarReleasedRowSerializer,
@@ -82,9 +87,16 @@ class IsApprovedRegistrarStaff(BasePermission):
 
 
 class RegisterView(APIView):
-    """POST /api/auth/register/ - student & alumni self-registration."""
+    """POST /api/auth/register/ - create an account and email a confirmation link.
+
+    Returns no tokens: the account cannot be used until the address is
+    confirmed (see LoginView and ActivateAccountView). Throttled, because each
+    call sends an email to whatever address it is given.
+    """
 
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "register"
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -93,17 +105,12 @@ class RegisterView(APIView):
         # per-field inline errors.
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        send_activation_email(user)
 
         return Response(
             {
-                "detail": "Account created successfully.",
-                "user": {
-                    "id": user.id,
-                    "email": user.email,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
-                    "role": user.role.role_name if user.role_id else None,
-                },
+                "detail": "Account created. Check your email to activate it.",
+                "email": user.email,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -147,6 +154,20 @@ class LoginView(APIView):
 
         role_name = user.role.role_name if user.role_id else None
 
+        # Same shape as the staff-approval block below: the password was
+        # right (so nothing is revealed to someone guessing), but the account
+        # isn't usable yet. Scoped to self-registered roles - staff accounts
+        # are provisioned by an admin, not confirmed by email.
+        if role_name in SELF_REGISTERED_ROLES and not user.email_verified:
+            return Response(
+                {
+                    "code": "email_unverified",
+                    "detail": "Please confirm your email before logging in.",
+                    "email": user.email,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         if role_name == Role.RoleName.REGISTRAR:
             staff_profile = getattr(user, "staff_profile", None)
             if (
@@ -158,25 +179,202 @@ class LoginView(APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-        profile_data = build_profile_payload(user)
+        return Response(_session_payload(user), status=status.HTTP_200_OK)
 
-        refresh = RefreshToken.for_user(user)
+
+def _session_payload(user):
+    """Tokens plus the user, in the shape the frontend saves as a session.
+
+    Shared by login and account activation, so someone who arrives through
+    their confirmation link holds exactly what a normal login would give them.
+    """
+    refresh = RefreshToken.for_user(user)
+    return {
+        "access": str(refresh.access_token),
+        "refresh": str(refresh),
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "role": user.role.role_name if user.role_id else None,
+            "profile": build_profile_payload(user),
+        },
+    }
+
+
+SELF_REGISTERED_ROLES = (Role.RoleName.STUDENT, Role.RoleName.ALUMNI)
+
+
+class ActivateAccountView(APIView):
+    """POST /api/auth/activate/ {uid, token} - the link from the confirmation email.
+
+    On success the address is marked verified and the student is signed in
+    straight away, so they land in onboarding rather than on a login form
+    asking for the password they typed two minutes ago.
+
+    Answers carry a `code` the page switches on:
+      already_active - the link was used before; log in normally
+      expired        - genuine but older than 24 hours; offer a new one
+      invalid        - malformed, tampered with, or superseded
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "activation"
+
+    def post(self, request):
+        serializer = ActivateAccountSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"code": "invalid", "detail": "This link isn't complete. Try opening it from the email again."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = user_from_uid(serializer.validated_data["uid"])
+        if user is None:
+            return Response(
+                {"code": "invalid", "detail": "This link isn't valid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if user.email_verified:
+            # Checked before the token, because using a link flips the flag
+            # the token is signed over - a second click would otherwise read
+            # as a broken link rather than as "you're already in".
+            return Response(
+                {"code": "already_active", "detail": "Your account is already active.", "email": user.email},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        result = activation_token.verify(user, serializer.validated_data["token"])
+        if result == "expired":
+            return Response(
+                {"code": "expired", "detail": "This link has expired.", "email": user.email},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if result != "ok":
+            return Response(
+                {"code": "invalid", "detail": "This link isn't valid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if user.status != "Active":
+            return Response(
+                {"code": "suspended", "detail": "Your account is suspended. Contact the registrar's office."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        user.email_verified = True
+        user.email_verified_at = timezone.now()
+        user.save(update_fields=["email_verified", "email_verified_at"])
+        return Response(_session_payload(user), status=status.HTTP_200_OK)
+
+
+class ResendActivationView(APIView):
+    """POST /api/auth/resend-activation/ {email} - send a fresh confirmation link.
+
+    Always answers the same way, whether or not the address has an account
+    and whether or not it is already confirmed. Anything else would let this
+    endpoint be used to check who is registered. Throttled, since each call
+    can send an email.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "activation_resend"
+
+    def post(self, request):
+        serializer = ResendActivationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"].strip()
+
+        user = (
+            User.objects.filter(
+                email__iexact=email,
+                email_verified=False,
+                role__role_name__in=SELF_REGISTERED_ROLES,
+            )
+            .select_related("role")
+            .first()
+        )
+        if user is not None:
+            send_activation_email(user)
 
         return Response(
             {
-                "access": str(refresh.access_token),
-                "refresh": str(refresh),
-                "user": {
-                    "id": user.id,
-                    "email": user.email,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
-                    "role": role_name,
-                    "profile": profile_data,
-                },
-            },
-            status=status.HTTP_200_OK,
+                "detail": (
+                    "If that email belongs to an account that still needs confirming, "
+                    "we've sent a new link. It can take a minute or two to arrive."
+                )
+            }
         )
+
+
+# What a filed request was made under. Year level moves on every year and
+# academic level/graduation date were never asked before, so those stay open.
+LOCKED_ACADEMIC_FIELDS = ("school_id_number", "course", "user_category")
+
+
+class MeOnboardingView(APIView):
+    """PATCH /api/me/onboarding/ {step, ...fields} - save one wizard step.
+
+    Saved step by step so closing the browser loses nothing. The response is
+    the full /api/me/ payload, whose profile.onboarding says which step is
+    next - the wizard never has to work that out for itself.
+
+    Academic details (ID number, course, category) are official records.
+    They can be set here while the student has never filed a request; once a
+    request exists, changes go through Window 6 like any other record change.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request):
+        profile = getattr(request.user, "user_profile", None)
+        if profile is None:
+            return Response(
+                {"detail": "Account setup is only for student and alumni accounts."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        step = request.data.get("step")
+        serializer_class = ONBOARDING_STEPS.get(step)
+        if serializer_class is None:
+            return Response(
+                {"step": [f"Unknown step. Use one of: {', '.join(ONBOARDING_STEPS)}."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = serializer_class(data=request.data, context={"user": request.user})
+        serializer.is_valid(raise_exception=True)
+
+        # The lock is on CHANGING a record a request was filed under, not on
+        # filling a blank: an account that already has requests but predates
+        # academic_level must still be able to finish onboarding, or it would
+        # be asked for a field it is then forbidden to save.
+        if step == "academic" and request.user.form_requests.exists():
+            changed = [
+                field
+                for field in LOCKED_ACADEMIC_FIELDS
+                if getattr(profile, field)
+                and str(serializer.validated_data.get(field) or "").strip().lower()
+                != str(getattr(profile, field)).strip().lower()
+            ]
+            if changed:
+                return Response(
+                    {
+                        "detail": (
+                            "Your School ID number, course and category are already on file with "
+                            "a request. To change them, please ask at Window 6."
+                        ),
+                        "locked_fields": changed,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        serializer.save(request.user)
+        return Response(MeSerializer(request.user).data)
 
 
 class MeView(APIView):

@@ -61,6 +61,13 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     contact_number = models.CharField(max_length=20, blank=True, null=True)
 
+    # Self-registered students must prove they own the address before they
+    # can log in (see LoginView). Everyone who existed before this was added
+    # was backfilled as verified by the migration: they were already logging
+    # in, and locking them out to re-prove it would be a regression.
+    email_verified = models.BooleanField(default=False)
+    email_verified_at = models.DateTimeField(null=True, blank=True)
+
     status = models.CharField(
         max_length=20,
         choices=[
@@ -98,7 +105,11 @@ class UserProfile(models.Model):
         related_name="user_profile",
     )
 
-    school_id_number = models.CharField(max_length=50, unique=True)
+    # Nullable because signup now creates an empty profile first and the
+    # onboarding wizard fills it in afterwards. NULL rather than "" so the
+    # unique constraint still holds: Postgres allows many NULLs, but two
+    # blank strings would collide.
+    school_id_number = models.CharField(max_length=50, unique=True, null=True, blank=True)
 
     # first_name / last_name live on User (AbstractUser); only the middle name
     # is profile-side, so registration has somewhere to put it.
@@ -153,13 +164,45 @@ class UserProfile(models.Model):
             ("Student", "Student"),
             ("Alumni", "Alumni"),
         ],
+        # Unknown until onboarding step 2, for the same reason as the ID.
+        null=True,
+        blank=True,
     )
+    # Alumni give a graduation date instead of a year level. It lives on the
+    # profile now so the request form doesn't have to ask every time.
+    graduation_date = models.DateField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.user.get_full_name()} - {self.user_category}"
+
+    def onboarding_state(self):
+        """Which onboarding steps are done, worked out from the data itself.
+
+        Deliberately computed, never stored: a separate "onboarding_complete"
+        flag could say done while the ID number is blank (or not done after
+        an admin filled everything in). The profile photo is not here - it is
+        optional, so it can never hold anyone back.
+        """
+        user = self.user
+        steps = {
+            1: bool((user.first_name or "").strip() and (user.last_name or "").strip()),
+            2: bool(
+                self.school_id_number
+                and self.course
+                and self.user_category
+                and self.academic_level
+                and (
+                    (self.user_category == "Student" and self.year_level)
+                    or (self.user_category == "Alumni" and self.graduation_date)
+                )
+            ),
+            3: bool(self.birth_date and (user.contact_number or "").strip()),
+        }
+        next_step = next((n for n, done in steps.items() if not done), None)
+        return {"complete": next_step is None, "next_step": next_step, "steps_done": steps}
 
 class StaffProfile(models.Model):
     class ApprovalStatus(models.TextChoices):

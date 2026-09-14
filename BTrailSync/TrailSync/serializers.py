@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 from datetime import date, datetime
 from urllib.parse import urljoin
@@ -60,6 +61,17 @@ def build_profile_payload(user):
             # means "no photo, show initials" - the one fallback everywhere.
             "profile_picture_url": absolute_media_url(p.profile_picture),
             "tour_completed_at": p.tour_completed_at.isoformat() if p.tour_completed_at else None,
+            "academic_level": p.academic_level,
+            "graduation_date": p.graduation_date.isoformat() if p.graduation_date else None,
+            "birth_date": p.birth_date.isoformat() if p.birth_date else None,
+            # Computed from the fields above on every read - never a stored
+            # flag that could drift from them. academic_locked: once any
+            # request exists, the ID/course/category it was filed under can
+            # only be changed at Window 6, not from the wizard.
+            "onboarding": {
+                **{k: v for k, v in p.onboarding_state().items() if k != "steps_done"},
+                "academic_locked": user.form_requests.exists(),
+            },
         }
     if hasattr(user, "staff_profile"):
         s = user.staff_profile
@@ -103,6 +115,7 @@ class MeSerializer(serializers.Serializer):
     first_name = serializers.CharField()
     last_name = serializers.CharField()
     contact_number = serializers.CharField(allow_null=True)
+    email_verified = serializers.BooleanField()
     role = serializers.SerializerMethodField()
     profile = serializers.SerializerMethodField()
 
@@ -972,7 +985,16 @@ class CreateFormRequestSerializer(serializers.Serializer):
         form_data = attrs["form_data"]
         user = self.context["request"].user
         profile = getattr(user, "user_profile", None)
-        is_alumni = bool(profile and profile.user_category == "Alumni")
+
+        # The official form is printed from the profile (name, ID number,
+        # course, birth date). Enforced here and not only by the frontend
+        # sending people to onboarding, because this endpoint can be called
+        # without the frontend.
+        if profile is None or not profile.onboarding_state()["complete"]:
+            raise serializers.ValidationError(
+                {"detail": "Please finish setting up your profile before requesting a document."}
+            )
+        is_alumni = profile.user_category == "Alumni"
 
         purpose = (form_data.get("purpose") or "").strip()
         if not purpose:
@@ -1128,94 +1150,225 @@ class CreateFormRequestSerializer(serializers.Serializer):
 
 
 class RegisterSerializer(serializers.Serializer):
-    """Student / alumni self-registration.
+    """Student / alumni self-registration: email and password only.
+
+    Everything else - name, school ID, course, birth date - is collected by
+    the onboarding wizard after the address is confirmed (see
+    OnboardingNameSerializer and friends). Spreading it out means signing up
+    takes seconds, and nobody types their whole profile into an account they
+    might never be able to activate.
 
     Staff never come through here: their accounts are provisioned by an admin
-    and gated on StaffProfile.approval_status, so this endpoint only ever
-    assigns the Student or Alumni role and activates the account immediately.
+    and gated on StaffProfile.approval_status.
     """
 
-    email = serializers.EmailField()
+    # Any well-formed address. There is deliberately no @ustp.edu.ph rule:
+    # alumni in particular may no longer have access to a school mailbox.
+    email = serializers.EmailField(
+        error_messages={"invalid": "Please enter a valid email address, like juan@gmail.com."}
+    )
     password = serializers.CharField(write_only=True)
     confirm_password = serializers.CharField(write_only=True)
-
-    school_id_number = serializers.CharField(max_length=50)
-    first_name = serializers.CharField(max_length=150)
-    middle_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
-    last_name = serializers.CharField(max_length=150)
-
-    course = serializers.CharField(max_length=150)
-    year_level = serializers.CharField(max_length=50, required=False, allow_blank=True)
-    user_category = serializers.ChoiceField(
-        choices=UserProfile._meta.get_field("user_category").choices
-    )
 
     def validate_email(self, value):
         value = value.strip().lower()
         if User.objects.filter(email__iexact=value).exists():
-            raise serializers.ValidationError("This email is already registered.")
-        return value
-
-    def validate_school_id_number(self, value):
-        value = value.strip()
-        if UserProfile.objects.filter(school_id_number__iexact=value).exists():
-            raise serializers.ValidationError("This School ID Number is already registered.")
+            raise serializers.ValidationError(
+                "There's already an account with this email. Try logging in instead."
+            )
         return value
 
     def validate(self, attrs):
         if attrs["password"] != attrs["confirm_password"]:
             raise serializers.ValidationError({"confirm_password": "Passwords don't match."})
 
-        # Year level is meaningless for alumni, so only students must supply it.
-        if attrs.get("user_category") == "Student" and not (attrs.get("year_level") or "").strip():
-            raise serializers.ValidationError({"year_level": "Year level is required for students."})
-
-        # Run Django's configured AUTH_PASSWORD_VALIDATORS. Passing an unsaved
-        # User lets UserAttributeSimilarityValidator compare against the email
-        # and name too. Django raises its own ValidationError, which DRF does
-        # not translate, so re-raise it keyed to the password field.
-        probe = User(
-            email=attrs.get("email", ""),
-            first_name=attrs.get("first_name", ""),
-            last_name=attrs.get("last_name", ""),
-        )
+        # Run Django's configured AUTH_PASSWORD_VALIDATORS against an unsaved
+        # User, so the similarity check can compare with the email. Django
+        # raises its own ValidationError, which DRF does not translate.
         try:
-            validate_password(attrs["password"], probe)
+            validate_password(attrs["password"], User(email=attrs.get("email", "")))
         except DjangoValidationError as exc:
             raise serializers.ValidationError({"password": list(exc.messages)})
-
         return attrs
 
     @transaction.atomic
     def create(self, validated_data):
-        validated_data.pop("confirm_password", None)
-        category = validated_data["user_category"]
-
-        # Look the role up by name rather than hardcoding a PK - the Role rows
-        # are reference data and their IDs are not guaranteed across databases.
+        # Student until onboarding says otherwise: step 2 sets the category,
+        # and the role follows it (see OnboardingAcademicSerializer).
         try:
-            role = Role.objects.get(role_name=category)
+            role = Role.objects.get(role_name=Role.RoleName.STUDENT)
         except Role.DoesNotExist:
             raise serializers.ValidationError(
-                {"user_category": f"The '{category}' role is not configured. Seed the ROLES table."}
+                {"detail": "The Student role is not configured. Seed the ROLES table."}
             )
 
         user = User.objects.create_user(
             email=validated_data["email"],
             password=validated_data["password"],
-            first_name=validated_data["first_name"].strip(),
-            last_name=validated_data["last_name"].strip(),
             role=role,
-            status="Active",  # students/alumni need no approval step
+            status="Active",
+            # Cannot log in until the confirmation link is used.
+            email_verified=False,
         )
-
-        UserProfile.objects.create(
-            user=user,
-            school_id_number=validated_data["school_id_number"],
-            middle_name=(validated_data.get("middle_name") or "").strip(),
-            course=validated_data["course"].strip(),
-            year_level=(validated_data.get("year_level") or "").strip(),
-            user_category=category,
-        )
-
+        # An empty profile now, so onboarding only ever updates a row that
+        # exists - there is no "create or update" branch to get wrong later.
+        UserProfile.objects.create(user=user)
         return user
+
+
+class ActivateAccountSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+
+
+class ResendActivationSerializer(serializers.Serializer):
+    email = serializers.EmailField(
+        error_messages={"invalid": "Please enter a valid email address, like juan@gmail.com."}
+    )
+
+
+# ---------------------------------------------------------------------------
+# Onboarding
+# ---------------------------------------------------------------------------
+#
+# One small serializer per wizard step, each saved as the student presses
+# Continue - so closing the browser halfway loses nothing, and the next
+# login resumes at the first step still missing data.
+
+ACADEMIC_LEVELS_BY_CATEGORY = {
+    # The printed form's own checkbox: a current student is Undergraduate or
+    # Graduate; an alumnus may also have finished at the high school level.
+    "Student": {"Undergraduate", "Graduate"},
+    "Alumni": {"High School", "Undergraduate", "Graduate"},
+}
+
+
+class OnboardingNameSerializer(serializers.Serializer):
+    first_name = serializers.CharField(
+        max_length=150, error_messages={"blank": "Please enter your first name."}
+    )
+    middle_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    last_name = serializers.CharField(
+        max_length=150, error_messages={"blank": "Please enter your last name."}
+    )
+
+    def save(self, user):
+        data = self.validated_data
+        user.first_name = data["first_name"].strip()
+        user.last_name = data["last_name"].strip()
+        user.save(update_fields=["first_name", "last_name"])
+        profile = user.user_profile
+        profile.middle_name = (data.get("middle_name") or "").strip() or None
+        profile.save(update_fields=["middle_name", "updated_at"])
+
+
+class OnboardingAcademicSerializer(serializers.Serializer):
+    school_id_number = serializers.CharField(
+        max_length=50, error_messages={"blank": "Please enter your School ID number."}
+    )
+    course = serializers.CharField(max_length=150, error_messages={"blank": "Please choose your course."})
+    user_category = serializers.ChoiceField(
+        choices=["Student", "Alumni"],
+        error_messages={"invalid_choice": "Please choose Student or Alumni."},
+    )
+    academic_level = serializers.ChoiceField(
+        choices=["High School", "Undergraduate", "Graduate"],
+        error_messages={"invalid_choice": "Please choose your academic level."},
+    )
+    year_level = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    graduation_date = serializers.DateField(
+        required=False, allow_null=True, error_messages={"invalid": "Please enter a valid date."}
+    )
+
+    def validate_school_id_number(self, value):
+        value = value.strip()
+        user = self.context["user"]
+        if UserProfile.objects.exclude(user=user).filter(school_id_number__iexact=value).exists():
+            # Someone else has claimed this ID. Pointing at Window 6 rather
+            # than a vague "taken" because the likeliest story is a mistyped
+            # ID - or, worse, a real one used by someone else.
+            raise serializers.ValidationError(
+                "This School ID number is already linked to another account. "
+                "Check it for typos, or ask at Window 6 if it's yours."
+            )
+        return value
+
+    def validate(self, attrs):
+        category = attrs["user_category"]
+        if attrs["academic_level"] not in ACADEMIC_LEVELS_BY_CATEGORY[category]:
+            raise serializers.ValidationError(
+                {"academic_level": "High School only applies to alumni. Please choose another level."}
+            )
+        if category == "Student":
+            if not (attrs.get("year_level") or "").strip():
+                raise serializers.ValidationError({"year_level": "Please choose your year level."})
+            attrs["graduation_date"] = None
+        else:
+            graduated = attrs.get("graduation_date")
+            if not graduated:
+                raise serializers.ValidationError({"graduation_date": "Please enter your graduation date."})
+            if graduated > date.today():
+                raise serializers.ValidationError({"graduation_date": "Your graduation date can't be in the future."})
+            attrs["year_level"] = ""
+        return attrs
+
+    @transaction.atomic
+    def save(self, user):
+        data = self.validated_data
+        profile = user.user_profile
+        profile.school_id_number = data["school_id_number"]
+        profile.course = data["course"].strip()
+        profile.user_category = data["user_category"]
+        profile.academic_level = data["academic_level"]
+        profile.year_level = (data.get("year_level") or "").strip() or None
+        profile.graduation_date = data.get("graduation_date")
+        profile.save(
+            update_fields=[
+                "school_id_number", "course", "user_category", "academic_level",
+                "year_level", "graduation_date", "updated_at",
+            ]
+        )
+        # The role is what the rest of the app routes on, so it follows the
+        # category the student just chose.
+        role = Role.objects.filter(role_name=data["user_category"]).first()
+        if role and user.role_id != role.id:
+            user.role = role
+            user.save(update_fields=["role"])
+
+
+PH_MOBILE_DIGITS = re.compile(r"^\+?\d{10,13}$")
+
+
+class OnboardingContactSerializer(serializers.Serializer):
+    birth_date = serializers.DateField(error_messages={"invalid": "Please enter a valid date."})
+    contact_number = serializers.CharField(
+        max_length=20, error_messages={"blank": "Please enter your mobile number."}
+    )
+
+    def validate_birth_date(self, value):
+        if value >= date.today():
+            raise serializers.ValidationError("Your birth date has to be in the past.")
+        if value.year < 1900:
+            raise serializers.ValidationError("Please check the year of your birth date.")
+        return value
+
+    def validate_contact_number(self, value):
+        compact = re.sub(r"[\s()-]", "", value)
+        if not PH_MOBILE_DIGITS.match(compact):
+            raise serializers.ValidationError("Please enter a valid mobile number, like 09171234567.")
+        return compact
+
+    def save(self, user):
+        data = self.validated_data
+        user.contact_number = data["contact_number"]
+        user.save(update_fields=["contact_number"])
+        profile = user.user_profile
+        profile.birth_date = data["birth_date"]
+        profile.save(update_fields=["birth_date", "updated_at"])
+
+
+ONBOARDING_STEPS = {
+    "name": OnboardingNameSerializer,
+    "academic": OnboardingAcademicSerializer,
+    "contact": OnboardingContactSerializer,
+}

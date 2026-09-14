@@ -1,0 +1,14 @@
+{% autoescape off %}TrailSync — USTP–CDO Registrar
+
+Welcome! You're one step away from requesting your documents online.
+
+Confirm your email address to activate your account:
+
+{{ link }}
+
+This link works for {{ expires }}. If it has expired, you can ask for a new one from the TrailSync login page.
+
+Didn't create a TrailSync account? You can safely ignore this email — nothing will happen.
+
+— Office of the Registrar, Window 6
+{% endautoescape %}

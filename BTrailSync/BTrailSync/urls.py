@@ -27,6 +27,7 @@ from TrailSync.views import (
     NotificationMarkAllReadView,
     NotificationListView,
     MeTourView,
+    MeOnboardingView,
     ChangeEmailConfirmView,
     ChangeEmailRequestView,
     ChangePasswordView,
@@ -62,6 +63,7 @@ urlpatterns = [
     path('api/me/', MeView.as_view(), name='me'),
     path('api/me/avatar/', MeAvatarView.as_view(), name='me-avatar'),
     path('api/me/tour/', MeTourView.as_view(), name='me-tour'),
+    path('api/me/onboarding/', MeOnboardingView.as_view(), name='me-onboarding'),
     # Student notifications. unread-count and mark-all-read are literal paths
     # registered before <int:pk>/ so they are never read as an id.
     path('api/notifications/', NotificationListView.as_view(), name='notifications'),
