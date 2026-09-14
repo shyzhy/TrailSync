@@ -12,7 +12,7 @@ import {
   SkeletonGroup,
   TableRowSkeleton,
 } from './trailsyncUI.jsx';
-import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { STAFF_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 import {
   STAFF_NEXT_STEP,
   STATUS,
@@ -21,7 +21,7 @@ import {
   statusPillClass,
 } from '../lib/requestStatus.js';
 
-const LOGIN_PATH = '/';
+const LOGIN_PATH = STAFF_LOGIN_PATH;
 
 /** Where Review goes. Real navigation now rather than inline selection — a
  *  review is a page of its own, so it can be linked, reloaded and shared. */
@@ -110,7 +110,7 @@ export default function ProcessingQueuePage() {
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8 sm:py-10">
         <h1 className="ts-ink text-3xl font-semibold tracking-tight" style={FONT_SERIF}>
-          Requests to Work On
+          Processing Queue
         </h1>
         <p className="ts-soft mt-1.5 text-base">
           Every request at Window 6. Pick a stage below to see what is waiting there, then click Review.

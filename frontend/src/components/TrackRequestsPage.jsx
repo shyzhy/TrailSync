@@ -10,9 +10,9 @@ import {
 import StudentShell from './StudentShell.jsx';
 import TicketCard from './TicketCard.jsx';
 import { LIFECYCLE, STATUS, studentStatusLabel } from '../lib/requestStatus.js';
-import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { STUDENT_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 
-const LOGIN_PATH = '/';
+const LOGIN_PATH = STUDENT_LOGIN_PATH;
 
 // Built from the shared lifecycle so a new stage cannot go missing here.
 // "All" is a UI-only value the backend maps to "no status filter" (see

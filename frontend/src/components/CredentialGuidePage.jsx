@@ -9,9 +9,9 @@ import {
 } from './trailsyncUI.jsx';
 import StudentShell from './StudentShell.jsx';
 import CredentialDetailCard, { formatFeeWithUnit } from './CredentialDetailCard.jsx';
-import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { STUDENT_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 
-const LOGIN_PATH = '/';
+const LOGIN_PATH = STUDENT_LOGIN_PATH;
 
 function truncate(text, max = 90) {
   if (!text) return '';

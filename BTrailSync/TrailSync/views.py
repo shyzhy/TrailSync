@@ -1,4 +1,5 @@
-from datetime import timedelta
+import calendar
+from datetime import date, timedelta
 
 from django.conf import settings
 from django.contrib.auth import authenticate
@@ -533,6 +534,33 @@ class FormRequestListCreateView(generics.ListCreateAPIView):
         return Response(FormRequestResultSerializer(form_request).data, status=status.HTTP_201_CREATED)
 
 
+def _releases_between(first_day, last_day):
+    """Requests whose handover falls on a date in [first_day, last_day].
+
+    The one rule every "when is this being released" view shares: the
+    ReleaseSchedule date that Mark Ready to Release writes, or - only for a
+    request that has no schedule date at all - the ReleaseSlot it was booked
+    into before slots were retired. That is the same precedence as
+    FormRequest.scheduled_release(), expressed as a query so it can be
+    counted without loading every row.
+
+    Before this existed the dashboard counted schedule dates only, so a
+    request booked under the old slot system was invisible there while
+    still showing its window to the student.
+    """
+    return FormRequest.objects.filter(
+        models.Q(release_schedule__release_date__range=(first_day, last_day))
+        | models.Q(
+            release_schedule__release_date__isnull=True,
+            release_slot__slot_date__range=(first_day, last_day),
+        )
+    )
+
+
+def _effective_release_date(schedule_date, slot_date):
+    return schedule_date or slot_date
+
+
 def _release_window_text():
     """"3:00 PM to 5:00 PM" - the one window Window 6 releases in.
 
@@ -583,9 +611,7 @@ class RegistrarDashboardSummaryView(APIView):
         # "For release today" = scheduled for handover today. Counted off
         # ReleaseSchedule.release_date now that Mark Ready to Release writes
         # it directly; the old ReleaseSlot count would read 0 forever.
-        for_release_today_count = FormRequest.objects.filter(
-            release_schedule__release_date=today
-        ).count()
+        for_release_today_count = _releases_between(today, today).count()
 
         completed_this_week_count = FormRequest.objects.filter(
             request_status=FormRequest.RequestStatus.RELEASED,
@@ -628,10 +654,95 @@ class RegistrarTodaysPickupsView(generics.ListAPIView):
     def get_queryset(self):
         today = timezone.localdate()
         return (
-            FormRequest.objects.filter(release_schedule__release_date=today)
+            _releases_between(today, today)
             .select_related("transaction_type", "user", "release_schedule", "release_slot")
-            .order_by("release_schedule__release_time_start")
+            .order_by("release_schedule__release_time_start", "request_code")
         )
+
+
+class RegistrarReleaseCalendarView(APIView):
+    """GET /api/registrar/release-calendar/?year=&month= - dates and counts only.
+
+    Deliberately thin: the month grid needs to know which days have releases
+    and how many, not who they are. Detail for one day comes from the day
+    endpoint below, only when a date is actually opened.
+
+    Read-only by design. Scheduling happens on the Request Review page and
+    nowhere else, so there is no write path here to keep in sync with it.
+    """
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    def get(self, request):
+        today = timezone.localdate()
+        try:
+            year = int(request.query_params.get("year", today.year))
+            month = int(request.query_params.get("month", today.month))
+            first_day = date(year, month, 1)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "Use a real year and month, for example ?year=2026&month=9."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        last_day = date(year, month, calendar.monthrange(year, month)[1])
+
+        counts = {}
+        rows = _releases_between(first_day, last_day).values_list(
+            "release_schedule__release_date", "release_slot__slot_date"
+        )
+        for schedule_date, slot_date in rows:
+            day = _effective_release_date(schedule_date, slot_date)
+            if first_day <= day <= last_day:
+                counts[day] = counts.get(day, 0) + 1
+
+        return Response(
+            {
+                "year": year,
+                "month": month,
+                "days": [{"date": d.isoformat(), "count": counts[d]} for d in sorted(counts)],
+            }
+        )
+
+
+class RegistrarReleaseCalendarDayView(APIView):
+    """GET /api/registrar/release-calendar/day/?date=YYYY-MM-DD - who is due that day.
+
+    Name, request code and document per release, plus whether it has been
+    collected yet so a glance at a past day reads correctly. No actions.
+    """
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    def get(self, request):
+        try:
+            day = date.fromisoformat((request.query_params.get("date") or "").strip())
+        except ValueError:
+            return Response(
+                {"detail": "Use a real date, for example ?date=2026-09-18."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        releases = (
+            _releases_between(day, day)
+            .select_related("transaction_type", "user", "release_schedule", "release_slot")
+            .order_by("request_code")
+        )
+        rows = []
+        for fr in releases:
+            when = fr.scheduled_release()
+            start = when[1] if when else None
+            rows.append(
+                {
+                    "id": fr.id,
+                    "request_code": fr.request_code,
+                    "student_name": fr.user.get_full_name() or fr.user.email,
+                    "transaction_type": fr.transaction_type.name,
+                    "request_status": fr.request_status,
+                    "release_time_start": start.isoformat(timespec="minutes") if start else None,
+                }
+            )
+        rows.sort(key=lambda r: (r["release_time_start"] or "", r["request_code"]))
+        return Response({"date": day.isoformat(), "releases": rows})
 
 
 class RegistrarQueueListView(generics.ListAPIView):

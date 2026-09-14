@@ -50,6 +50,8 @@ from TrailSync.views import (
     RegistrarReleasedListView,
     RegistrarReleaseView,
     RegistrarTodaysPickupsView,
+    RegistrarReleaseCalendarDayView,
+    RegistrarReleaseCalendarView,
     TransactionTypeListView,
     UpcomingReleaseDatesView,
 )
@@ -85,6 +87,9 @@ urlpatterns = [
     path('api/registrar/dashboard/recent-submissions/', RegistrarRecentSubmissionsView.as_view(), name='registrar-recent-submissions'),
     path('api/registrar/dashboard/flagged/', RegistrarFlaggedRequestsView.as_view(), name='registrar-flagged'),
     path('api/registrar/dashboard/todays-pickups/', RegistrarTodaysPickupsView.as_view(), name='registrar-todays-pickups'),
+    # View-only: dates + counts for a month, then one day's list on demand.
+    path('api/registrar/release-calendar/day/', RegistrarReleaseCalendarDayView.as_view(), name='registrar-release-calendar-day'),
+    path('api/registrar/release-calendar/', RegistrarReleaseCalendarView.as_view(), name='registrar-release-calendar'),
     # Processing Queue
     # Registered before the list route's own prefix so "export" is never
     # read as a filter value.

@@ -12,10 +12,10 @@ import {
   Toast,
 } from './trailsyncUI.jsx';
 import StudentShell from './StudentShell.jsx';
-import { authFetch, clearSession, getAccessToken, getStoredUser, updateStoredUser } from '../lib/auth.js';
+import { STUDENT_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser, updateStoredUser } from '../lib/auth.js';
 import { friendlyFieldErrors, friendlySummary, NETWORK_ERROR } from '../lib/friendlyErrors.js';
 
-const LOGIN_PATH = '/';
+const LOGIN_PATH = STUDENT_LOGIN_PATH;
 
 // Mirrors the server's rules in avatars.py. Checked here so a student hears
 // "too big" instantly instead of after uploading 5 MB; the server checks

@@ -1,3 +1,4 @@
+import { STUDENT_LOGIN_PATH } from '../lib/auth.js';
 import { useEffect, useState } from 'react';
 import {
   API_BASE_URL,
@@ -8,7 +9,6 @@ import {
   EyeOffIcon,
   FONT_SERIF,
   GlassScene,
-  Spinner,
 } from './trailsyncUI.jsx';
 import { friendlyMessage, NETWORK_ERROR } from '../lib/friendlyErrors.js';
 
@@ -37,7 +37,7 @@ const USTP_DOMAIN_RE = /@ustp\.edu\.ph$/i;
 
 // Redirect delay after a successful signup, long enough to read the message.
 const REDIRECT_DELAY_MS = 2500;
-const LOGIN_PATH = '/';
+const LOGIN_PATH = STUDENT_LOGIN_PATH;
 
 // DRF replies with {"<model_field>": ["message"]}. Translate those field names
 // into this form's state keys so each message lands on its own input instead
@@ -455,14 +455,14 @@ export default function CreateAccountPage() {
               aria-invalid={Boolean(errors.password)}
               aria-describedby={errors.password ? 'password-error' : 'password-strength'}
               placeholder="At least 8 characters"
-              className={`ts-input w-full px-3.5 py-2.5 pr-11 text-sm ${errors.password ? 'ts-input-error' : ''}`}
+              className={`ts-input w-full px-3.5 py-2.5 pr-12 text-sm ${errors.password ? 'ts-input-error' : ''}`}
             />
             <button
               type="button"
               onClick={() => setShowPassword((s) => !s)}
               aria-label={showPassword ? 'Hide password' : 'Show password'}
               aria-pressed={showPassword}
-              className="ts-icon-btn absolute right-2 top-1/2 -translate-y-1/2 p-1.5"
+              className="ts-eye-btn"
             >
               {showPassword ? <EyeOffIcon /> : <EyeIcon />}
             </button>
@@ -491,14 +491,14 @@ export default function CreateAccountPage() {
               aria-invalid={Boolean(errors.confirmPassword)}
               aria-describedby={errors.confirmPassword ? 'confirmPassword-error' : undefined}
               placeholder="Re-enter your password"
-              className={`ts-input w-full px-3.5 py-2.5 pr-11 text-sm ${errors.confirmPassword ? 'ts-input-error' : ''}`}
+              className={`ts-input w-full px-3.5 py-2.5 pr-12 text-sm ${errors.confirmPassword ? 'ts-input-error' : ''}`}
             />
             <button
               type="button"
               onClick={() => setShowConfirm((s) => !s)}
               aria-label={showConfirm ? 'Hide password' : 'Show password'}
               aria-pressed={showConfirm}
-              className="ts-icon-btn absolute right-2 top-1/2 -translate-y-1/2 p-1.5"
+              className="ts-eye-btn"
             >
               {showConfirm ? <EyeOffIcon /> : <EyeIcon />}
             </button>
@@ -559,7 +559,7 @@ export default function CreateAccountPage() {
 
       <p className="ts-soft mt-6 text-sm">
         Already have an account?{' '}
-        <a href="/" className="ts-link font-medium">Log in</a>
+        <a href={LOGIN_PATH} className="ts-link font-medium">Log in</a>
       </p>
 
       <p className="ts-soft mt-10 text-xs">

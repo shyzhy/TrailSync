@@ -13,10 +13,10 @@ import {
   Toast,
   WarningIcon,
 } from './trailsyncUI.jsx';
-import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { STAFF_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 import { STAFF_NEXT_STEP, STATUS, statusLabel, statusPillClass } from '../lib/requestStatus.js';
 
-const LOGIN_PATH = '/';
+const LOGIN_PATH = STAFF_LOGIN_PATH;
 const QUEUE_PATH = '/registrar/queue';
 
 const PESO = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });

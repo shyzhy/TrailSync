@@ -1,4 +1,6 @@
-import LoginPage from './components/LoginPage.jsx';
+import LandingPage from './components/LandingPage.jsx';
+import StudentLoginPage, { RegistrarLoginPage } from './components/LoginPage.jsx';
+import ReleaseCalendarPage from './components/ReleaseCalendarPage.jsx';
 import CreateAccountPage from './components/CreateAccountPage.jsx';
 import StudentDashboard from './components/StudentDashboard.jsx';
 import RequestFormPage from './components/RequestFormPage.jsx';
@@ -27,6 +29,10 @@ function Page({ children }) {
 // router. Replace with react-router when routing lands.
 export default function App() {
   const { pathname } = window.location;
+  // Exact matches for the two logins: /login is a prefix of nothing else,
+  // but /registrar/login has to be caught before the /registrar/* pages.
+  if (pathname === '/login' || pathname === '/login/') return <Page><StudentLoginPage /></Page>;
+  if (pathname.startsWith('/registrar/login')) return <Page><RegistrarLoginPage /></Page>;
   if (pathname.startsWith('/create-account')) return <Page><CreateAccountPage /></Page>;
   if (pathname.startsWith('/request-form')) return <Page><RequestFormPage /></Page>;
   if (pathname.startsWith('/track-requests')) return <Page><TrackRequestsPage /></Page>;
@@ -40,14 +46,16 @@ export default function App() {
   const review = pathname.match(/^\/registrar\/queue\/(\d+)/);
   if (review) return <Page><RequestReviewPage requestId={review[1]} /></Page>;
   if (pathname.startsWith('/registrar/queue')) return <Page><ProcessingQueuePage /></Page>;
+  if (pathname.startsWith('/registrar/calendar')) return <Page><ReleaseCalendarPage /></Page>;
   if (pathname.startsWith('/registrar/released')) return <Page><ReleasedDocumentsPage /></Page>;
-  // Release Slots is gone. A staff member with it bookmarked would otherwise
-  // land on the unknown-path fallback below, which is the login screen — an
-  // alarming thing to see while you are already logged in.
+  // Release Slots is gone; its nearest successor is the view-only calendar,
+  // so an old bookmark lands there rather than on the landing page.
   if (pathname.startsWith('/registrar/release-slots')) {
-    window.location.replace('/registrar/released');
+    window.location.replace('/registrar/calendar');
     return null;
   }
   if (pathname.startsWith('/portal')) return <Page><StudentDashboard /></Page>;
-  return <Page><LoginPage /></Page>;
+  // The landing page is both "/" and the answer to any unknown address:
+  // a mistyped link lands somewhere that explains the app, not on a form.
+  return <Page><LandingPage /></Page>;
 }

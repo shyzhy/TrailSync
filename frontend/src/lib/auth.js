@@ -3,6 +3,15 @@
 // sessionStorage ("remember me") rule live in exactly one place.
 import { API_BASE_URL } from '../components/trailsyncUI.jsx';
 
+/**
+ * Where each audience logs in. Two pages rather than one with a role toggle:
+ * a single "Log in" button under a Student/Staff switch left it unclear who
+ * the button would log you in as. Every page that bounces an expired session
+ * sends it to the login for ITS side of the app.
+ */
+export const STUDENT_LOGIN_PATH = '/login';
+export const STAFF_LOGIN_PATH = '/registrar/login';
+
 const ACCESS_KEY = 'trailsync_access_token';
 const REFRESH_KEY = 'trailsync_refresh_token';
 const USER_KEY = 'trailsync_user';

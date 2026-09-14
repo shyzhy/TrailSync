@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BellIcon, ChevronIcon, EmptyState, FONT_SERIF, ListRowSkeleton, SkeletonGroup } from './trailsyncUI.jsx';
 import StudentShell, { markNotificationRead, notificationHref, timeAgo, useStudentShell } from './StudentShell.jsx';
-import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { STUDENT_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 
-const LOGIN_PATH = '/';
+const LOGIN_PATH = STUDENT_LOGIN_PATH;
 
 /**
  * The body lives in its own component so it can reach the shell's context:

@@ -14,8 +14,9 @@ import {
   StatCardSkeleton,
   WarningIcon,
 } from './trailsyncUI.jsx';
-import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { STAFF_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 import { STATUS } from '../lib/requestStatus.js';
+import ReleaseCalendar from './ReleaseCalendar.jsx';
 
 /** "15:00" -> "3:00 PM". Staff read a clock, not a 24-hour timestamp. */
 function formatClock(hhmm) {
@@ -25,7 +26,7 @@ function formatClock(hhmm) {
   return `${h % 12 === 0 ? 12 : h % 12}:${String(m || 0).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
 }
 
-const LOGIN_PATH = '/';
+const LOGIN_PATH = STAFF_LOGIN_PATH;
 
 // Today's pickup rows read in claim terms rather than lifecycle terms:
 // at the counter the only question is whether the person has turned up yet.
@@ -58,6 +59,26 @@ export default function RegistrarDashboardPage() {
   const [recentSubmissions, setRecentSubmissions] = useState(null);
   const [todaysPickups, setTodaysPickups] = useState(null);
   const [flagged, setFlagged] = useState([]);
+  const [calendarCounts, setCalendarCounts] = useState({});
+  const [calendarMonth] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
+
+  // The mini calendar loads on its own for the same reason the fraud alert
+  // does: a slow or failed month shouldn't hold up the rest of the dashboard.
+  const loadCalendar = useCallback(async () => {
+    try {
+      const res = await authFetch(
+        `/api/registrar/release-calendar/?year=${calendarMonth.year}&month=${calendarMonth.month + 1}`,
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      setCalendarCounts(Object.fromEntries((data.days || []).map((d) => [d.date, d.count])));
+    } catch {
+      // The grid still draws; it just has no numbers until the next load.
+    }
+  }, [calendarMonth]);
 
   // The fraud alert loads on its own, so a failure here can't take the rest
   // of the dashboard down with it - and a failure the other way round can't
@@ -121,7 +142,8 @@ export default function RegistrarDashboardPage() {
     }
     load();
     loadFlagged();
-  }, [load, loadFlagged]);
+    loadCalendar();
+  }, [load, loadFlagged, loadCalendar]);
 
   const handleLogout = () => {
     clearSession();
@@ -316,7 +338,29 @@ export default function RegistrarDashboardPage() {
           </div>
 
           <div className="lg:col-span-2">
+            {/* The month around today, so "today's pickups" below has
+                context. Picking a day opens it on the full calendar. */}
             <div className="flex items-center justify-between">
+              <h2 className="ts-ink text-lg font-semibold" style={FONT_SERIF}>
+                Release calendar
+              </h2>
+              <a href="/registrar/calendar" className="ts-link text-sm font-medium">
+                View full calendar
+              </a>
+            </div>
+            <div className="ts-card mt-4 p-4">
+              <ReleaseCalendar
+                size="mini"
+                year={calendarMonth.year}
+                month={calendarMonth.month}
+                counts={calendarCounts}
+                onSelect={(iso) => {
+                  window.location.href = `/registrar/calendar?date=${iso}`;
+                }}
+              />
+            </div>
+
+            <div className="mt-8 flex items-center justify-between">
               <h2 className="ts-ink text-lg font-semibold" style={FONT_SERIF}>
                 Today&rsquo;s pickups
               </h2>

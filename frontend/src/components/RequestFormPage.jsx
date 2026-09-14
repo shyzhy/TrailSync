@@ -18,10 +18,10 @@ import {
   WarningIcon,
 } from './trailsyncUI.jsx';
 import StudentShell from './StudentShell.jsx';
-import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { STUDENT_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 import { NETWORK_ERROR, friendlySummary } from '../lib/friendlyErrors.js';
 
-const LOGIN_PATH = '/';
+const LOGIN_PATH = STUDENT_LOGIN_PATH;
 const DASHBOARD_PATH = '/portal';
 
 // Plain words for each step. "Proxy Assignment" and "Select Service" were

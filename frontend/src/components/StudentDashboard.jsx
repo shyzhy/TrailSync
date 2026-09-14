@@ -16,10 +16,10 @@ import {
 } from './trailsyncUI.jsx';
 import StudentShell from './StudentShell.jsx';
 import MiniCalendar from './MiniCalendar.jsx';
-import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { STUDENT_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 import { LIFECYCLE, STATUS, statusPillClass, studentStatusLabel } from '../lib/requestStatus.js';
 
-const LOGIN_PATH = '/';
+const LOGIN_PATH = STUDENT_LOGIN_PATH;
 
 // Student-facing wording for each stage, from the shared lifecycle. The
 // stages are no longer collapsed: "Ready to Print" is an instruction to the

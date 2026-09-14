@@ -70,7 +70,7 @@ export default function ConfirmEmailPage() {
         {state === 'needs-login' && (
           <>
             <p className="ts-soft mt-4 text-sm">Please log in to confirm this email change.</p>
-            <a href="/" className="ts-btn-primary mt-6 inline-flex px-6 py-2.5 text-sm font-medium">
+            <a href="/login" className="ts-btn-primary mt-6 inline-flex px-6 py-2.5 text-sm font-medium">
               Log in
             </a>
           </>

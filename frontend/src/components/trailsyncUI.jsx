@@ -91,6 +91,18 @@ const COLOR_UTIL_CSS = `
 // on both. One definition, included in both SHARED_CSS and APP_CSS, so a
 // tweak to how an input looks never has to be made twice.
 const FORM_CONTROL_CSS = `
+  /* ---- Busy buttons -------------------------------------------------
+     The idle and busy labels sit in the same grid cell, so the button is
+     always as wide as the longer of the two and nothing beside it moves
+     when the label changes. Lives here, in the sheet both the app AND the
+     login/sign-up pages load: in the app-only sheet, the login button
+     showed both of its labels stacked at all times. */
+  .ts-busy-label { display: inline-grid; align-items: center; justify-items: center; }
+  .ts-busy-label > * { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 8px; }
+  .ts-busy-label > .ts-busy-on { visibility: hidden; }
+  .ts-busy-label[data-busy='1'] > .ts-busy-off { visibility: hidden; }
+  .ts-busy-label[data-busy='1'] > .ts-busy-on { visibility: visible; }
+
   /* On phones: iOS Safari zooms the whole page when a field under 16px gets
      focus, leaving a first-time user scrolled sideways mid-form. Element +
      class so it outranks Tailwind's text-sm on the same input. And 44px is
@@ -355,6 +367,108 @@ export const SHARED_CSS = `
 
   ${COLOR_UTIL_CSS}
   ${FORM_CONTROL_CSS}
+
+  /* ---- Password show/hide: a real 44px thumb target ------------------ */
+  .ts-eye-btn {
+    position: absolute;
+    top: 50%; right: 2px;
+    transform: translateY(-50%);
+    width: 44px; height: 44px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 10px;
+    color: #5B6474;
+    background: transparent;
+    cursor: pointer;
+    transition: color 150ms ease, background 150ms ease;
+  }
+  .ts-eye-btn:hover { color: #1F2937; background: rgba(31,41,55,0.05); }
+  .ts-eye-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.6); }
+
+  /* ---- Login outcomes: one shape each, not one red box for all ------- */
+  .ts-notice {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid transparent;
+  }
+  .ts-notice-icon {
+    flex-shrink: 0;
+    width: 32px; height: 32px;
+    border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .ts-notice-icon svg { width: 18px; height: 18px; }
+  /* Wrong details: red, and something the person can fix right now. */
+  .ts-notice-wrong { background: rgba(220,38,38,0.08); border-color: rgba(220,38,38,0.32); color: #991B1B; }
+  .ts-notice-wrong .ts-notice-icon { background: rgba(220,38,38,0.12); color: #B91C1C; }
+  /* Waiting on someone else: warm gold, a clock, nothing to retype. */
+  .ts-notice-pending { background: rgba(184,135,43,0.12); border-color: rgba(184,135,43,0.48); color: #5E4413; }
+  .ts-notice-pending .ts-notice-icon {
+    color: #FAF8F3;
+    background: linear-gradient(180deg, #DCA948 0%, #B8872B 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.45), 0 2px 5px rgba(140,102,32,0.35);
+  }
+  /* Blocked by the office: neutral and serious. */
+  .ts-notice-suspended { background: rgba(31,41,55,0.06); border-color: rgba(31,41,55,0.24); color: #1F2937; }
+  .ts-notice-suspended .ts-notice-icon { background: #1F2937; color: #FAF8F3; }
+  /* Right password, wrong door: blue, with a way through. */
+  .ts-notice-info { background: rgba(36,64,107,0.07); border-color: rgba(36,64,107,0.26); color: #1B3358; }
+  .ts-notice-info .ts-notice-icon { background: rgba(36,64,107,0.12); color: #24406B; }
+
+  /* ---- Staff scene: charcoal and gold ---------------------------------
+     The same photo and glass as the student login, re-tinted to the staff
+     side's colours so the two doors are told apart at a glance. */
+  .ts-scene-staff { background: #1B1E23; }
+  .ts-scene-staff .ts-photo { filter: saturate(0.55) brightness(0.9); }
+  .ts-scene-staff .ts-photo-tint {
+    background: linear-gradient(90deg, rgba(20,22,27,0.40) 0%, rgba(20,22,27,0.20) 55%, rgba(20,22,27,0.36) 100%);
+  }
+  @media (min-width: 1024px) {
+    .ts-scene-staff .ts-glass-b {
+      background: linear-gradient(to right,
+        rgba(250,248,243,0.26) 0%,
+        rgba(250,248,243,0.18) 45%,
+        rgba(31,35,42,0.20) 74%,
+        rgba(31,35,42,0.04) 100%);
+    }
+  }
+  @media (max-width: 1023px) {
+    .ts-scene-staff .ts-glass-b {
+      background: linear-gradient(to bottom,
+        rgba(31,35,42,0.18) 0%,
+        rgba(250,248,243,0.20) 16%,
+        rgba(250,248,243,0.28) 100%);
+    }
+  }
+  .ts-scene-staff .ts-btn-primary {
+    color: #FAF8F3;
+    background: linear-gradient(180deg, #4A4F58 0%, #2B2F36 55%, #1B1E23 100%);
+    border-color: rgba(20,22,27,0.75);
+    border-top-color: rgba(228,180,92,0.6);
+    box-shadow:
+      0 8px 18px rgba(20,22,27,0.34),
+      0 2px 4px rgba(20,22,27,0.26),
+      inset 0 1px 0 rgba(228,180,92,0.38);
+  }
+  .ts-scene-staff .ts-btn-primary:active:not(:disabled) {
+    background: linear-gradient(180deg, #1B1E23 0%, #2B2F36 50%, #4A4F58 100%);
+    box-shadow: inset 0 3px 8px rgba(0,0,0,0.45), inset 0 -1px 0 rgba(228,180,92,0.2);
+  }
+  .ts-scene-staff .ts-btn-primary:focus-visible {
+    box-shadow: 0 0 0 3px rgba(228,180,92,0.7), 0 8px 18px rgba(20,22,27,0.34);
+  }
+  .ts-scene-staff .ts-link { color: #7A5719; }
+  .ts-scene-staff .ts-input:focus { border-color: rgba(184,135,43,0.7); }
+  .ts-staff-eyebrow {
+    display: inline-flex; align-items: center;
+    padding: 5px 11px;
+    border-radius: 999px;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
+    color: #E4B45C;
+    background: linear-gradient(180deg, #3A3F47 0%, #1F2329 100%);
+    border: 1px solid rgba(228,180,92,0.35);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 2px 6px rgba(20,22,27,0.25);
+  }
 `;
 
 /**
@@ -362,9 +476,12 @@ export const SHARED_CSS = `
  * that fades into it on the left, form content directly on the glass with no
  * card. Content is passed as children.
  */
-export function GlassScene({ children, maxWidth = '420px' }) {
+export function GlassScene({ children, maxWidth = '420px', variant = 'student' }) {
   return (
-    <div className="ts-page relative flex min-h-screen w-full flex-col lg:flex-row" style={FONT_SANS}>
+    <div
+      className={`ts-page relative flex min-h-screen w-full flex-col lg:flex-row ${variant === 'staff' ? 'ts-scene-staff' : ''}`}
+      style={FONT_SANS}
+    >
       <style>{SHARED_CSS}</style>
 
       <div className="ts-photo" aria-hidden="true" />
@@ -1573,15 +1690,6 @@ export const APP_CSS = `
   }
   .ts-empty-icon > svg { width: 22px; height: 22px; }
 
-  /* ---- Busy buttons -------------------------------------------------
-     The idle and busy labels sit in the same grid cell, so the button is
-     always as wide as the longer of the two and nothing beside it moves
-     when the label changes. */
-  .ts-busy-label { display: inline-grid; align-items: center; justify-items: center; }
-  .ts-busy-label > * { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 8px; }
-  .ts-busy-label > .ts-busy-on { visibility: hidden; }
-  .ts-busy-label[data-busy='1'] > .ts-busy-off { visibility: hidden; }
-  .ts-busy-label[data-busy='1'] > .ts-busy-on { visibility: visible; }
 
   /* ---- Success seal: circle drawn, then the tick ---- */
   .ts-seal-circle {
@@ -1666,6 +1774,82 @@ export const APP_CSS = `
       transform: none;
     }
   }
+
+  /* ---- Release calendar (registrar, view-only) ----------------------- */
+  .ts-relcal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+  .ts-relcal-weekday {
+    padding-bottom: 4px;
+    text-align: center;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: #5B6474;
+  }
+  .ts-relcal-day {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    min-height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #1F2937;
+    font-size: 14px; font-weight: 500;
+    cursor: pointer;
+    transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+  }
+  .ts-relcal-day:hover { background: rgba(36,64,107,0.05); }
+  /* A day with releases reads as a raised tile, not just a number. */
+  .ts-relcal-day.has-releases {
+    background: linear-gradient(165deg, rgba(255,255,255,0.96) 0%, rgba(250,248,243,0.82) 100%);
+    border-color: rgba(227,223,210,0.95);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 5px 12px -7px rgba(31,41,55,0.3);
+  }
+  .ts-relcal-day.is-selected {
+    background: linear-gradient(165deg, rgba(255,255,255,0.98) 0%, rgba(234,240,248,0.92) 100%);
+    border-color: rgba(36,64,107,0.55);
+    box-shadow: 0 0 0 3px rgba(36,64,107,0.15), inset 0 1px 0 rgba(255,255,255,0.9);
+  }
+  .ts-relcal-day:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.6); }
+  .ts-relcal-num {
+    width: 30px; height: 30px;
+    border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .ts-relcal-day.is-today .ts-relcal-num {
+    color: #FAF8F3; font-weight: 600;
+    background: linear-gradient(180deg, #DCA948 0%, #B8872B 100%);
+    box-shadow: 0 1px 3px rgba(31,41,55,0.3), inset 0 1px 0 rgba(255,255,255,0.5);
+  }
+  .ts-relcal-count {
+    position: absolute; top: 4px; right: 4px;
+    min-width: 19px; height: 19px; padding: 0 5px;
+    border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; line-height: 1;
+    color: #FAF8F3;
+    background: linear-gradient(180deg, #3E5D8F 0%, #24406B 100%);
+    box-shadow: 0 1px 3px rgba(23,41,74,0.4), inset 0 1px 0 rgba(255,255,255,0.3);
+  }
+  .ts-relcal-count-legend { position: static; flex-shrink: 0; }
+  .ts-relcal-nav {
+    width: 40px; height: 40px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 10px;
+    color: #24406B;
+    background: linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.62) 100%);
+    border: 1px solid #E3DFD2;
+    box-shadow: 0 2px 5px rgba(31,41,55,0.1), inset 0 1px 0 rgba(255,255,255,0.95);
+    cursor: pointer;
+  }
+  .ts-relcal-nav:hover { background: #FFFFFF; }
+  .ts-relcal-nav:active { transform: translateY(1px); box-shadow: inset 0 2px 5px rgba(31,41,55,0.18); }
+  .ts-relcal-nav:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.6); }
+
+  /* The Dashboard's mini version: same drawing, smaller. */
+  .ts-relcal-mini .ts-relcal-grid { gap: 3px; }
+  .ts-relcal-mini .ts-relcal-weekday { font-size: 10px; }
+  .ts-relcal-mini .ts-relcal-day { min-height: 34px; border-radius: 9px; font-size: 12px; }
+  .ts-relcal-mini .ts-relcal-num { width: 24px; height: 24px; }
+  .ts-relcal-mini .ts-relcal-count { top: 1px; right: 1px; min-width: 15px; height: 15px; padding: 0 3px; font-size: 9.5px; }
 
   /* =====================================================================
      PHONE OVERRIDES — deliberately last in this sheet.
@@ -2312,7 +2496,9 @@ export function AppMobileHeader({ onLogout }) {
  */
 const STAFF_NAV_ITEMS = [
   { key: 'dashboard', href: '/registrar/dashboard', label: 'Dashboard', Icon: GridIcon },
-  { key: 'queue', href: '/registrar/queue', label: 'Requests to Work On', Icon: DocumentIcon },
+  { key: 'queue', href: '/registrar/queue', label: 'Processing Queue', Icon: DocumentIcon },
+  // Between the work and the record: where releases are headed.
+  { key: 'calendar', href: '/registrar/calendar', label: 'Release Calendar', Icon: CalendarIcon },
   { key: 'released', href: '/registrar/released', label: 'Released Documents', Icon: ArchiveIcon },
 ];
 
@@ -2325,7 +2511,7 @@ function StaffHelp({ onClose }) {
   const items = [
     {
       q: 'How do I work through a request?',
-      a: 'Open "Requests to Work On" and click Review on any row. The page shows the one action that fits where that request has got to, and asks you to confirm before anything is saved.',
+      a: 'Open "Processing Queue" and click Review on any row. The page shows the one action that fits where that request has got to, and asks you to confirm before anything is saved.',
     },
     {
       q: 'What do the stages mean?',
