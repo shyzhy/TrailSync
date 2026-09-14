@@ -13,15 +13,22 @@ import {
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 import { STATUS } from '../lib/requestStatus.js';
 
+/** "15:00" -> "3:00 PM". Staff read a clock, not a 24-hour timestamp. */
+function formatClock(hhmm) {
+  if (!hhmm) return null;
+  const [h, m] = String(hhmm).split(':').map(Number);
+  if (Number.isNaN(h)) return hhmm;
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m || 0).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+
 const LOGIN_PATH = '/';
 
-// Today's release rows read in claim terms rather than lifecycle terms:
-// at a release window the only question is whether the person has turned up
-// yet, so Ready reads as "Waiting" and Released as "Claimed".
+// Today's pickup rows read in claim terms rather than lifecycle terms:
+// at the counter the only question is whether the person has turned up yet.
 const RELEASE_ROW_PILL = {
-  [STATUS.PROCESSING]: { label: 'Processing', className: 'ts-pill-processing' },
-  [STATUS.READY]: { label: 'Waiting', className: 'ts-pill-blue' },
-  [STATUS.RELEASED]: { label: 'Claimed', className: 'ts-pill-ready' },
+  [STATUS.PROCESSING]: { label: 'Still being prepared', className: 'ts-pill-processing' },
+  [STATUS.READY]: { label: 'Not collected yet', className: 'ts-pill-blue' },
+  [STATUS.RELEASED]: { label: 'Collected', className: 'ts-pill-ready' },
 };
 
 function formatRelativeTime(iso) {
@@ -67,7 +74,7 @@ export default function RegistrarDashboardPage() {
   const [me, setMe] = useState(() => getStoredUser());
   const [summary, setSummary] = useState(null);
   const [recentSubmissions, setRecentSubmissions] = useState(null);
-  const [releaseSlots, setReleaseSlots] = useState(null);
+  const [todaysPickups, setTodaysPickups] = useState(null);
   const [flagged, setFlagged] = useState([]);
 
   // The fraud alert loads on its own, so a failure here can't take the rest
@@ -86,14 +93,14 @@ export default function RegistrarDashboardPage() {
   const load = useCallback(async () => {
     setStatus('loading');
     try {
-      const [meRes, summaryRes, recentRes, slotsRes] = await Promise.all([
+      const [meRes, summaryRes, recentRes, pickupsRes] = await Promise.all([
         authFetch('/api/me/'),
         authFetch('/api/registrar/dashboard/summary/'),
         authFetch('/api/registrar/dashboard/recent-submissions/'),
-        authFetch('/api/registrar/dashboard/todays-release-slots/'),
+        authFetch('/api/registrar/dashboard/todays-pickups/'),
       ]);
 
-      if ([meRes, summaryRes, recentRes, slotsRes].some((r) => r.status === 401)) {
+      if ([meRes, summaryRes, recentRes, pickupsRes].some((r) => r.status === 401)) {
         clearSession();
         window.location.href = LOGIN_PATH;
         return;
@@ -101,24 +108,24 @@ export default function RegistrarDashboardPage() {
       // 403 here means an authenticated-but-non-staff (or not-yet-approved)
       // token hit a registrar-only endpoint — the API is the real gate;
       // this just gives a clear message instead of a half-rendered page.
-      if ([meRes, summaryRes, recentRes, slotsRes].some((r) => r.status === 403)) {
+      if ([meRes, summaryRes, recentRes, pickupsRes].some((r) => r.status === 403)) {
         throw new Error('forbidden');
       }
-      if (!meRes.ok || !summaryRes.ok || !recentRes.ok || !slotsRes.ok) {
+      if (!meRes.ok || !summaryRes.ok || !recentRes.ok || !pickupsRes.ok) {
         throw new Error('One or more requests failed.');
       }
 
-      const [meData, summaryData, recentData, slotsData] = await Promise.all([
+      const [meData, summaryData, recentData, pickupsData] = await Promise.all([
         meRes.json(),
         summaryRes.json(),
         recentRes.json(),
-        slotsRes.json(),
+        pickupsRes.json(),
       ]);
 
       setMe(meData);
       setSummary(summaryData);
       setRecentSubmissions(recentData);
-      setReleaseSlots(slotsData);
+      setTodaysPickups(pickupsData);
       setStatus('ready');
     } catch {
       setStatus('error');
@@ -145,7 +152,7 @@ export default function RegistrarDashboardPage() {
     <div className="ts-app-shell lg:flex" style={FONT_SANS}>
       <style>{APP_CSS}</style>
       <RegistrarSidebar active="dashboard" onLogout={handleLogout} me={me} />
-      <RegistrarMobileHeader onLogout={handleLogout} />
+      <RegistrarMobileHeader active="dashboard" onLogout={handleLogout} />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8 sm:py-10">
         {/* Greeting */}
@@ -161,8 +168,8 @@ export default function RegistrarDashboardPage() {
                 <h1 className="ts-ink text-3xl font-semibold tracking-tight" style={FONT_SERIF}>
                   {greetingForNow()}{me?.first_name ? `, ${me.first_name}` : ''}!
                 </h1>
-                <p className="ts-soft mt-1.5 text-sm">
-                  Here's the registrar queue activity for Window {profile?.assigned_window || '6'} today.
+                <p className="ts-soft mt-1.5 text-base">
+                  Here&rsquo;s what&rsquo;s happening at Window {profile?.assigned_window || '6'} today.
                 </p>
               </>
             )}
@@ -172,9 +179,9 @@ export default function RegistrarDashboardPage() {
 
         {status === 'error' && (
           <div className="ts-banner ts-banner-error mb-8 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>Something went wrong loading the dashboard.</span>
+            <span>We couldn&rsquo;t load the dashboard. Please check your internet connection.</span>
             <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
-              Retry
+              Try again
             </button>
           </div>
         )}
@@ -220,35 +227,35 @@ export default function RegistrarDashboardPage() {
           ) : (
             <>
               <div className="ts-card ts-card-hoverable p-5">
-                <span className="ts-tag ts-tag-gold">Pending</span>
+                <span className="ts-tag ts-tag-gold">To do</span>
                 <p className="ts-stat-number mt-4 text-3xl font-semibold" style={FONT_SERIF}>
                   {summary?.pending_review_count ?? 0}
                 </p>
-                <p className="ts-soft mt-1 text-sm">Pending Review</p>
+                <p className="ts-soft mt-1 text-sm">Waiting for your review</p>
               </div>
 
               <div className="ts-card ts-card-hoverable p-5">
-                <span className="ts-tag ts-tag-sage">Approved</span>
+                <span className="ts-tag ts-tag-sage">Done</span>
                 <p className="ts-stat-number mt-4 text-3xl font-semibold" style={FONT_SERIF}>
                   {summary?.verified_today_count ?? 0}
                 </p>
-                <p className="ts-soft mt-1 text-sm">Approved Today</p>
+                <p className="ts-soft mt-1 text-sm">Approved today</p>
               </div>
 
               <div className="ts-card ts-card-hoverable p-5">
-                <span className="ts-tag">For Release</span>
+                <span className="ts-tag">Pickups</span>
                 <p className="ts-stat-number mt-4 text-3xl font-semibold" style={FONT_SERIF}>
                   {summary?.for_release_today_count ?? 0}
                 </p>
-                <p className="ts-soft mt-1 text-sm">For Release Today</p>
+                <p className="ts-soft mt-1 text-sm">To be collected today</p>
               </div>
 
               <div className="ts-card ts-card-hoverable p-5">
-                <span className="ts-tag ts-tag-muted">Completed</span>
+                <span className="ts-tag ts-tag-muted">This week</span>
                 <p className="ts-stat-number mt-4 text-3xl font-semibold" style={FONT_SERIF}>
                   {summary?.completed_this_week_count ?? 0}
                 </p>
-                <p className="ts-soft mt-1 text-sm">Completed This Week</p>
+                <p className="ts-soft mt-1 text-sm">Handed over this week</p>
               </div>
             </>
           )}
@@ -259,10 +266,10 @@ export default function RegistrarDashboardPage() {
           <div className="lg:col-span-3">
             <div className="flex items-center justify-between">
               <h2 className="ts-ink text-lg font-semibold" style={FONT_SERIF}>
-                Recent Submissions
+                Newest requests
               </h2>
               <a href="/registrar/queue" className="ts-link text-sm font-medium">
-                View Queue
+                See all requests
               </a>
             </div>
 
@@ -280,7 +287,8 @@ export default function RegistrarDashboardPage() {
               {status === 'ready' && recentSubmissions?.length === 0 && (
                 <div className="flex flex-col items-center px-6 py-12 text-center">
                   <InboxIcon />
-                  <p className="ts-soft mt-4 text-sm">No pending reviews right now.</p>
+                  <p className="ts-ink mt-4 text-base font-semibold">Nothing waiting</p>
+                  <p className="ts-soft mt-1 text-sm">New requests will show up here as students send them.</p>
                 </div>
               )}
 
@@ -304,9 +312,10 @@ export default function RegistrarDashboardPage() {
                           {r.request_code} · {r.transaction_type} · {formatRelativeTime(r.created_at)}
                         </p>
                       </div>
+                      {/* Opens this request, not the list it came from. */}
                       <a
-                        href="/registrar/queue"
-                        className="ts-btn-primary shrink-0 px-4 py-1.5 text-xs font-medium"
+                        href={`/registrar/queue/${r.id}`}
+                        className="ts-btn-primary shrink-0 px-5 py-2.5 text-sm font-medium"
                       >
                         Review
                       </a>
@@ -317,7 +326,7 @@ export default function RegistrarDashboardPage() {
 
               {status === 'error' && (
                 <div className="px-5 py-8 text-center">
-                  <p className="ts-soft text-sm">Recent submissions couldn't be loaded.</p>
+                  <p className="ts-soft text-sm">We couldn&rsquo;t load the newest requests.</p>
                 </div>
               )}
             </div>
@@ -326,10 +335,10 @@ export default function RegistrarDashboardPage() {
           <div className="lg:col-span-2">
             <div className="flex items-center justify-between">
               <h2 className="ts-ink text-lg font-semibold" style={FONT_SERIF}>
-                Today's Release Slots
+                Today&rsquo;s pickups
               </h2>
-              <a href="/registrar/release-slots" className="ts-link text-sm font-medium">
-                Manage Slots
+              <a href="/registrar/released" className="ts-link text-sm font-medium">
+                See released
               </a>
             </div>
 
@@ -342,16 +351,19 @@ export default function RegistrarDashboardPage() {
                 </>
               )}
 
-              {status === 'ready' && releaseSlots?.length === 0 && (
+              {status === 'ready' && todaysPickups?.length === 0 && (
                 <div className="flex flex-col items-center px-6 py-12 text-center">
                   <InboxIcon />
-                  <p className="ts-soft mt-4 text-sm">No releases scheduled today.</p>
+                  <p className="ts-ink mt-4 text-base font-semibold">No pickups today</p>
+                  <p className="ts-soft mt-1 text-sm">
+                    Documents you mark ready show up here on their pickup date.
+                  </p>
                 </div>
               )}
 
-              {status === 'ready' && releaseSlots && releaseSlots.length > 0 && (
+              {status === 'ready' && todaysPickups && todaysPickups.length > 0 && (
                 <ul>
-                  {releaseSlots.map((r) => {
+                  {todaysPickups.map((r) => {
                     const pill = RELEASE_ROW_PILL[r.request_status] || {
                       label: r.request_status,
                       className: 'ts-pill-released',
@@ -362,9 +374,12 @@ export default function RegistrarDashboardPage() {
                         className="ts-row-hover ts-row-divider flex items-center justify-between gap-3 px-5 py-4"
                       >
                         <div className="min-w-0">
-                          <p className="ts-ink text-sm font-medium">{r.start_time}</p>
-                          <p className="ts-soft mt-0.5 truncate text-xs">
-                            {r.student_first_name} {r.student_last_name} · {r.transaction_type}
+                          <p className="ts-ink text-sm font-medium">
+                            {r.student_first_name} {r.student_last_name}
+                          </p>
+                          <p className="ts-soft mt-0.5 truncate text-sm">
+                            {r.transaction_type}
+                            {formatClock(r.start_time) ? ` · from ${formatClock(r.start_time)}` : ''}
                           </p>
                         </div>
                         <span className={`ts-pill ${pill.className} shrink-0`}>{pill.label}</span>
@@ -376,7 +391,7 @@ export default function RegistrarDashboardPage() {
 
               {status === 'error' && (
                 <div className="px-5 py-8 text-center">
-                  <p className="ts-soft text-sm">Today's release slots couldn't be loaded.</p>
+                  <p className="ts-soft text-sm">We couldn&rsquo;t load today&rsquo;s pickups.</p>
                 </div>
               )}
             </div>

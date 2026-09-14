@@ -1,4 +1,5 @@
 import uuid
+from datetime import time
 from decimal import Decimal
 
 from django.contrib.auth.base_user import BaseUserManager
@@ -291,6 +292,14 @@ class ReleaseSlot(models.Model):
 # table: they are two fixed line items on a printed form, and a table would
 # buy configurability nobody has asked for. If a third appears, or the office
 # wants to edit them without a deploy, that is when this earns a model.
+# Window 6 releases documents between 3:00 and 5:00 PM, every day, and that
+# is printed on the official form's claim stub notice (see
+# receipts.RELEASING_TIME_NOTICE). Staff pick the release DATE; the time is
+# this constant rather than a question, because there has never been another
+# answer to give.
+RELEASE_TIME_START = time(15, 0)
+RELEASE_TIME_END = time(17, 0)
+
 RUSH_FEE = Decimal("100.00")
 COMPLETION_OF_INC_FEE = Decimal("175.00")
 
@@ -510,6 +519,10 @@ class FormRequest(models.Model):
         schedule = getattr(self, "release_schedule", None)
         if schedule is not None and schedule.release_date:
             return schedule.release_date, schedule.release_time_start
+        # Legacy fallback. Nothing books a ReleaseSlot any more (the Release
+        # Slots page is gone, and Mark Ready to Release sets the date
+        # directly), but requests booked before that change still carry one
+        # and should keep showing the window they were promised.
         if self.release_slot is not None:
             return self.release_slot.slot_date, self.release_slot.start_time
         return None

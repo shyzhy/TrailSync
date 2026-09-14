@@ -1907,20 +1907,92 @@ export function AppMobileHeader({ onLogout }) {
 // ---------------------------------------------------------------------------
 // Registrar (staff) shell — same structure as AppSidebar/AppMobileHeader
 // above, deliberately charcoal + gold instead of institutional blue so a
-// staff member can never mistake which side of the app they're on. Only
-// "Dashboard" is wired to a real page today; Processing Queue, Release
-// Slots, and Notifications are placeholders until those pages exist.
+// staff member can never mistake which side of the app they're on.
 // ---------------------------------------------------------------------------
 
+/**
+ * Three items, and it should stay three. Window 6 is run by one person at a
+ * counter: everything they do is either "what needs working on" (Queue),
+ * "what happened" (Released Documents) or the overview. Release Slots used
+ * to sit here, managing bookable windows with capacity limits for an office
+ * that releases everything between 3:00 and 5:00 PM.
+ *
+ * No Notifications either: that inbox is student-only, and the one
+ * staff-facing alert (duplicate_flag) lives on the Dashboard.
+ */
 const STAFF_NAV_ITEMS = [
   { key: 'dashboard', href: '/registrar/dashboard', label: 'Dashboard', Icon: GridIcon },
-  { key: 'queue', href: '/registrar/queue', label: 'Processing Queue', Icon: DocumentIcon },
-  { key: 'slots', href: '/registrar/release-slots', label: 'Release Slots', Icon: CalendarIcon },
-  // No Notifications here: that inbox is student-only. The one staff-facing
-  // alert (duplicate_flag) has its home on the Dashboard instead.
+  { key: 'queue', href: '/registrar/queue', label: 'Requests to Work On', Icon: DocumentIcon },
+  { key: 'released', href: '/registrar/released', label: 'Released Documents', Icon: ArchiveIcon },
 ];
 
+/**
+ * Plain answers to the questions a new staff member actually asks, plus who
+ * to contact when the answer isn't here. Opened from the sidebar footer and
+ * from the phone menu, so it is reachable from every registrar screen.
+ */
+function StaffHelp({ onClose }) {
+  const items = [
+    {
+      q: 'How do I work through a request?',
+      a: 'Open "Requests to Work On" and click Review on any row. The page shows the one action that fits where that request has got to, and asks you to confirm before anything is saved.',
+    },
+    {
+      q: 'What do the stages mean?',
+      a: 'Waiting for Review (you check the requirements) → Waiting for Approval (the Registrar approves and the fee is set) → Waiting for Payment (the student pays at the Cashier) → Being Prepared → Ready for Pickup → Released.',
+    },
+    {
+      q: 'When can students collect documents?',
+      a: 'Window 6 releases documents from 3:00 to 5:00 PM. You set the date when you mark a request ready; the time is always that window.',
+    },
+    {
+      q: 'How do I get a record for the office?',
+      a: 'Released Documents lists everything that has been claimed. Set the dates you need and click "Export to Excel" to download it as a spreadsheet.',
+    },
+    {
+      q: 'Something looks wrong, or I am stuck.',
+      a: 'Contact whoever administers TrailSync for your office. If a request will not move to the next stage, the page explains why at the top - most often the student is not cleared yet.',
+    },
+  ];
+
+  return (
+    <div className="ts-modal-overlay" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Help"
+        className="ts-modal-panel p-6 sm:p-8"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button type="button" onClick={onClose} aria-label="Close" className="ts-modal-close">
+          <CloseIcon />
+        </button>
+        <h2 className="ts-ink text-2xl font-semibold" style={FONT_SERIF}>
+          Need help?
+        </h2>
+        <p className="ts-soft mt-1.5 text-base">The short version of how this side of TrailSync works.</p>
+        <dl className="mt-6 space-y-5">
+          {items.map((item) => (
+            <div key={item.q}>
+              <dt className="ts-ink text-base font-semibold">{item.q}</dt>
+              <dd className="ts-soft mt-1 text-sm leading-relaxed">{item.a}</dd>
+            </div>
+          ))}
+        </dl>
+        <button
+          type="button"
+          onClick={onClose}
+          className="ts-btn-primary mt-7 flex w-full items-center justify-center py-2.5 text-sm font-medium"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function RegistrarSidebar({ active, onLogout, me }) {
+  const [helpOpen, setHelpOpen] = useState(false);
   const profile = me?.profile;
   const idLine = [profile?.employee_id, profile?.assigned_window ? `Window ${profile.assigned_window}` : null]
     .filter(Boolean)
@@ -1968,19 +2040,53 @@ export function RegistrarSidebar({ active, onLogout, me }) {
         </div>
       )}
 
-      <div className="px-3 pb-6">
+      <div className="space-y-2.5 px-3 pb-6">
+        <button
+          type="button"
+          onClick={() => setHelpOpen(true)}
+          className="ts-staff-nav-item w-full px-3 py-2.5 text-sm font-medium"
+        >
+          <QuestionIcon />
+          Need help?
+        </button>
         <button type="button" onClick={onLogout} className="ts-staff-nav-item w-full px-3 py-2.5 text-sm font-medium">
           <LogoutIcon />
           Log out
         </button>
       </div>
+
+      {helpOpen && <StaffHelp onClose={() => setHelpOpen(false)} />}
     </aside>
   );
 }
 
-export function RegistrarMobileHeader({ onLogout }) {
+/**
+ * The staff header on phones. This was a logo and a Log out button, with no
+ * way to reach the Queue or anything else — the sidebar is desktop-only, so
+ * a staff member on a phone could open one page and then log out. The menu
+ * carries the same three items, plus help.
+ */
+export function RegistrarMobileHeader({ active, onLogout }) {
+  const [open, setOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
   return (
-    <header className="ts-staff-mobile-header sticky top-0 z-10 lg:hidden">
+    <header className="ts-staff-mobile-header sticky top-0 z-20 lg:hidden">
       <div className="flex items-center justify-between px-6 py-3.5">
         <div className="flex items-center gap-2">
           <img
@@ -1991,15 +2097,55 @@ export function RegistrarMobileHeader({ onLogout }) {
           />
           <span className="text-lg font-semibold" style={{ ...FONT_SERIF, color: '#FAF8F3' }}>TrailSync</span>
         </div>
-        <button
-          type="button"
-          onClick={onLogout}
-          className="text-sm font-medium"
-          style={{ color: '#E4B45C' }}
-        >
-          Log out
-        </button>
+
+        <div className="relative" ref={ref}>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-haspopup="true"
+            aria-expanded={open}
+            className="flex items-center gap-1.5 text-sm font-medium"
+            style={{ color: '#E4B45C', minHeight: 44 }}
+          >
+            {open ? <CloseIcon /> : <MenuIcon />}
+            Menu
+          </button>
+
+          {open && (
+            <nav className="ts-popover right-0 mt-2 w-64 py-1" aria-label="Registrar pages">
+              {STAFF_NAV_ITEMS.map(({ key, href, label, Icon }) => (
+                <a
+                  key={key}
+                  href={href}
+                  aria-current={key === active ? 'page' : undefined}
+                  className="ts-popover-row ts-ink items-center text-base"
+                  style={key === active ? { background: 'rgba(36,64,107,0.06)', fontWeight: 600 } : undefined}
+                >
+                  <Icon />
+                  {label}
+                </a>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  setHelpOpen(true);
+                }}
+                className="ts-popover-row ts-ink items-center text-base"
+              >
+                <QuestionIcon />
+                Need help?
+              </button>
+              <button type="button" onClick={onLogout} className="ts-popover-row ts-ink items-center text-base">
+                <LogoutIcon />
+                Log out
+              </button>
+            </nav>
+          )}
+        </div>
       </div>
+
+      {helpOpen && <StaffHelp onClose={() => setHelpOpen(false)} />}
     </header>
   );
 }

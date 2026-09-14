@@ -16,14 +16,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from .exports import build_released_workbook
 from .official_form import build_official_form_pdf
 from .receipts import build_claim_stub_pdf
 from .avatars import AvatarRejected, process_avatar
 from .models import (
+    RELEASE_TIME_END,
+    RELEASE_TIME_START,
     FormRequest,
     Notification,
     ReleaseSchedule,
-    ReleaseSlot,
     RequirementVerification,
     Role,
     StaffProfile,
@@ -32,13 +34,10 @@ from .models import (
 )
 from .serializers import (
     ApproveLogSerializer,
-    AssignSlotSerializer,
-    AssignableRequestSerializer,
     ChangeEmailConfirmSerializer,
     ChangeEmailRequestSerializer,
     ChangePasswordSerializer,
     CreateFormRequestSerializer,
-    CreateReleaseSlotSerializer,
     FormRequestResultSerializer,
     MarkReadySerializer,
     MeSerializer,
@@ -47,11 +46,10 @@ from .serializers import (
     RegisterSerializer,
     RegistrarQueueRowSerializer,
     RegistrarRecentSubmissionSerializer,
-    RegistrarReleaseSlotRowSerializer,
+    RegistrarReleasedRowSerializer,
+    RegistrarTodaysPickupRowSerializer,
     RejectRequestSerializer,
     ReleaseRequestSerializer,
-    ReleaseSlotDetailSerializer,
-    ReleaseSlotSerializer,
     TrackedFormRequestSerializer,
     TransactionTypeSerializer,
     UpdateProfileSerializer,
@@ -439,11 +437,14 @@ class UpcomingReleaseDatesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        # Reads the schedule, which is what Mark Ready to Release writes.
+        # This used to read FormRequest.release_slot, so once the slot picker
+        # was removed every dot on the student's calendar would have
+        # disappeared.
         dates = FormRequest.objects.filter(
             user=request.user,
-            release_slot__isnull=False,
-            release_slot__slot_date__gte=timezone.localdate(),
-        ).values_list("release_slot__slot_date", flat=True)
+            release_schedule__release_date__gte=timezone.localdate(),
+        ).values_list("release_schedule__release_date", flat=True)
 
         # Deduping in Python rather than via .distinct(): FormRequest's
         # default ordering (-created_at) gets pulled into the query when you
@@ -461,25 +462,6 @@ class TransactionTypeListView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
     pagination_class = None
     queryset = TransactionType.objects.all().order_by("name")
-
-
-class ReleaseSlotListView(generics.ListAPIView):
-    """GET /api/release-slots/ - only slots that are actually bookable.
-
-    Fully booked or past-dated slots are simply absent from this list, so
-    the frontend never has to reimplement "is this slot pickable" itself —
-    whatever comes back is a valid choice.
-    """
-
-    serializer_class = ReleaseSlotSerializer
-    permission_classes = [IsAuthenticated]
-    pagination_class = None
-
-    def get_queryset(self):
-        return ReleaseSlot.objects.filter(
-            available_slots__gt=0,
-            slot_date__gte=timezone.localdate(),
-        ).order_by("slot_date", "start_time")
 
 
 class FormRequestPagination(PageNumberPagination):
@@ -551,6 +533,16 @@ class FormRequestListCreateView(generics.ListCreateAPIView):
         return Response(FormRequestResultSerializer(form_request).data, status=status.HTTP_201_CREATED)
 
 
+def _release_window_text():
+    """"3:00 PM to 5:00 PM" - the one window Window 6 releases in.
+
+    Built here rather than with strftime's %-I, which is not portable (it
+    raises on Windows, where this project is developed).
+    """
+    fmt = lambda t: f"{t:%I:%M %p}".lstrip("0")  # noqa: E731
+    return f"{fmt(RELEASE_TIME_START)} and {fmt(RELEASE_TIME_END)}"
+
+
 class RegistrarDashboardSummaryView(APIView):
     """GET /api/registrar/dashboard/summary/ - the four Registrar Dashboard
     stat cards.
@@ -588,10 +580,12 @@ class RegistrarDashboardSummaryView(APIView):
             verified_at__date=today,
         ).count()
 
-        # "For release today" = booked into a slot dated today, not a
-        # RELEASE_SCHEDULES query — that table only records the claim event
-        # after the fact, it has no date/status of its own to query against.
-        for_release_today_count = FormRequest.objects.filter(release_slot__slot_date=today).count()
+        # "For release today" = scheduled for handover today. Counted off
+        # ReleaseSchedule.release_date now that Mark Ready to Release writes
+        # it directly; the old ReleaseSlot count would read 0 forever.
+        for_release_today_count = FormRequest.objects.filter(
+            release_schedule__release_date=today
+        ).count()
 
         completed_this_week_count = FormRequest.objects.filter(
             request_status=FormRequest.RequestStatus.RELEASED,
@@ -623,21 +617,20 @@ class RegistrarRecentSubmissionsView(generics.ListAPIView):
         )
 
 
-class RegistrarTodaysReleaseSlotsView(generics.ListAPIView):
-    """GET /api/registrar/dashboard/todays-release-slots/ - requests booked
-    into a ReleaseSlot dated today, for the Dashboard's "Today's Release
-    Slots" card."""
+class RegistrarTodaysPickupsView(generics.ListAPIView):
+    """GET /api/registrar/dashboard/todays-pickups/ - requests scheduled for
+    handover today, for the Dashboard's "Today's Pickups" card."""
 
-    serializer_class = RegistrarReleaseSlotRowSerializer
+    serializer_class = RegistrarTodaysPickupRowSerializer
     permission_classes = [IsApprovedRegistrarStaff]
     pagination_class = None
 
     def get_queryset(self):
         today = timezone.localdate()
         return (
-            FormRequest.objects.filter(release_slot__slot_date=today)
-            .select_related("transaction_type", "user", "release_slot")
-            .order_by("release_slot__start_time")
+            FormRequest.objects.filter(release_schedule__release_date=today)
+            .select_related("transaction_type", "user", "release_schedule", "release_slot")
+            .order_by("release_schedule__release_time_start")
         )
 
 
@@ -681,6 +674,90 @@ class RegistrarQueueListView(generics.ListAPIView):
             )
 
         return qs
+
+
+class ReleasedPagination(FormRequestPagination):
+    """A records page, not a work queue: more rows per page than the six the
+    Processing Queue shows, since nobody acts on these one at a time."""
+
+    page_size = 15
+
+
+def _released_queryset(params):
+    """Every released request matching the page's two filters, newest first.
+
+    Shared by the table and the export so "Export to Excel" can never hand
+    back a different set of rows than the one on screen - the whole point of
+    the button is that it exports what staff are looking at.
+
+    Dates filter on when the document was CLAIMED, not when it was
+    requested: this is a record of handovers.
+    """
+    qs = (
+        FormRequest.objects.filter(
+            request_status=FormRequest.RequestStatus.RELEASED,
+            release_schedule__isnull=False,
+        )
+        .select_related(
+            "transaction_type",
+            "user",
+            "user__user_profile",
+            "submission",
+            "proxy",
+            "release_schedule",
+        )
+        .order_by("-release_schedule__claimed_at")
+    )
+
+    date_from = (params.get("date_from") or "").strip()
+    if date_from:
+        qs = qs.filter(release_schedule__claimed_at__date__gte=date_from)
+    date_to = (params.get("date_to") or "").strip()
+    if date_to:
+        qs = qs.filter(release_schedule__claimed_at__date__lte=date_to)
+
+    search = (params.get("search") or "").strip()
+    if search:
+        qs = qs.filter(
+            models.Q(request_code__icontains=search)
+            | models.Q(user__first_name__icontains=search)
+            | models.Q(user__last_name__icontains=search)
+        )
+    return qs
+
+
+class RegistrarReleasedListView(generics.ListAPIView):
+    """GET /api/registrar/released/ - the Released Documents table.
+
+    ?date_from=&date_to= (against the claim date) and ?search= (student name
+    or request code), paginated.
+    """
+
+    serializer_class = RegistrarReleasedRowSerializer
+    permission_classes = [IsApprovedRegistrarStaff]
+    pagination_class = ReleasedPagination
+
+    def get_queryset(self):
+        return _released_queryset(self.request.query_params)
+
+
+class RegistrarReleasedExportView(APIView):
+    """GET /api/registrar/released/export/ - the same rows as an .xlsx file.
+
+    Returns the workbook itself rather than a URL to one: there is no
+    generated-files store to put it in, and the record is small enough that
+    building it per request costs less than managing stale copies of it.
+    """
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    def get(self, request):
+        rows = list(_released_queryset(request.query_params))
+        return build_released_workbook(
+            rows,
+            date_from=(request.query_params.get("date_from") or "").strip() or None,
+            date_to=(request.query_params.get("date_to") or "").strip() or None,
+        )
 
 
 class RegistrarQueueVerifyView(APIView):
@@ -828,112 +905,6 @@ class RegistrarQueueRejectView(APIView):
         )
 
         return Response(RegistrarQueueRowSerializer(form_request).data)
-
-
-class RegistrarReleaseSlotCalendarView(APIView):
-    """GET /api/registrar/release-slots/calendar/?year=&month= - lightweight
-    dates+counts for the visible month, so the calendar doesn't have to pull
-    full slot detail (assignments, etc.) just to draw dots."""
-
-    permission_classes = [IsApprovedRegistrarStaff]
-
-    def get(self, request):
-        try:
-            year = int(request.query_params.get("year"))
-            month = int(request.query_params.get("month"))
-        except (TypeError, ValueError):
-            return Response({"detail": "year and month query params are required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        rows = (
-            ReleaseSlot.objects.filter(slot_date__year=year, slot_date__month=month)
-            .values("slot_date")
-            .annotate(slot_count=models.Count("id"))
-            .order_by("slot_date")
-        )
-        return Response([{"date": r["slot_date"].isoformat(), "slot_count": r["slot_count"]} for r in rows])
-
-
-class RegistrarReleaseSlotsForDateView(generics.ListAPIView):
-    """GET /api/registrar/release-slots/?date=YYYY-MM-DD - full detail
-    (including assigned students) for one date only."""
-
-    serializer_class = ReleaseSlotDetailSerializer
-    permission_classes = [IsApprovedRegistrarStaff]
-    pagination_class = None
-
-    def get_queryset(self):
-        date_param = (self.request.query_params.get("date") or "").strip()
-        qs = ReleaseSlot.objects.all()
-        if date_param:
-            qs = qs.filter(slot_date=date_param)
-        return qs.order_by("start_time")
-
-
-class RegistrarCreateReleaseSlotView(generics.CreateAPIView):
-    """POST /api/registrar/release-slots/ - "+ Create New Slot" (any date)
-    and "+ Add Time Slot" (pre-filled date) both post here; the only
-    difference is what date the frontend pre-fills in the form."""
-
-    serializer_class = CreateReleaseSlotSerializer
-    permission_classes = [IsApprovedRegistrarStaff]
-
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        slot = serializer.save()
-        return Response(ReleaseSlotDetailSerializer(slot).data, status=status.HTTP_201_CREATED)
-
-
-class RegistrarAssignableRequestsView(generics.ListAPIView):
-    """GET /api/registrar/release-slots/assignable-requests/ - the Assign
-    picker's options: every Ready-status request, whichever slot (if any)
-    it's currently attached to. Not restricted to "not yet in a slot" —
-    picking an already-assigned one from a different slot's Assign button
-    is how reassignment works, since students currently have no path of
-    their own to pick a slot (that step was dropped from the Request Form
-    wizard), so every assignment today originates from this endpoint or an
-    earlier one via this same flow.
-    """
-
-    serializer_class = AssignableRequestSerializer
-    permission_classes = [IsApprovedRegistrarStaff]
-    pagination_class = None
-
-    def get_queryset(self):
-        return (
-            FormRequest.objects.filter(
-                request_status__in=[
-                    FormRequest.RequestStatus.PROCESSING,
-                    FormRequest.RequestStatus.READY,
-                ]
-            )
-            .select_related("transaction_type", "user")
-            .order_by("-created_at")
-        )
-
-
-class RegistrarAssignSlotView(APIView):
-    """POST /api/registrar/release-slots/<slot_id>/assign/ {form_request} -
-    points a FormRequest at this ReleaseSlot. No ReleaseSchedule row is
-    created here - that model records the actual claim event, which has not
-    happened yet; the row is created by RegistrarReleaseView when the
-    document is physically handed over. A request with a slot but no
-    schedule row therefore reads as Scheduled, and one whose schedule says
-    release_status="Claimed" reads as Claimed.
-    """
-
-    permission_classes = [IsApprovedRegistrarStaff]
-
-    def post(self, request, pk):
-        slot = get_object_or_404(ReleaseSlot, pk=pk)
-        serializer = AssignSlotSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        form_request = serializer.validated_data["form_request"]
-        form_request.release_slot = slot
-        form_request.save(update_fields=["release_slot", "updated_at"])
-
-        return Response(ReleaseSlotDetailSerializer(slot).data)
 
 
 def _student_document_target(request, pk):
@@ -1197,16 +1168,10 @@ class RegistrarApproveLogView(APIView):
 class RegistrarMarkReadyView(APIView):
     """PATCH /api/form-requests/<id>/mark-ready/ - Processing -> Ready for Pickup.
 
-    Staff set the handover time as part of this step rather than the step
-    only reading a value booked earlier, so a request can always be told to
-    the student with a real date attached.
-
-    Two paths coexist by design. Picking one of that date's ReleaseSlots
-    books against its capacity; typing a freeform date and time schedules the
-    release without consuming a bookable place, which is what Window 6 does
-    when it tells someone to drop by outside the published windows. Either
-    way release_date and release_time_start land on the ReleaseSchedule row,
-    so nothing downstream has to know which path was taken.
+    Staff choose the date. The time is always RELEASE_TIME_START, because
+    Window 6 hands documents over between 3:00 and 5:00 PM and nothing else
+    was ever on offer - asking for it (and for a capacity slot to hang it on)
+    made staff answer a question with one possible answer.
     """
 
     permission_classes = [IsApprovedRegistrarStaff]
@@ -1221,39 +1186,25 @@ class RegistrarMarkReadyView(APIView):
 
         serializer = MarkReadySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        slot = serializer.validated_data.get("release_slot")
         release_date = serializer.validated_data["release_date"]
-        release_time = serializer.validated_data.get("release_time_start")
+        release_time = RELEASE_TIME_START
 
         schedule, _ = ReleaseSchedule.objects.get_or_create(form_request=form_request)
         schedule.release_date = release_date
         schedule.release_time_start = release_time
-        schedule.release_slot = slot
-        schedule.save(
-            update_fields=["release_date", "release_time_start", "release_slot", "updated_at"]
-        )
+        schedule.save(update_fields=["release_date", "release_time_start", "updated_at"])
 
-        # FormRequest.release_slot stays the single source the Release Slots
-        # page counts capacity from (it reads slot.form_requests). Mirroring
-        # the choice onto it here is what makes a slot picked at this step
-        # show up in that page's "X/Y filled", and clearing it for a freeform
-        # time is what stops a request still counting against a window it is
-        # no longer being handed over in.
-        form_request.release_slot = slot
         form_request.request_status = FormRequest.RequestStatus.READY
         form_request.arrival_notice_sent_at = timezone.now()
         form_request.save(
             update_fields=[
-                "release_slot",
                 "request_status",
                 "arrival_notice_sent_at",
                 "updated_at",
             ]
         )
 
-        when = f" on {release_date:%B %d, %Y}"
-        if release_time is not None:
-            when += f" at {release_time:%I:%M %p}"
+        when = f" on {release_date:%B %d, %Y}, between {_release_window_text()}"
         _notify_student(
             form_request,
             Notification.NotificationType.READY,

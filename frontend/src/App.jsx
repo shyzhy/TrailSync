@@ -9,7 +9,7 @@ import ConfirmEmailPage from './components/ConfirmEmailPage.jsx';
 import CredentialGuidePage from './components/CredentialGuidePage.jsx';
 import RegistrarDashboardPage from './components/RegistrarDashboardPage.jsx';
 import ProcessingQueuePage from './components/ProcessingQueuePage.jsx';
-import ReleaseSlotsPage from './components/ReleaseSlotsPage.jsx';
+import ReleasedDocumentsPage from './components/ReleasedDocumentsPage.jsx';
 import RequestReviewPage from './components/RequestReviewPage.jsx';
 
 // Minimal path switch so all screens are reachable without pulling in a
@@ -29,7 +29,14 @@ export default function App() {
   const review = pathname.match(/^\/registrar\/queue\/(\d+)/);
   if (review) return <RequestReviewPage requestId={review[1]} />;
   if (pathname.startsWith('/registrar/queue')) return <ProcessingQueuePage />;
-  if (pathname.startsWith('/registrar/release-slots')) return <ReleaseSlotsPage />;
+  if (pathname.startsWith('/registrar/released')) return <ReleasedDocumentsPage />;
+  // Release Slots is gone. A staff member with it bookmarked would otherwise
+  // land on the unknown-path fallback below, which is the login screen — an
+  // alarming thing to see while you are already logged in.
+  if (pathname.startsWith('/registrar/release-slots')) {
+    window.location.replace('/registrar/released');
+    return null;
+  }
   if (pathname.startsWith('/portal')) return <StudentDashboard />;
   return <LoginPage />;
 }

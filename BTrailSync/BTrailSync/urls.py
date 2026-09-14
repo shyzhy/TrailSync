@@ -39,9 +39,6 @@ from TrailSync.views import (
     RecentFormRequestsView,
     RegistrarApproveLogView,
     RegistrarQueueApproveView,
-    RegistrarAssignableRequestsView,
-    RegistrarAssignSlotView,
-    RegistrarCreateReleaseSlotView,
     RegistrarDashboardSummaryView,
     RegistrarMarkReadyView,
     RegistrarQueueDetailView,
@@ -49,11 +46,10 @@ from TrailSync.views import (
     RegistrarQueueRejectView,
     RegistrarQueueVerifyView,
     RegistrarRecentSubmissionsView,
-    RegistrarReleaseSlotCalendarView,
+    RegistrarReleasedExportView,
+    RegistrarReleasedListView,
     RegistrarReleaseView,
-    RegistrarReleaseSlotsForDateView,
-    RegistrarTodaysReleaseSlotsView,
-    ReleaseSlotListView,
+    RegistrarTodaysPickupsView,
     TransactionTypeListView,
     UpcomingReleaseDatesView,
 )
@@ -77,7 +73,6 @@ urlpatterns = [
     path('api/dashboard/recent-requests/', RecentFormRequestsView.as_view(), name='dashboard-recent-requests'),
     path('api/dashboard/upcoming-release-dates/', UpcomingReleaseDatesView.as_view(), name='dashboard-upcoming-release-dates'),
     path('api/transaction-types/', TransactionTypeListView.as_view(), name='transaction-types'),
-    path('api/release-slots/', ReleaseSlotListView.as_view(), name='release-slots'),
     path('api/form-requests/', FormRequestListCreateView.as_view(), name='form-requests'),
     path('api/form-requests/<int:pk>/receipt/', FormRequestReceiptView.as_view(), name='form-request-receipt'),
     path('api/form-requests/<int:pk>/claim-stub/', FormRequestClaimStubView.as_view(), name='form-request-claim-stub'),
@@ -89,8 +84,12 @@ urlpatterns = [
     path('api/registrar/dashboard/summary/', RegistrarDashboardSummaryView.as_view(), name='registrar-dashboard-summary'),
     path('api/registrar/dashboard/recent-submissions/', RegistrarRecentSubmissionsView.as_view(), name='registrar-recent-submissions'),
     path('api/registrar/dashboard/flagged/', RegistrarFlaggedRequestsView.as_view(), name='registrar-flagged'),
-    path('api/registrar/dashboard/todays-release-slots/', RegistrarTodaysReleaseSlotsView.as_view(), name='registrar-todays-release-slots'),
+    path('api/registrar/dashboard/todays-pickups/', RegistrarTodaysPickupsView.as_view(), name='registrar-todays-pickups'),
     # Processing Queue
+    # Registered before the list route's own prefix so "export" is never
+    # read as a filter value.
+    path('api/registrar/released/export/', RegistrarReleasedExportView.as_view(), name='registrar-released-export'),
+    path('api/registrar/released/', RegistrarReleasedListView.as_view(), name='registrar-released'),
     path('api/registrar/queue/', RegistrarQueueListView.as_view(), name='registrar-queue'),
     path('api/registrar/queue/<int:pk>/', RegistrarQueueDetailView.as_view(), name='registrar-queue-detail'),
     path('api/registrar/queue/<int:pk>/verify/', RegistrarQueueVerifyView.as_view(), name='registrar-queue-verify'),
@@ -99,11 +98,6 @@ urlpatterns = [
     path('api/registrar/queue/<int:pk>/reject/', RegistrarQueueRejectView.as_view(), name='registrar-queue-reject'),
     # Release Slots — literal paths (calendar/, assignable-requests/, create/)
     # registered before the <int:pk> pattern so they aren't swallowed by it.
-    path('api/registrar/release-slots/calendar/', RegistrarReleaseSlotCalendarView.as_view(), name='registrar-release-slots-calendar'),
-    path('api/registrar/release-slots/assignable-requests/', RegistrarAssignableRequestsView.as_view(), name='registrar-assignable-requests'),
-    path('api/registrar/release-slots/create/', RegistrarCreateReleaseSlotView.as_view(), name='registrar-release-slots-create'),
-    path('api/registrar/release-slots/<int:pk>/assign/', RegistrarAssignSlotView.as_view(), name='registrar-release-slots-assign'),
-    path('api/registrar/release-slots/', RegistrarReleaseSlotsForDateView.as_view(), name='registrar-release-slots-for-date'),
 ]
 
 if settings.DEBUG:

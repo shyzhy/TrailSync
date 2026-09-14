@@ -36,15 +36,32 @@ export const LIFECYCLE = [
   STATUS.RELEASED,
 ];
 
-/** Staff-facing labels — the full wording from the feature docs. */
+/**
+ * Staff-facing labels. Each one says what is true of the request right now,
+ * in the words a person at Window 6 would use - "Pending Verification" and
+ * "Verified" described the paperwork's state without saying whose turn it
+ * is, which is the only thing a queue is read for.
+ */
 export const STATUS_LABEL = {
-  [STATUS.SUBMITTED]: 'Pending Verification',
-  [STATUS.VERIFIED]: 'Verified',
-  [STATUS.APPROVED]: 'Approved - Ready to Print',
-  [STATUS.PROCESSING]: 'Processing',
+  [STATUS.SUBMITTED]: 'Waiting for Review',
+  [STATUS.VERIFIED]: 'Waiting for Approval',
+  [STATUS.APPROVED]: 'Waiting for Payment',
+  [STATUS.PROCESSING]: 'Being Prepared',
   [STATUS.READY]: 'Ready for Pickup',
   [STATUS.RELEASED]: 'Released',
-  [STATUS.REJECTED]: 'Rejected',
+  [STATUS.REJECTED]: 'Not Approved',
+};
+
+/** What the staff member should do next at each stage, for the queue's
+ *  filter descriptions and the review page's heading. */
+export const STAFF_NEXT_STEP = {
+  [STATUS.SUBMITTED]: 'Check the requirements, then send it to the Registrar.',
+  [STATUS.VERIFIED]: 'The Registrar approves it and the fee is worked out.',
+  [STATUS.APPROVED]: 'The student prints their form and pays at the Cashier.',
+  [STATUS.PROCESSING]: 'Prepare the document, then set the pickup date.',
+  [STATUS.READY]: 'The student collects it at Window 6.',
+  [STATUS.RELEASED]: 'Nothing left to do. This one is finished.',
+  [STATUS.REJECTED]: 'Nothing left to do. The student was told why.',
 };
 
 /**

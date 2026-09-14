@@ -8,7 +8,13 @@ import {
   RegistrarSidebar,
 } from './trailsyncUI.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
-import { STATUS, STATUS_FILTER_OPTIONS, statusLabel, statusPillClass } from '../lib/requestStatus.js';
+import {
+  STAFF_NEXT_STEP,
+  STATUS,
+  STATUS_FILTER_OPTIONS,
+  statusLabel,
+  statusPillClass,
+} from '../lib/requestStatus.js';
 
 const LOGIN_PATH = '/';
 
@@ -107,68 +113,93 @@ export default function ProcessingQueuePage() {
     <div className="ts-app-shell lg:flex" style={FONT_SANS}>
       <style>{APP_CSS}</style>
       <RegistrarSidebar active="queue" onLogout={handleLogout} me={me} />
-      <RegistrarMobileHeader onLogout={handleLogout} />
+      <RegistrarMobileHeader active="queue" onLogout={handleLogout} />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8 sm:py-10">
         <h1 className="ts-ink text-3xl font-semibold tracking-tight" style={FONT_SERIF}>
-          Processing Queue — Window 6
+          Requests to Work On
         </h1>
-        <p className="ts-soft mt-1.5 text-sm">
-          Review pending submissions, log Cashier payments, and release documents.
+        <p className="ts-soft mt-1.5 text-base">
+          Every request at Window 6. Pick a stage below to see what is waiting there, then click Review.
         </p>
 
-        {/* Filter row */}
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-          <div className="relative">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              aria-label="Filter by status"
-              className="ts-input ts-select w-full py-2.5 pl-3.5 pr-9 text-sm sm:w-56"
-            >
-              {STATUS_FILTER_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <span className="ts-soft pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
-              <ChevronIcon />
-            </span>
+        {/* Filters. Labelled rather than placeholder-only: a placeholder
+            disappears the moment someone types, taking the only explanation
+            of the field with it. */}
+        <div className="ts-card mt-6 p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+            <div>
+              <label htmlFor="stageFilter" className="ts-ink mb-1.5 block text-sm font-medium">
+                Show requests that are
+              </label>
+              <div className="relative">
+                <select
+                  id="stageFilter"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="ts-input ts-select w-full py-2.5 pl-3.5 pr-9 text-sm lg:w-60"
+                >
+                  {STATUS_FILTER_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="ts-soft pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
+                  <ChevronIcon />
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="queueDateFrom" className="ts-ink mb-1.5 block text-sm font-medium">
+                Requested between
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  id="queueDateFrom"
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="ts-input px-3 py-2.5 text-sm"
+                />
+                <span className="ts-soft text-sm">and</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  aria-label="Requested up to"
+                  className="ts-input px-3 py-2.5 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="lg:flex-1">
+              <label htmlFor="queueSearch" className="ts-ink mb-1.5 block text-sm font-medium">
+                Search
+              </label>
+              <input
+                id="queueSearch"
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Student name or request code"
+                className="ts-input w-full px-3.5 py-2.5 text-sm"
+              />
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              aria-label="Date from"
-              className="ts-input px-3 py-2.5 text-sm"
-            />
-            <span className="ts-soft text-sm">–</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              aria-label="Date to"
-              className="ts-input px-3 py-2.5 text-sm"
-            />
-          </div>
-
-          <input
-            type="text"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search student name or request code..."
-            className="ts-input min-w-0 flex-1 px-3.5 py-2.5 text-sm sm:min-w-[220px]"
-          />
+          {/* What this stage means, so the filter teaches the process. */}
+          {STAFF_NEXT_STEP[statusFilter] && (
+            <p className="ts-soft mt-3 text-sm">{STAFF_NEXT_STEP[statusFilter]}</p>
+          )}
         </div>
 
         {status === 'error' && (
           <div className="ts-banner ts-banner-error mt-6 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>Something went wrong loading the queue.</span>
+            <span>We couldn&rsquo;t load the requests. Please check your internet connection.</span>
             <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
-              Retry
+              Try again
             </button>
           </div>
         )}
@@ -178,11 +209,11 @@ export default function ProcessingQueuePage() {
             className="hidden grid-cols-12 gap-3 px-5 py-3 text-xs font-semibold uppercase tracking-wide sm:grid"
             style={{ color: '#5B6474' }}
           >
-            <span className="col-span-2">Req Code</span>
+            <span className="col-span-2">Code</span>
             <span className="col-span-4">Student</span>
-            <span className="col-span-2">Document Type</span>
-            <span className="col-span-3">Status</span>
-            <span className="col-span-1">Action</span>
+            <span className="col-span-2">Document</span>
+            <span className="col-span-3">Stage</span>
+            <span className="col-span-1" />
           </div>
 
           {status === 'loading' && (
@@ -197,9 +228,17 @@ export default function ProcessingQueuePage() {
           )}
 
           {status === 'ready' && results.length === 0 && (
-            <div className="px-6 py-14 text-center">
-              <p className="ts-ink text-sm font-semibold">No requests match these filters</p>
-              <p className="ts-soft mt-1 text-sm">Try a different status, date range, or search term.</p>
+            <div className="px-6 py-16 text-center">
+              <p className="ts-ink text-base font-semibold">
+                {statusFilter === STATUS.SUBMITTED && !search && !dateFrom && !dateTo
+                  ? 'Nothing waiting for review'
+                  : 'Nothing here right now'}
+              </p>
+              <p className="ts-soft mx-auto mt-1.5 max-w-md text-sm">
+                {statusFilter === STATUS.SUBMITTED && !search && !dateFrom && !dateTo
+                  ? 'You are all caught up. New requests appear here as students send them.'
+                  : 'No requests are at this stage. Try another stage, a wider date range, or a different search.'}
+              </p>
             </div>
           )}
 
@@ -208,17 +247,19 @@ export default function ProcessingQueuePage() {
               <a
                 key={r.id}
                 href={reviewPath(r.id)}
-                className="ts-row-hover ts-row-divider grid w-full grid-cols-1 gap-2 px-5 py-4 text-left sm:grid-cols-12 sm:items-center sm:gap-3"
+                className="ts-row-hover ts-row-divider grid w-full grid-cols-1 gap-2 px-5 py-5 text-left sm:grid-cols-12 sm:items-center sm:gap-3"
               >
                 <span className="ts-ink text-sm font-semibold sm:col-span-2">{r.request_code}</span>
 
                 <div className="sm:col-span-4">
-                  <p className="ts-ink truncate text-sm font-medium">
+                  <p className="ts-ink truncate text-base font-medium">
                     {r.student_first_name} {r.student_last_name}
                   </p>
-                  <p className="ts-soft mt-0.5 truncate text-xs">
-                    ID: {r.student_school_id_number} · {r.student_course}
-                    {r.student_year_level ? `-${r.student_year_level}` : ''}
+                  {/* Wraps rather than truncating: the year level was being
+                      cut off mid-word on a laptop screen. */}
+                  <p className="ts-soft mt-0.5 text-sm">
+                    {r.student_school_id_number} · {r.student_course}
+                    {r.student_year_level ? ` · ${r.student_year_level}` : ''}
                   </p>
                 </div>
 
@@ -233,13 +274,14 @@ export default function ProcessingQueuePage() {
                     {statusLabel(r.request_status)}
                   </span>
                   {r.requirements_status === 'Incomplete' && (
-                    <span className="ts-pill ts-pill-danger">Incomplete</span>
+                    <span className="ts-pill ts-pill-danger">Missing requirement</span>
                   )}
                   {r.is_rush && <span className="ts-pill ts-pill-processing">Rush</span>}
+                  {r.duplicate_flag && <span className="ts-pill ts-pill-danger">Possible duplicate</span>}
                 </span>
 
                 <span className="sm:col-span-1">
-                  <span className="ts-btn-primary inline-flex px-4 py-1.5 text-xs font-medium">Review</span>
+                  <span className="ts-btn-primary inline-flex px-5 py-2.5 text-sm font-medium">Review</span>
                 </span>
               </a>
             ))}
@@ -248,26 +290,30 @@ export default function ProcessingQueuePage() {
         {status === 'ready' && results.length > 0 && (
           <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
             <p className="ts-soft text-sm">
-              Showing {pageInfo.start}–{pageInfo.end} of {pageInfo.count} requests
+              {pageInfo.count === 1
+                ? 'Showing 1 request'
+                : `Showing ${pageInfo.start}–${pageInfo.end} of ${pageInfo.count} requests`}
             </p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={!pageInfo.previous}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="ts-btn-glass px-4 py-2 text-sm font-medium"
-              >
-                Previous
-              </button>
-              <button
-                type="button"
-                disabled={!pageInfo.next}
-                onClick={() => setPage((p) => p + 1)}
-                className="ts-btn-glass px-4 py-2 text-sm font-medium"
-              >
-                Next
-              </button>
-            </div>
+            {(pageInfo.previous || pageInfo.next) && (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={!pageInfo.previous}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="ts-btn-glass px-5 py-2.5 text-sm font-medium"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  disabled={!pageInfo.next}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="ts-btn-glass px-5 py-2.5 text-sm font-medium"
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </div>
         )}
       </main>

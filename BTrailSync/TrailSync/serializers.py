@@ -14,7 +14,6 @@ from .models import (
     FormSubmission,
     Notification,
     ReleaseSchedule,
-    ReleaseSlot,
     RequestProxy,
     RequirementVerification,
     Role,
@@ -399,8 +398,8 @@ class RegistrarRecentSubmissionSerializer(serializers.ModelSerializer):
         return absolute_media_url(profile.profile_picture) if profile else None
 
 
-class RegistrarReleaseSlotRowSerializer(serializers.ModelSerializer):
-    """GET /api/registrar/dashboard/todays-release-slots/ row shape.
+class RegistrarTodaysPickupRowSerializer(serializers.ModelSerializer):
+    """GET /api/registrar/dashboard/todays-pickups/ row shape.
 
     No dedicated release_status field exists (RELEASE_SCHEDULES, as actually
     built, is a post-hoc claim record with no status of its own) — the
@@ -427,7 +426,72 @@ class RegistrarReleaseSlotRowSerializer(serializers.ModelSerializer):
         ]
 
     def get_start_time(self, obj):
-        return obj.release_slot.start_time.isoformat(timespec="minutes") if obj.release_slot else None
+        # Reads the schedule (via scheduled_release, which also covers
+        # requests still carrying an old slot) rather than ReleaseSlot: the
+        # slot picker is gone, so nothing new ever has one.
+        when = obj.scheduled_release()
+        start = when[1] if when else None
+        return start.isoformat(timespec="minutes") if start else None
+
+
+class RegistrarReleasedRowSerializer(serializers.ModelSerializer):
+    """GET /api/registrar/released/ row shape - the Released Documents table.
+
+    Deliberately narrower than the .xlsx export (see exports.COLUMNS): the
+    screen answers "was this collected, by whom, and what was paid", while
+    the office's sheet also carries eligibility and turnaround columns that
+    are only read when the record is filed.
+    """
+
+    date_released = serializers.SerializerMethodField()
+    student_name = serializers.SerializerMethodField()
+    student_course = serializers.SerializerMethodField()
+    transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
+    claimed_by = serializers.SerializerMethodField()
+    claimed_by_proxy = serializers.SerializerMethodField()
+
+    class Meta:
+        model = FormRequest
+        fields = [
+            "id",
+            "request_code",
+            "date_released",
+            "student_name",
+            "student_course",
+            "transaction_type",
+            "amount_due",
+            "or_number",
+            "claimed_by",
+            "claimed_by_proxy",
+        ]
+
+    def _schedule(self, obj):
+        return getattr(obj, "release_schedule", None)
+
+    def get_date_released(self, obj):
+        schedule = self._schedule(obj)
+        return schedule.claimed_at if schedule else None
+
+    def get_student_name(self, obj):
+        return obj.user.get_full_name() or obj.user.email
+
+    def get_student_course(self, obj):
+        profile = getattr(obj.user, "user_profile", None)
+        return profile.course if profile else None
+
+    def get_claimed_by(self, obj):
+        schedule = self._schedule(obj)
+        return schedule.claimant_name if schedule else None
+
+    def get_claimed_by_proxy(self, obj):
+        """Whether an authorised proxy was on file for this request.
+
+        The claimant name alone cannot answer this: staff type whoever
+        actually collected the document, which may or may not match the
+        registered proxy. Shown so a record can be read without opening the
+        request.
+        """
+        return getattr(obj, "proxy", None) is not None
 
 
 class RegistrarQueueRowSerializer(serializers.ModelSerializer):
@@ -680,37 +744,17 @@ class ApproveLogSerializer(serializers.Serializer):
 
 
 class MarkReadySerializer(serializers.Serializer):
-    """Payload for Mark Ready to Release.
+    """Payload for Mark Ready to Release: one date, nothing else.
 
-    Staff set the handover time here rather than the step only reading a
-    value booked earlier. Two paths, deliberately allowed to coexist:
-
-      - release_slot chosen -> date and time are taken FROM that slot, so a
-        staff member cannot save a time that contradicts the window they
-        picked. That request then counts against the slot's capacity.
-      - no slot -> release_date and release_time_start are taken as typed,
-        and the booking consumes no slot capacity.
-
-    release_date is required either way: the whole point of the amendment is
-    that "Ready for Pickup" now always carries a date the student can be
-    told, so there is no path here that leaves one unset.
+    This used to accept a release_slot and a freeform time as well, with the
+    slot overriding both. Window 6 releases documents from 3:00 to 5:00 PM
+    and has no other windows to choose between, so the picker asked staff to
+    decide something that was never theirs to decide. The time now comes
+    from models.RELEASE_TIME_START, and ReleaseSlot is no longer written by
+    this path at all.
     """
 
     release_date = serializers.DateField()
-    release_time_start = serializers.TimeField(required=False, allow_null=True)
-    release_slot = serializers.PrimaryKeyRelatedField(
-        queryset=ReleaseSlot.objects.all(), required=False, allow_null=True
-    )
-
-    def validate(self, attrs):
-        slot = attrs.get("release_slot")
-        if slot is not None:
-            # The slot is the authority on its own timing; whatever the date
-            # picker sent is overwritten rather than trusted, so the two can
-            # never disagree in the stored row.
-            attrs["release_date"] = slot.slot_date
-            attrs["release_time_start"] = slot.start_time
-        return attrs
 
 
 class ReleaseRequestSerializer(serializers.Serializer):
@@ -736,94 +780,6 @@ class RejectRequestSerializer(serializers.Serializer):
     remarks = serializers.CharField(allow_blank=False, error_messages={"blank": "Review remarks are required to reject a request."})
 
 
-class ReleaseSlotDetailSerializer(serializers.ModelSerializer):
-    """GET /api/registrar/release-slots/?date=... row shape.
-
-    available_slots practically means "total capacity" now, not "remaining"
-    — see the model docstring update. assigned/remaining are computed live
-    from FormRequest.release_slot here rather than trusted from a
-    decrementing counter, since nothing has decremented this field since the
-    Request Form wizard stopped asking students to pick a slot at submission.
-    """
-
-    assigned_count = serializers.SerializerMethodField()
-    remaining = serializers.SerializerMethodField()
-    assignments = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ReleaseSlot
-        fields = ["id", "slot_date", "start_time", "end_time", "available_slots", "assigned_count", "remaining", "assignments"]
-
-    def get_assigned_count(self, obj):
-        return obj.form_requests.count()
-
-    def get_remaining(self, obj):
-        return max(obj.available_slots - obj.form_requests.count(), 0)
-
-    def get_assignments(self, obj):
-        rows = []
-        for fr in obj.form_requests.select_related("transaction_type", "user", "release_schedule"):
-            schedule = getattr(fr, "release_schedule", None)
-            # Prefer the stored release_status now that ReleaseSchedule has
-            # one; fall back to the old claimed_at derivation for rows
-            # written before that column existed, which the migration only
-            # backfilled where a claim timestamp was actually present.
-            if schedule is not None and schedule.release_status:
-                claimed = schedule.release_status == "Claimed"
-            else:
-                claimed = bool(schedule and schedule.claimed_at)
-            rows.append(
-                {
-                    "form_request_id": fr.id,
-                    "request_code": fr.request_code,
-                    "student_first_name": fr.user.first_name,
-                    "student_last_name": fr.user.last_name,
-                    "transaction_type": fr.transaction_type.name,
-                    "status": "Claimed" if claimed else "Scheduled",
-                }
-            )
-        return rows
-
-
-class CreateReleaseSlotSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ReleaseSlot
-        fields = ["slot_date", "start_time", "end_time", "available_slots"]
-
-
-class AssignableRequestSerializer(serializers.ModelSerializer):
-    """GET /api/registrar/release-slots/assignable-requests/ — the picker's
-    options. Includes requests already assigned to A slot (with which one
-    flagged), not just unassigned ones, so reassigning a request from one
-    slot to another is just picking it again from a different slot's
-    Assign button — no separate "reassign" flow needed.
-    """
-
-    transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
-    student_first_name = serializers.CharField(source="user.first_name", read_only=True)
-    student_last_name = serializers.CharField(source="user.last_name", read_only=True)
-    current_slot_id = serializers.IntegerField(source="release_slot_id", read_only=True)
-
-    class Meta:
-        model = FormRequest
-        fields = ["id", "request_code", "transaction_type", "student_first_name", "student_last_name", "current_slot_id"]
-
-
-class AssignSlotSerializer(serializers.Serializer):
-    form_request = serializers.PrimaryKeyRelatedField(
-        # Schedulable from the moment payment is logged. Staff confirm the
-        # booked window as part of Mark Ready to Release, so requiring Ready
-        # first would mean nothing could ever be scheduled before the point
-        # the schedule is needed.
-        queryset=FormRequest.objects.filter(
-            request_status__in=[
-                FormRequest.RequestStatus.PROCESSING,
-                FormRequest.RequestStatus.READY,
-            ]
-        )
-    )
-
-
 class RecentFormRequestSerializer(serializers.ModelSerializer):
     transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
 
@@ -847,12 +803,6 @@ class TransactionTypeSerializer(serializers.ModelSerializer):
             "common_purposes",
             "special_notes",
         ]
-
-
-class ReleaseSlotSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ReleaseSlot
-        fields = ["id", "slot_date", "start_time", "end_time", "available_slots"]
 
 
 class FormRequestResultSerializer(serializers.ModelSerializer):
