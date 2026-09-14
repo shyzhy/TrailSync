@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BellIcon, ChevronIcon, EmptyState, FONT_SERIF, ListRowSkeleton, SkeletonGroup } from './trailsyncUI.jsx';
+import { BellIcon, ChevronIcon, EmptyState, ErrorState, FONT_SERIF, ListRowSkeleton, SkeletonGroup } from './trailsyncUI.jsx';
 import StudentShell, { markNotificationRead, notificationHref, timeAgo, useStudentShell } from './StudentShell.jsx';
 import { STUDENT_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { errorFromResponse, toApiError } from '../lib/api.js';
 
 const LOGIN_PATH = STUDENT_LOGIN_PATH;
 
@@ -11,30 +12,28 @@ const LOGIN_PATH = STUDENT_LOGIN_PATH;
  * of this same screen, not only on the next page load.
  */
 function NotificationsBody() {
-  const { unreadCount, setUnreadCount } = useStudentShell();
+  const { unreadCount, setUnreadCount, notify } = useStudentShell();
   const [status, setStatus] = useState('loading'); // 'loading' | 'ready' | 'error'
   const [items, setItems] = useState([]);
   const [order, setOrder] = useState('newest');
   const [page, setPage] = useState(1);
   const [pageInfo, setPageInfo] = useState({ count: 0, start: 0, end: 0, next: null, previous: null });
+  const [loadError, setLoadError] = useState(null);
 
   const load = useCallback(async () => {
     setStatus('loading');
+    setLoadError(null);
     try {
       const params = new URLSearchParams({ page: String(page) });
       if (order === 'oldest') params.set('order', 'oldest');
       const res = await authFetch(`/api/notifications/?${params}`);
-      if (res.status === 401) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
-        return;
-      }
-      if (!res.ok) throw new Error('failed');
+      if (!res.ok) throw await errorFromResponse(res);
       const data = await res.json();
       setItems(data.results || []);
       setPageInfo({ count: data.count, start: data.start, end: data.end, next: data.next, previous: data.previous });
       setStatus('ready');
-    } catch {
+    } catch (error) {
+      setLoadError(toApiError(error));
       setStatus('error');
     }
   }, [page, order]);
@@ -44,10 +43,13 @@ function NotificationsBody() {
   }, [load]);
 
   const markAll = async () => {
-    const res = await authFetch('/api/notifications/mark-all-read/', { method: 'POST' }).catch(() => null);
-    if (res?.ok) {
+    try {
+      const res = await authFetch('/api/notifications/mark-all-read/', { method: 'POST' });
+      if (!res.ok) throw await errorFromResponse(res);
       setUnreadCount(0);
       setItems((list) => list.map((n) => ({ ...n, is_read: true })));
+    } catch (error) {
+      notify(toApiError(error).message, 'error');
     }
   };
 
@@ -100,14 +102,10 @@ function NotificationsBody() {
       )}
 
       {status === 'error' && (
-        <div className="ts-banner ts-banner-error mt-6 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-          <span>We couldn&rsquo;t load your notifications. Please check your connection.</span>
-          <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
-            Try again
-          </button>
-        </div>
+        <ErrorState className="mt-6" error={loadError} title="We couldn&rsquo;t load your notifications" onRetry={load} />
       )}
 
+      {status !== 'error' && (
       <div className="ts-card mt-5 overflow-hidden">
         {status === 'loading' && (
           <SkeletonGroup label="Loading your notifications">
@@ -156,6 +154,7 @@ function NotificationsBody() {
             </a>
           ))}
       </div>
+      )}
 
       {status === 'ready' && pageInfo.count > 0 && (pageInfo.next || pageInfo.previous) && (
         <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">

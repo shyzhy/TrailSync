@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { DownloadIcon, FONT_SERIF, HelpTip } from './trailsyncUI.jsx';
 import { LIFECYCLE, STATUS, STEP_LABEL, studentStatusLabel } from '../lib/requestStatus.js';
 import { authFetch } from '../lib/auth.js';
+import { errorFromResponse, toApiError } from '../lib/api.js';
 
 const PESO = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
 
@@ -79,7 +80,8 @@ function StepProgress({ status }) {
 export default function TicketCard({ request, expanded, onToggle }) {
   const isRejected = request.request_status === STATUS.REJECTED;
   // null | 'receipt' | 'claim-stub' while downloading, or 'error'.
-  const [docState, setDocState] = useState(null);
+  const [docState, setDocState] = useState(null); // which document is being prepared
+  const [docError, setDocError] = useState('');
   const amountDue = formatAmount(request.amount_due);
 
   /**
@@ -93,9 +95,10 @@ export default function TicketCard({ request, expanded, onToggle }) {
    */
   async function downloadDocument(kind, filename) {
     setDocState(kind);
+    setDocError('');
     try {
       const res = await authFetch(`/api/form-requests/${request.id}/${kind}/`);
-      if (!res.ok) throw new Error(String(res.status));
+      if (!res.ok) throw await errorFromResponse(res);
 
       const url = URL.createObjectURL(await res.blob());
       const anchor = document.createElement('a');
@@ -108,8 +111,10 @@ export default function TicketCard({ request, expanded, onToggle }) {
       // save if the object URL disappears before they have read the blob.
       setTimeout(() => URL.revokeObjectURL(url), 10000);
       setDocState(null);
-    } catch {
-      setDocState('error');
+      setDocError('');
+    } catch (error) {
+      setDocState(null);
+      setDocError(`That document didn’t download. ${toApiError(error).message}`);
     }
   }
 
@@ -143,9 +148,7 @@ export default function TicketCard({ request, expanded, onToggle }) {
           {isRejected ? (
             <div className="mt-3 flex items-center gap-2">
               <span className="ts-ticket-rejected-dot" aria-hidden="true" />
-              <span className="text-xs font-medium" style={{ color: '#B91C1C' }}>
-                Not approved
-              </span>
+              <span className="ts-error-text text-xs font-medium">Not approved</span>
               {request.verification_remarks && (
                 <span className="ts-soft text-xs">— {request.verification_remarks}</span>
               )}
@@ -302,9 +305,9 @@ export default function TicketCard({ request, expanded, onToggle }) {
             </div>
           )}
 
-          {docState === 'error' && (
-            <p className="mt-2 text-xs" style={{ color: '#B91C1C' }}>
-              Couldn&rsquo;t generate that document just now. Please try again.
+          {docError && (
+            <p role="alert" className="ts-field-error">
+              {docError}
             </p>
           )}
         </div>

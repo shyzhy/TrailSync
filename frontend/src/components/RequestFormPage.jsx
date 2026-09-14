@@ -6,6 +6,8 @@ import {
   SuccessSeal,
   ChevronIcon,
   DocumentIcon,
+  ErrorState,
+  FieldError,
   FONT_SERIF,
   GraduationCapIcon,
   GridTableIcon,
@@ -13,13 +15,12 @@ import {
   KeyIcon,
   PaperPlaneIcon,
   ShieldIcon,
-  Spinner,
   UploadIcon,
   WarningIcon,
 } from './trailsyncUI.jsx';
 import StudentShell from './StudentShell.jsx';
 import { STUDENT_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
-import { NETWORK_ERROR, friendlySummary } from '../lib/friendlyErrors.js';
+import { errorFromResponse, toApiError } from '../lib/api.js';
 
 const LOGIN_PATH = STUDENT_LOGIN_PATH;
 const DASHBOARD_PATH = '/portal';
@@ -204,6 +205,56 @@ function Stepper({ current }) {
   );
 }
 
+// Mirrors the server's check_upload for the 2x2 photo, so a wrong file is
+// caught the moment it's picked rather than after pressing Send.
+const BOARD_EXAM_PHOTO_TYPES = ['image/jpeg', 'image/png'];
+const BOARD_EXAM_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+
+// Which step asks for each answer the server can reject, so a refused
+// submission opens on the step where the fix is. Anything not listed here
+// (and not a whole-request problem) is a Step 2 detail.
+const STEP_FOR_FIELD = { transaction_type: 1, proxy: 3, proxy_full_name: 3, relationship: 3, contact_number: 3 };
+const stepForField = (key) => STEP_FOR_FIELD[key] ?? 2;
+
+// Answers that show their server message directly under their own field.
+const INLINE_FIELDS = new Set([
+  'purpose',
+  'purpose_other',
+  'semester_taken',
+  'subject_code',
+  'board_exam_photo',
+  'cav_agency',
+  'certification_subtypes',
+  'number_of_copies',
+  'number_of_pages',
+  'semester',
+  'graduation_date',
+  'proxy_full_name',
+  'relationship',
+  'contact_number',
+]);
+
+/**
+ * Top-of-step note after the server turned the request down: says nothing
+ * was sent, and lists any problem that has no field of its own on screen.
+ */
+function SubmitProblems({ general, loose, hasInline }) {
+  const fieldProblems = loose.length > 0 || hasInline;
+  if (!general && !fieldProblems) return null;
+  return (
+    <div role="alert" className="ts-banner ts-banner-error mt-4 px-3.5 py-2.5 text-sm">
+      {fieldProblems && <p className="font-semibold">Your request hasn&rsquo;t been sent yet.</p>}
+      {general && <p className={fieldProblems ? 'mt-1' : ''}>{general}</p>}
+      {loose.map((m) => (
+        <p key={m} className="mt-1">
+          {m}
+        </p>
+      ))}
+      {hasInline && <p className="mt-1">Please fix the answers marked in red below, then send it again.</p>}
+    </div>
+  );
+}
+
 function RequiredMark() {
   return <span className="ts-error-text"> *</span>;
 }
@@ -256,19 +307,22 @@ export default function RequestFormPage() {
   const [submitting, setSubmitting] = useState(false);
   const [generalError, setGeneralError] = useState('');
   const [result, setResult] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [deepLinkUnavailable, setDeepLinkUnavailable] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+  // What the server rejected, together with the answers it was looking at:
+  // a message stays on a field only until that answer is changed.
+  const [serverErrors, setServerErrors] = useState({ messages: {}, answers: {} });
 
   const semesterOptions = useMemo(() => getSemesterOptions(), []);
 
   const load = useCallback(async () => {
     setStatus('loading');
+    setLoadError(null);
     try {
       const [meRes, typesRes] = await Promise.all([authFetch('/api/me/'), authFetch('/api/transaction-types/')]);
-      if ([meRes, typesRes].some((r) => r.status === 401)) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
-        return;
-      }
-      if (!meRes.ok || !typesRes.ok) throw new Error('One or more requests failed.');
+      const failed = [meRes, typesRes].find((r) => !r.ok);
+      if (failed) throw await errorFromResponse(failed);
 
       const [meData, typesData] = await Promise.all([meRes.json(), typesRes.json()]);
       setMe(meData);
@@ -279,14 +333,20 @@ export default function RequestFormPage() {
       // straight to Step 2, but only once that id is confirmed to exist in
       // what the backend actually returned — an invalid/stale id just
       // leaves the student on Step 1 with nothing pre-selected.
+      // A paused document isn't pre-selected either; the student lands on
+      // Step 1 with a note saying why, not on a form that will refuse it.
       const deepLinkId = new URLSearchParams(window.location.search).get('transaction_type');
-      if (deepLinkId && typesData.some((t) => String(t.id) === deepLinkId)) {
+      const deepLinked = deepLinkId && typesData.find((t) => String(t.id) === deepLinkId);
+      if (deepLinked && deepLinked.is_available !== false) {
         setTransactionTypeId(deepLinkId);
         setStep(2);
+      } else if (deepLinked) {
+        setDeepLinkUnavailable(true);
       }
 
       setStatus('ready');
-    } catch {
+    } catch (error) {
+      setLoadError(toApiError(error));
       setStatus('error');
     }
   }, []);
@@ -326,7 +386,7 @@ export default function RequestFormPage() {
   // disabled button with no explanation is where first-time users get stuck.
   // Step 2 mirrors the server's rules, so Next can't walk a student into an
   // error they'd only discover after submitting.
-  const step1Missing = transactionTypeId ? [] : ['choose a document'];
+  const step1Missing = transactionTypeId && selectedType?.is_available !== false ? [] : ['choose a document'];
   const step2Missing = [
     !purpose && 'what you need it for',
     purpose === 'Others' && !purposeOther.trim() && 'your reason',
@@ -349,6 +409,70 @@ export default function RequestFormPage() {
       ].filter(Boolean)
     : [];
 
+  const answers = {
+    transaction_type: transactionTypeId,
+    purpose,
+    purpose_other: purposeOther,
+    number_of_copies: String(numberOfCopies),
+    number_of_pages: String(numberOfPages),
+    semester,
+    graduation_date: graduationDate,
+    board_exam_photo: boardExamPhoto,
+    cav_agency: cavAgency,
+    certification_subtypes: certificationSubtypes.join('|'),
+    semester_taken: semesterTaken,
+    subject_code: subjectCode,
+    proxy_full_name: proxyFullName,
+    relationship: proxyRelationship,
+    contact_number: proxyContactNumber,
+  };
+  /** The server's message for one answer, while that answer is unchanged. */
+  const errorFor = (key) => {
+    const message = serverErrors.messages[key];
+    return message && serverErrors.answers[key] === answers[key] ? message : '';
+  };
+  const invalidProps = (key, id) =>
+    errorFor(key) ? { 'aria-invalid': true, 'aria-describedby': `${id}-error` } : {};
+  const errorClass = (key) => (errorFor(key) ? 'ts-input-error' : '');
+  /** Problems to list at the top of one step: those with no field of their own. */
+  const problemsFor = (n) => {
+    // Still-current problems on step n; one tied to an answer drops out as
+    // soon as that answer is changed.
+    const open = Object.keys(serverErrors.messages).filter(
+      (k) => stepForField(k) === n && (!(k in answers) || errorFor(k)),
+    );
+    return {
+      loose: open.filter((k) => !INLINE_FIELDS.has(k)).map((k) => serverErrors.messages[k]),
+      hasInline: open.some((k) => INLINE_FIELDS.has(k)),
+    };
+  };
+
+  const pickBoardExamPhoto = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!BOARD_EXAM_PHOTO_TYPES.includes(file.type)) {
+      setBoardExamPhoto(null);
+      setPhotoError(`“${file.name}” isn’t a JPG or PNG file. Please choose a JPG or PNG photo.`);
+      return;
+    }
+    if (file.size > BOARD_EXAM_PHOTO_MAX_BYTES) {
+      setBoardExamPhoto(null);
+      setPhotoError(`That photo is ${(file.size / (1024 * 1024)).toFixed(1)} MB. The limit is 5 MB.`);
+      return;
+    }
+    setPhotoError('');
+    setBoardExamPhoto(file);
+  };
+
+  // Quietly re-read the catalogue, so a document the office paused while
+  // this form was open shows as unavailable instead of failing again.
+  const refreshTypes = () =>
+    authFetch('/api/transaction-types/')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => Array.isArray(data) && setTransactionTypes(data))
+      .catch(() => {});
+
   const step1Valid = step1Missing.length === 0;
   const step2Valid = step2Missing.length === 0;
   const step3Valid = step3Missing.length === 0;
@@ -361,6 +485,7 @@ export default function RequestFormPage() {
 
   const goToStep = (n) => {
     setGeneralError('');
+    setPhotoError('');
     setStepDirection(n >= step ? 'fwd' : 'back');
     setStep(n);
   };
@@ -411,19 +536,27 @@ export default function RequestFormPage() {
       // No Content-Type header here on purpose — the browser sets the
       // multipart boundary itself when the body is a FormData instance.
       const response = await authFetch('/api/form-requests/', { method: 'POST', body: fd });
-      if (response.status === 401) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
+      if (!response.ok) throw await errorFromResponse(response);
+      setServerErrors({ messages: {}, answers: {} });
+      setResult(await response.json());
+    } catch (error) {
+      const apiError = toApiError(error);
+      if (apiError.kind !== 'validation') {
+        // Nothing was saved, and nothing on the form is cleared - the photo
+        // included - so sending again is one press.
+        const kept = boardExamPhoto ? 'Your answers and photo are still here' : 'Your answers are still here';
+        const retryable = ['network', 'server', 'rate_limited'].includes(apiError.kind);
+        setGeneralError(
+          `Your request wasn’t sent. ${apiError.message}${retryable ? ` ${kept}, so you can press Send request again.` : ''}`,
+        );
         return;
       }
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setGeneralError(friendlySummary(data, "We couldn't send your request. Please check your answers and try again."));
-        return;
-      }
-      setResult(data);
-    } catch {
-      setGeneralError(NETWORK_ERROR);
+      const { general, ...fields } = apiError.fieldErrors;
+      setServerErrors({ messages: fields, answers });
+      if (fields.transaction_type) refreshTypes();
+      const steps = Object.keys(fields).map(stepForField);
+      if (steps.length) goToStep(Math.min(...steps));
+      setGeneralError(general || '');
     } finally {
       setSubmitting(false);
     }
@@ -483,12 +616,7 @@ export default function RequestFormPage() {
         <Stepper current={step} />
 
         {status === 'error' && (
-          <div className="ts-banner ts-banner-error mb-6 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>We couldn&rsquo;t load the form. Please check your internet connection.</span>
-            <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
-              Try again
-            </button>
-          </div>
+          <ErrorState error={loadError} title="We couldn&rsquo;t load the form" onRetry={load} />
         )}
 
         {status === 'loading' && (
@@ -522,16 +650,25 @@ export default function RequestFormPage() {
                   .
                 </p>
 
+                {deepLinkUnavailable && !transactionTypeId && (
+                  <p className="ts-banner ts-banner-pending mt-4 px-3.5 py-2.5 text-sm">
+                    The document you chose isn&rsquo;t currently available for request. You can pick another one below.
+                  </p>
+                )}
+                <SubmitProblems general={generalError} {...problemsFor(1)} />
+
                 <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
                   {transactionTypes.map((t) => {
                     const Icon = iconForTransactionType(t.name);
-                    const selected = String(t.id) === String(transactionTypeId);
+                    const unavailable = t.is_available === false;
+                    const selected = !unavailable && String(t.id) === String(transactionTypeId);
                     return (
                       <button
                         key={t.id}
                         type="button"
                         onClick={() => setTransactionTypeId(String(t.id))}
                         aria-pressed={selected}
+                        disabled={unavailable}
                         className={`ts-select-card p-5 ${selected ? 'ts-select-card-selected' : ''}`}
                       >
                         {selected && (
@@ -544,6 +681,7 @@ export default function RequestFormPage() {
                         </div>
                         <p className="ts-ink mt-3 text-sm font-semibold">{t.name}</p>
                         <p className="ts-soft mt-1 text-xs leading-relaxed">{descriptionForTransactionType(t)}</p>
+                        {unavailable && <span className="ts-tag ts-tag-muted mt-2">Not available right now</span>}
                       </button>
                     );
                   })}
@@ -572,6 +710,8 @@ export default function RequestFormPage() {
                 <p className="ts-soft mt-1.5 text-base">
                   Answer the questions below. Anything marked with <span className="ts-error-text">*</span> is required.
                 </p>
+
+                <SubmitProblems general={generalError} {...problemsFor(2)} />
 
                 {requestingAsLine && (
                   <div className="ts-info-note mt-4 px-3.5 py-2.5 text-sm">
@@ -632,7 +772,8 @@ export default function RequestFormPage() {
                         id="purpose"
                         value={purpose}
                         onChange={(e) => setPurpose(e.target.value)}
-                        className="ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm"
+                        {...invalidProps('purpose', 'purpose')}
+                        className={`ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm ${errorClass('purpose')}`}
                       >
                         <option value="">Select a purpose</option>
                         {PURPOSE_OPTIONS.map((p) => (
@@ -645,16 +786,22 @@ export default function RequestFormPage() {
                         <ChevronIcon />
                       </span>
                     </div>
+                    <FieldError id="purpose">{errorFor('purpose')}</FieldError>
 
                     {purpose === 'Others' && (
-                      <input
-                        type="text"
-                        value={purposeOther}
-                        onChange={(e) => setPurposeOther(e.target.value)}
-                        placeholder="Tell us what you need it for"
-                        aria-label="What you need the document for"
-                        className="ts-input mt-3 w-full px-3.5 py-2.5 text-sm"
-                      />
+                      <>
+                        <input
+                          id="purposeOther"
+                          type="text"
+                          value={purposeOther}
+                          onChange={(e) => setPurposeOther(e.target.value)}
+                          placeholder="Tell us what you need it for"
+                          aria-label="What you need the document for"
+                          {...invalidProps('purpose_other', 'purposeOther')}
+                          className={`ts-input mt-3 w-full px-3.5 py-2.5 text-sm ${errorClass('purpose_other')}`}
+                        />
+                        <FieldError id="purposeOther">{errorFor('purpose_other')}</FieldError>
+                      </>
                     )}
 
                     {/* The one purpose on the form that carries its own fee
@@ -675,8 +822,10 @@ export default function RequestFormPage() {
                             value={semesterTaken}
                             onChange={(e) => setSemesterTaken(e.target.value)}
                             placeholder="e.g. 1st Semester, SY 2023-2024"
-                            className="ts-input w-full px-3.5 py-2.5 text-sm"
+                            {...invalidProps('semester_taken', 'semesterTaken')}
+                            className={`ts-input w-full px-3.5 py-2.5 text-sm ${errorClass('semester_taken')}`}
                           />
+                          <FieldError id="semesterTaken">{errorFor('semester_taken')}</FieldError>
                         </div>
                         <div>
                           <label htmlFor="subjectCode" className="ts-ink mb-1.5 block text-sm font-medium">
@@ -688,8 +837,10 @@ export default function RequestFormPage() {
                             value={subjectCode}
                             onChange={(e) => setSubjectCode(e.target.value)}
                             placeholder="e.g. IT321"
-                            className="ts-input w-full px-3.5 py-2.5 text-sm"
+                            {...invalidProps('subject_code', 'subjectCode')}
+                            className={`ts-input w-full px-3.5 py-2.5 text-sm ${errorClass('subject_code')}`}
                           />
+                          <FieldError id="subjectCode">{errorFor('subject_code')}</FieldError>
                         </div>
                       </div>
                     )}
@@ -700,7 +851,7 @@ export default function RequestFormPage() {
                           htmlFor="boardExamPhoto"
                           className={`ts-file-drop flex cursor-pointer items-center gap-3 px-4 py-3.5 ${
                             boardExamPhoto ? 'ts-file-drop-filled' : ''
-                          }`}
+                          } ${photoError || errorFor('board_exam_photo') ? 'ts-file-drop-error' : ''}`}
                         >
                           <span className={boardExamPhoto ? 'ts-sage' : 'ts-soft'}>
                             {boardExamPhoto ? <CheckIcon /> : <UploadIcon />}
@@ -711,7 +862,7 @@ export default function RequestFormPage() {
                               <RequiredMark />
                             </span>
                             <span className="ts-soft block truncate text-xs">
-                              {boardExamPhoto ? boardExamPhoto.name : 'JPG or PNG, required for Board Exam requests'}
+                              {boardExamPhoto ? boardExamPhoto.name : 'JPG or PNG, up to 5 MB. Required for Board Exam requests'}
                             </span>
                           </span>
                         </label>
@@ -719,9 +870,12 @@ export default function RequestFormPage() {
                           id="boardExamPhoto"
                           type="file"
                           accept="image/png,image/jpeg"
-                          onChange={(e) => setBoardExamPhoto(e.target.files?.[0] || null)}
+                          onChange={pickBoardExamPhoto}
+                          aria-invalid={Boolean(photoError || errorFor('board_exam_photo'))}
+                          aria-describedby={photoError || errorFor('board_exam_photo') ? 'boardExamPhoto-error' : undefined}
                           className="sr-only"
                         />
+                        <FieldError id="boardExamPhoto">{photoError || errorFor('board_exam_photo')}</FieldError>
                       </div>
                     )}
                   </div>
@@ -747,7 +901,8 @@ export default function RequestFormPage() {
                           id="cavAgency"
                           value={cavAgency}
                           onChange={(e) => setCavAgency(e.target.value)}
-                          className="ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm"
+                          {...invalidProps('cav_agency', 'cavAgency')}
+                          className={`ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm ${errorClass('cav_agency')}`}
                         >
                           <option value="">Choose the office that asked for it</option>
                           {CAV_AGENCIES.map((a) => (
@@ -760,6 +915,7 @@ export default function RequestFormPage() {
                           <ChevronIcon />
                         </span>
                       </div>
+                      <FieldError id="cavAgency">{errorFor('cav_agency')}</FieldError>
                       <p className="ts-soft mt-1.5 text-xs">
                         {CAV_AGENCIES.find((a) => a.value === cavAgency)?.hint ||
                           "Pick the office you'll be giving the document to. Not sure? Ask whoever requested it from you."}
@@ -810,6 +966,7 @@ export default function RequestFormPage() {
                         })}
                       </div>
                       <p className="ts-soft mt-1.5 text-xs">Tick at least one.</p>
+                      <FieldError id="certificationSubtypes">{errorFor('certification_subtypes')}</FieldError>
                     </div>
                   )}
 
@@ -825,8 +982,10 @@ export default function RequestFormPage() {
                         min="1"
                         value={numberOfCopies}
                         onChange={(e) => setNumberOfCopies(e.target.value)}
-                        className="ts-input w-full px-3.5 py-2.5 text-sm"
+                        {...invalidProps('number_of_copies', 'numberOfCopies')}
+                        className={`ts-input w-full px-3.5 py-2.5 text-sm ${errorClass('number_of_copies')}`}
                       />
+                      <FieldError id="numberOfCopies">{errorFor('number_of_copies')}</FieldError>
                       <p className="ts-soft mt-1.5 text-xs">How many separate copies you need.</p>
                     </div>
 
@@ -846,8 +1005,10 @@ export default function RequestFormPage() {
                           value={numberOfPages}
                           onChange={(e) => setNumberOfPages(e.target.value)}
                           placeholder="e.g. 4"
-                          className="ts-input w-full px-3.5 py-2.5 text-sm"
+                          {...invalidProps('number_of_pages', 'numberOfPages')}
+                          className={`ts-input w-full px-3.5 py-2.5 text-sm ${errorClass('number_of_pages')}`}
                         />
+                        <FieldError id="numberOfPages">{errorFor('number_of_pages')}</FieldError>
                         <p className="ts-soft mt-1.5 text-xs">
                           {selectedType?.name} is charged per page
                           {selectedType?.fee_amount ? ` (₱${Number(selectedType.fee_amount).toFixed(2)} each)` : ''}.
@@ -872,7 +1033,8 @@ export default function RequestFormPage() {
                           id="semester"
                           value={semester}
                           onChange={(e) => setSemester(e.target.value)}
-                          className="ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm"
+                          {...invalidProps('semester', 'semester')}
+                          className={`ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm ${errorClass('semester')}`}
                         >
                           <option value="">Choose a semester</option>
                           {semesterOptions.map((s) => (
@@ -885,6 +1047,7 @@ export default function RequestFormPage() {
                           <ChevronIcon />
                         </span>
                       </div>
+                      <FieldError id="semester">{errorFor('semester')}</FieldError>
                     </div>
                   </div>
 
@@ -900,8 +1063,10 @@ export default function RequestFormPage() {
                         type="date"
                         value={graduationDate}
                         onChange={(e) => setGraduationDate(e.target.value)}
-                        className="ts-input w-full px-3.5 py-2.5 text-sm"
+                        {...invalidProps('graduation_date', 'graduationDate')}
+                        className={`ts-input w-full px-3.5 py-2.5 text-sm ${errorClass('graduation_date')}`}
                       />
+                      <FieldError id="graduationDate">{errorFor('graduation_date')}</FieldError>
                       {/* Mirrors the server's own rule (graduated before 2018 =
                           requires_archive_retrieval), so the student is warned at
                           the moment it applies rather than surprised by a wait. */}
@@ -971,6 +1136,7 @@ export default function RequestFormPage() {
                 <p className="ts-soft mt-1.5 text-base">
                   Most people collect their own document. If someone else will collect it for you, tell us who.
                 </p>
+                <SubmitProblems general={generalError} {...problemsFor(3)} />
 
                 <div className="ts-card mt-6 flex items-center justify-between gap-4 p-5">
                   <label htmlFor="proxyEnabled" className="cursor-pointer">
@@ -1001,8 +1167,10 @@ export default function RequestFormPage() {
                             type="text"
                             value={proxyFullName}
                             onChange={(e) => setProxyFullName(e.target.value)}
-                            className="ts-input w-full px-3.5 py-2.5 text-sm"
+                            {...invalidProps('proxy_full_name', 'proxyFullName')}
+                            className={`ts-input w-full px-3.5 py-2.5 text-sm ${errorClass('proxy_full_name')}`}
                           />
+                          <FieldError id="proxyFullName">{errorFor('proxy_full_name')}</FieldError>
                         </div>
                         <div>
                           <label htmlFor="proxyRelationship" className="ts-ink mb-1.5 block text-sm font-medium">
@@ -1014,7 +1182,8 @@ export default function RequestFormPage() {
                               id="proxyRelationship"
                               value={proxyRelationship}
                               onChange={(e) => setProxyRelationship(e.target.value)}
-                              className="ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm"
+                              {...invalidProps('relationship', 'proxyRelationship')}
+                              className={`ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm ${errorClass('relationship')}`}
                             >
                               <option value="">Choose one</option>
                               {RELATIONSHIP_OPTIONS.map((r) => (
@@ -1027,6 +1196,7 @@ export default function RequestFormPage() {
                               <ChevronIcon />
                             </span>
                           </div>
+                          <FieldError id="proxyRelationship">{errorFor('relationship')}</FieldError>
                         </div>
                         <div>
                           <label htmlFor="proxyContactNumber" className="ts-ink mb-1.5 block text-sm font-medium">
@@ -1040,8 +1210,10 @@ export default function RequestFormPage() {
                             placeholder="09XX XXX XXXX"
                             value={proxyContactNumber}
                             onChange={(e) => setProxyContactNumber(e.target.value)}
-                            className="ts-input w-full px-3.5 py-2.5 text-sm"
+                            {...invalidProps('contact_number', 'proxyContactNumber')}
+                            className={`ts-input w-full px-3.5 py-2.5 text-sm ${errorClass('contact_number')}`}
                           />
+                          <FieldError id="proxyContactNumber">{errorFor('contact_number')}</FieldError>
                         </div>
                       </div>
                     </div>
@@ -1247,11 +1419,7 @@ export default function RequestFormPage() {
                   </div>
                 </div>
 
-                {generalError && (
-                  <div role="alert" className="ts-banner ts-banner-error mt-4 px-3.5 py-2.5 text-sm">
-                    {generalError}
-                  </div>
-                )}
+                <SubmitProblems general={generalError} {...problemsFor(4)} />
 
                 <div className="mt-5">
                   <label htmlFor="confirmAccurate" className="flex cursor-pointer select-none items-start gap-2.5">

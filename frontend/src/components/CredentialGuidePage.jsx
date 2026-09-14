@@ -3,6 +3,7 @@ import {
   CloseIcon,
   DocumentIcon,
   EmptyState,
+  ErrorState,
   FONT_SERIF,
   GuideCardSkeleton,
   SearchIcon,
@@ -10,6 +11,7 @@ import {
 import StudentShell from './StudentShell.jsx';
 import CredentialDetailCard, { formatFeeWithUnit } from './CredentialDetailCard.jsx';
 import { STUDENT_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { errorFromResponse, toApiError } from '../lib/api.js';
 
 const LOGIN_PATH = STUDENT_LOGIN_PATH;
 
@@ -26,22 +28,20 @@ export default function CredentialGuidePage() {
   const [search, setSearch] = useState('');
   const [activePurpose, setActivePurpose] = useState('All');
   const [selected, setSelected] = useState(null);
+  const [loadError, setLoadError] = useState(null);
 
   const load = async () => {
     setStatus('loading');
+    setLoadError(null);
     try {
       // Same GET /api/transaction-types/ the Request Form's Step 1 uses —
       // one admin-editable source, no separately hardcoded catalog content.
       const res = await authFetch('/api/transaction-types/');
-      if (res.status === 401) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
-        return;
-      }
-      if (!res.ok) throw new Error('Request failed.');
+      if (!res.ok) throw await errorFromResponse(res);
       setTypes(await res.json());
       setStatus('ready');
-    } catch {
+    } catch (error) {
+      setLoadError(toApiError(error));
       setStatus('error');
     }
   };
@@ -143,12 +143,7 @@ export default function CredentialGuidePage() {
         </div>
 
         {status === 'error' && (
-          <div className="ts-banner ts-banner-error mt-6 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>We couldn&rsquo;t load the list of documents. Please check your internet connection.</span>
-            <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
-              Try again
-            </button>
-          </div>
+          <ErrorState className="mt-6" error={loadError} title="We couldn&rsquo;t load the list of documents" onRetry={load} />
         )}
 
         <div
@@ -170,6 +165,7 @@ export default function CredentialGuidePage() {
                 <p className="ts-ink mt-3 text-base font-semibold">{t.name}</p>
                 <p className="ts-soft mt-1 text-sm leading-relaxed">{truncate(t.description, 110)}</p>
                 <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  {t.is_available === false && <span className="ts-tag ts-tag-muted">Not available right now</span>}
                   <span className="ts-tag">{formatFeeWithUnit(t)}</span>
                   {t.processing_time && <span className="ts-tag ts-tag-sage">{t.processing_time}</span>}
                   <span className="ts-link ml-auto text-xs font-medium">See details</span>

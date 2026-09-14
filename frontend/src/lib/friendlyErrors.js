@@ -9,12 +9,19 @@
  * it raw, so the wording is fixed in one place.
  */
 
-export const NETWORK_ERROR =
-  "We couldn't reach TrailSync. Please check your internet connection and try again.";
+// The request never reached the server (offline, dropped connection).
+export const NETWORK_ERROR = "Can't connect right now. Check your connection and try again.";
 
-export const SERVER_ERROR = 'Something went wrong on our side. Please try again in a moment.';
+// The server hit an error of its own (5xx).
+export const SERVER_ERROR = 'Something went wrong on our end. Please try again in a moment.';
 
-export const SESSION_ENDED = 'Your session has ended. Please log in again to continue.';
+export const SESSION_ENDED = 'Your session expired. Please log in again.';
+
+export const FORBIDDEN_ERROR = "You don't have permission to do that.";
+
+export const NOT_FOUND_ERROR = "We couldn't find that. It may have been removed, or the link may be wrong.";
+
+export const RATE_LIMITED_ERROR = "You've tried that a lot just now. Please wait a moment, then try again.";
 
 // [pattern, replacement] - replacement is a string or a function of the match.
 const RULES = [
@@ -39,8 +46,9 @@ const RULES = [
   [/^This password is entirely numeric\.?$/i, 'Please use some letters too, not only numbers.'],
   [/^The password is too similar to the .*$/i, 'Your password is too close to your name or email. Please choose a different one.'],
   [/^(Authentication credentials were not provided|Given token not valid.*|Token is invalid or expired)\.?$/i, SESSION_ENDED],
-  [/^Not found\.?$/i, "We couldn't find that. It may have been removed."],
-  [/^You do not have permission to perform this action\.?$/i, "Your account isn't able to do that."],
+  [/^(Not found|No \w+ matches the given query)\.?$/i, NOT_FOUND_ERROR],
+  [/^You do not have permission to perform this action\.?$/i, FORBIDDEN_ERROR],
+  [/^Request was throttled\..*$/i, RATE_LIMITED_ERROR],
   [/^Method ".*" not allowed\.?$/i, SERVER_ERROR],
 ];
 

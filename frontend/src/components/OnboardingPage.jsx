@@ -4,6 +4,8 @@ import {
   avatarUrlFor,
   BusyLabel,
   ChevronIcon,
+  ErrorState,
+  FieldError,
   FONT_SANS,
   FONT_SERIF,
   Skeleton,
@@ -20,7 +22,7 @@ import {
   getStoredUser,
   updateStoredUser,
 } from '../lib/auth.js';
-import { NETWORK_ERROR, friendlyFieldErrors } from '../lib/friendlyErrors.js';
+import { errorFromResponse, formErrors, toApiError } from '../lib/api.js';
 
 const LOGIN_PATH = STUDENT_LOGIN_PATH;
 
@@ -71,9 +73,7 @@ function Field({ id, label, optional, hint, error, children }) {
       </label>
       {children}
       {error ? (
-        <p id={`${id}-error`} className="ts-error-text mt-1.5 text-sm">
-          {error}
-        </p>
+        <FieldError id={id}>{error}</FieldError>
       ) : (
         hint && (
           <p id={`${id}-hint`} className="ts-soft mt-1.5 text-sm leading-relaxed">
@@ -122,6 +122,7 @@ export default function OnboardingPage() {
   const [direction, setDirection] = useState('fwd');
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
+  const [loadError, setLoadError] = useState(null);
 
   const [values, setValues] = useState({
     firstName: '',
@@ -143,22 +144,19 @@ export default function OnboardingPage() {
     setErrors((prev) => (prev[key] || prev.general ? { ...prev, [key]: undefined, general: undefined } : prev));
   };
 
-  const bounce = () => {
+  const logOut = () => {
     clearSession();
     window.location.href = LOGIN_PATH;
   };
 
   // ---- Load, and decide where to start --------------------------------
-  useEffect(() => {
-    if (!getAccessToken()) {
-      window.location.href = LOGIN_PATH;
-      return;
-    }
-    (async () => {
+  const load = async () => {
+    setStatus('loading');
+    setLoadError(null);
+    {
       try {
         const res = await authFetch('/api/me/');
-        if (res.status === 401) return bounce();
-        if (!res.ok) throw new Error(String(res.status));
+        if (!res.ok) throw await errorFromResponse(res);
         const data = await res.json();
         const p = data.profile;
         if (!p?.onboarding) {
@@ -188,10 +186,19 @@ export default function OnboardingPage() {
         });
         setStep(p.onboarding.next_step || 1);
         setStatus('ready');
-      } catch {
+      } catch (error) {
+        setLoadError(toApiError(error));
         setStatus('error');
       }
-    })();
+    }
+  };
+
+  useEffect(() => {
+    if (!getAccessToken()) {
+      window.location.href = LOGIN_PATH;
+      return;
+    }
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -279,21 +286,14 @@ export default function OnboardingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payloadFor(step)),
       });
-      if (res.status === 401) return bounce();
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const mapped = {};
-        Object.entries(friendlyFieldErrors(data)).forEach(([k, v]) => {
-          mapped[FIELD_KEYS[k] || 'general'] = v;
-        });
-        setErrors(mapped);
-        return;
-      }
+      if (!res.ok) throw await errorFromResponse(res);
+      const data = await res.json();
       setMe(data);
       updateStoredUser(data);
       go(step + 1);
-    } catch {
-      setErrors({ general: NETWORK_ERROR });
+    } catch (error) {
+      // Nothing on this step was saved, and what they typed stays put.
+      setErrors(formErrors(error, FIELD_KEYS));
     } finally {
       setSaving(false);
     }
@@ -304,7 +304,6 @@ export default function OnboardingPage() {
       setMe(data);
       updateStoredUser(data);
     },
-    onUnauthorized: bounce,
   });
 
   const current = STEPS[step - 1];
@@ -323,7 +322,7 @@ export default function OnboardingPage() {
             TrailSync
           </span>
         </span>
-        <button type="button" onClick={bounce} className="ts-link inline-flex min-h-[44px] items-center px-2 text-sm font-medium">
+        <button type="button" onClick={logOut} className="ts-link inline-flex min-h-[44px] items-center px-2 text-sm font-medium">
           Log out
         </button>
       </header>
@@ -343,12 +342,7 @@ export default function OnboardingPage() {
         )}
 
         {status === 'error' && (
-          <div role="alert" className="ts-banner ts-banner-error flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>We couldn&rsquo;t load your setup. Please check your internet connection.</span>
-            <button type="button" onClick={() => window.location.reload()} className="ts-link shrink-0 font-medium">
-              Try again
-            </button>
-          </div>
+          <ErrorState error={loadError} title="We couldn&rsquo;t load your setup" onRetry={load} />
         )}
 
         {status === 'ready' && step <= TOTAL && (
@@ -478,7 +472,7 @@ export default function OnboardingPage() {
                           );
                         })}
                       </div>
-                      {errors.userCategory && <p className="ts-error-text mt-1.5 text-sm">{errors.userCategory}</p>}
+                      <FieldError id="userCategory">{errors.userCategory}</FieldError>
                     </fieldset>
 
                     <Field id="course" label="Course" error={errors.course}>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Avatar, avatarUrlFor, CameraIcon, Spinner } from './trailsyncUI.jsx';
 import { authFetch } from '../lib/auth.js';
-import { NETWORK_ERROR, friendlySummary } from '../lib/friendlyErrors.js';
+import { errorFromResponse, toApiError } from '../lib/api.js';
 
 /**
  * Profile picture upload, shared by the Profile page and onboarding step 4.
@@ -60,16 +60,31 @@ function cropToSquare(file) {
   });
 }
 
+// Failures worth offering "Try again" for: the photo itself was fine, the
+// trip to the server wasn't.
+const RETRYABLE = ['network', 'server', 'rate_limited'];
+
+/** What a picked file's type is called, for "That file is a GIF". */
+function typeName(file) {
+  const ext = (file.name.split('.').pop() || '').toUpperCase();
+  return ext && ext.length <= 5 ? ext : 'different kind of';
+}
+
 /**
- * @param onUpdated      (me, 'updated' | 'removed') => void, with the fresh /api/me/ payload.
- * @param onUnauthorized () => void, when the session has ended mid-upload.
+ * @param onUpdated (me, 'updated' | 'removed') => void, with the fresh /api/me/ payload.
+ *
+ * An expired session needs no handling here: authFetch sends the person to
+ * log in, like everywhere else.
  */
-export function useAvatarUpload({ onUpdated, onUnauthorized }) {
+export function useAvatarUpload({ onUpdated }) {
   const inputRef = useRef(null);
   const [preview, setPreview] = useState(null); // object URL while uploading
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  // The cropped photo whose upload failed on the way, kept so "Try again"
+  // can resend it without making the student find the file again.
+  const [retryPhoto, setRetryPhoto] = useState(null);
 
   // Clear the success note after a moment; errors stay until the next try.
   useEffect(() => {
@@ -86,14 +101,43 @@ export function useAvatarUpload({ onUpdated, onUnauthorized }) {
   }, [preview]);
 
   /**
-   * A new photo was picked.
+   * Upload an already-cropped photo.
    *
-   * The preview appears the instant the file is chosen - from the file
-   * itself, which the circle's object-fit crops visually - and the square
-   * crop and upload run behind it with a spinner over the avatar. Whatever
-   * the server returns then replaces the preview, so the photo on screen is
-   * the one actually stored.
+   * The preview shows while it travels, and is always dropped at the end:
+   * on success the stored photo from the server takes its place; on failure
+   * the circle goes back to the old photo, because a preview left standing
+   * after a failed upload would look exactly like one that worked.
    */
+  const send = async (photo) => {
+    setError('');
+    setNotice('');
+    setRetryPhoto(null);
+    setPreview(URL.createObjectURL(photo));
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('image', photo, 'avatar.jpg');
+      // No Content-Type header: the browser sets multipart with its boundary.
+      const res = await authFetch('/api/me/avatar/', { method: 'PATCH', body: fd });
+      if (!res.ok) throw await errorFromResponse(res);
+      const data = await res.json();
+      setNotice('Profile picture updated');
+      onUpdated?.(data, 'updated');
+    } catch (err) {
+      const apiError = toApiError(err);
+      if (RETRYABLE.includes(apiError.kind)) {
+        setError(`Your photo wasn’t saved. ${apiError.message}`);
+        setRetryPhoto(photo);
+      } else {
+        setError(apiError.message);
+      }
+    } finally {
+      setPreview(null);
+      setBusy(false);
+    }
+  };
+
+  /** A new photo was picked: check it, crop it, send it. */
   const handlePicked = async (e) => {
     const file = e.target.files?.[0];
     // Reset so choosing the same file again still fires a change event.
@@ -102,9 +146,10 @@ export function useAvatarUpload({ onUpdated, onUnauthorized }) {
 
     setError('');
     setNotice('');
+    setRetryPhoto(null);
 
     if (!AVATAR_TYPES.includes(file.type)) {
-      setError('Please choose a JPEG, PNG, or WebP image.');
+      setError(`That file is a ${typeName(file)} file. Please choose a JPEG, PNG, or WebP image.`);
       return;
     }
     if (file.size > AVATAR_MAX_BYTES) {
@@ -112,62 +157,31 @@ export function useAvatarUpload({ onUpdated, onUnauthorized }) {
       return;
     }
 
-    setPreview(URL.createObjectURL(file));
-    setBusy(true);
+    let photo;
     try {
-      let upload;
-      try {
-        upload = await cropToSquare(file);
-      } catch {
-        setError("That image couldn't be read. Try a different file.");
-        setPreview(null);
-        return;
-      }
-
-      const fd = new FormData();
-      fd.append('image', upload, 'avatar.jpg');
-      // No Content-Type header: the browser sets multipart with its boundary.
-      const res = await authFetch('/api/me/avatar/', { method: 'PATCH', body: fd });
-      if (res.status === 401) {
-        onUnauthorized?.();
-        return;
-      }
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(friendlySummary(data, "We couldn't update your photo. Please try again."));
-        setPreview(null);
-        return;
-      }
-      setPreview(null);
-      setNotice('Profile picture updated');
-      onUpdated?.(data, 'updated');
+      photo = await cropToSquare(file);
     } catch {
-      setError(NETWORK_ERROR);
-      setPreview(null);
-    } finally {
-      setBusy(false);
+      setError("That image couldn't be opened. It may be damaged - try a different photo.");
+      return;
     }
+    await send(photo);
   };
+
+  const retry = () => (retryPhoto ? send(retryPhoto) : undefined);
 
   const remove = async () => {
     setError('');
     setNotice('');
+    setRetryPhoto(null);
     setBusy(true);
     try {
       const res = await authFetch('/api/me/avatar/', { method: 'DELETE' });
-      if (res.status === 401) {
-        onUnauthorized?.();
-        return;
-      }
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(friendlySummary(data, "We couldn't remove your photo. Please try again."));
-        return;
-      }
+      if (!res.ok) throw await errorFromResponse(res);
+      const data = await res.json();
       setNotice('Profile picture removed');
       onUpdated?.(data, 'removed');
-    } catch {
-      setError(NETWORK_ERROR);
+    } catch (err) {
+      setError(`Your photo wasn’t removed. ${toApiError(err).message}`);
     } finally {
       setBusy(false);
     }
@@ -179,6 +193,8 @@ export function useAvatarUpload({ onUpdated, onUnauthorized }) {
     busy,
     error,
     notice,
+    canRetry: Boolean(retryPhoto),
+    retry,
     handlePicked,
     remove,
     choose: () => inputRef.current?.click(),
@@ -243,9 +259,17 @@ export function AvatarStatus({ upload, className = '' }) {
           </p>
         )}
       </div>
-      {upload.error && (
-        <p role="alert" className="text-xs font-medium" style={{ color: '#B91C1C' }}>
+      {upload.error && !upload.busy && (
+        <p role="alert" className="ts-field-error">
           {upload.error}
+          {upload.canRetry && (
+            <>
+              {' '}
+              <button type="button" onClick={upload.retry} className="ts-link font-semibold">
+                Try again
+              </button>
+            </>
+          )}
         </p>
       )}
     </div>

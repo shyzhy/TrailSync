@@ -34,7 +34,16 @@ from .models import (
     TransactionType,
     User,
 )
-from .activation import activation_token, send_activation_email, user_from_uid
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+
+from .account_links import (
+    activation_token,
+    password_reset_token,
+    send_activation_email,
+    send_password_reset_email,
+    user_from_uid,
+)
 from .serializers import (
     ONBOARDING_STEPS,
     ActivateAccountSerializer,
@@ -50,6 +59,9 @@ from .serializers import (
     RecentFormRequestSerializer,
     RegisterSerializer,
     ResendActivationSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetLinkSerializer,
+    PasswordResetRequestSerializer,
     RegistrarQueueRowSerializer,
     RegistrarRecentSubmissionSerializer,
     RegistrarReleasedRowSerializer,
@@ -299,7 +311,9 @@ class ResendActivationView(APIView):
             .first()
         )
         if user is not None:
-            send_activation_email(user)
+            # Background, for the same timing reason as password reset: the
+            # answer must not take longer only when the account exists.
+            send_activation_email(user, background=True)
 
         return Response(
             {
@@ -309,6 +323,121 @@ class ResendActivationView(APIView):
                 )
             }
         )
+
+
+PASSWORD_RESET_SENT = (
+    "If an account exists for this email, we've sent a reset link. "
+    "It can take a minute or two to arrive."
+)
+
+
+class PasswordResetRequestView(APIView):
+    """POST /api/auth/password-reset/ {email} - email a reset link if the account exists.
+
+    The answer is identical, word for word and in timing, whether or not the
+    address is registered: the email goes out on a background thread, so the
+    response never waits on the mail server only for real accounts. One flow
+    for students and staff alike - resetting a password doesn't depend on role.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_reset"
+
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = (
+            User.objects.filter(email__iexact=serializer.validated_data["email"].strip(), status="Active")
+            .select_related("role")
+            .first()
+        )
+        if user is not None and user.has_usable_password():
+            send_password_reset_email(user)
+        return Response({"detail": PASSWORD_RESET_SENT})
+
+
+def _reset_link_user(serializer):
+    """(user, None) for a usable reset link, or (None, error Response).
+
+    Expired and already-used links are reported the same way on purpose:
+    both mean "ask for a new one", and a used link fails the signature check
+    (the password it was signed over has changed), so the two can't be told
+    apart honestly anyway.
+    """
+    user = user_from_uid(serializer.validated_data["uid"])
+    result = password_reset_token.verify(user, serializer.validated_data["token"]) if user else "invalid"
+    if result != "ok":
+        return None, Response(
+            {"code": result, "detail": "This reset link has expired or already been used."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return user, None
+
+
+class PasswordResetValidateView(APIView):
+    """POST /api/auth/password-reset/validate/ {uid, token} - is this link still good?
+
+    Asked when the reset page opens, so someone with a dead link is told so
+    straight away instead of after choosing and typing a new password.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_reset_confirm"
+
+    def post(self, request):
+        serializer = PasswordResetLinkSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"code": "invalid", "detail": "This reset link has expired or already been used."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        _, error = _reset_link_user(serializer)
+        return error or Response({"valid": True})
+
+
+class PasswordResetConfirmView(APIView):
+    """POST /api/auth/password-reset/confirm/ {uid, token, new_password, confirm_new_password}.
+
+    Sets the new password and deliberately does NOT sign the person in: they
+    log in fresh with it, which is also the moment they find out it works.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_reset_confirm"
+
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user, error = _reset_link_user(serializer)
+        if error:
+            return error
+
+        data = serializer.validated_data
+        if data["new_password"] != data["confirm_new_password"]:
+            return Response(
+                {"confirm_new_password": ["Passwords don't match."]}, status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            validate_password(data["new_password"], user)
+        except DjangoValidationError as exc:
+            return Response({"new_password": list(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(data["new_password"])
+        fields = ["password"]
+        # Opening this link proved they read that inbox - the same thing the
+        # activation link proves - so an unconfirmed account is confirmed too,
+        # rather than resetting the password only to be refused at login.
+        if not user.email_verified:
+            user.email_verified = True
+            user.email_verified_at = timezone.now()
+            fields += ["email_verified", "email_verified_at"]
+        user.save(update_fields=fields)
+
+        is_staff = bool(user.role_id and user.role.role_name == Role.RoleName.REGISTRAR)
+        return Response({"detail": "Your password has been changed.", "login": "staff" if is_staff else "student"})
 
 
 # What a filed request was made under. Year level moves on every year and
@@ -1359,8 +1488,9 @@ def _wrong_state(form_request, expected_label):
     return Response(
         {
             "detail": (
-                f"This request is at {form_request.get_request_status_display()} and "
-                f"cannot take this action. Expected: {expected_label}."
+                f"This request has already moved on - it is now at "
+                f"\"{form_request.get_request_status_display()}\", so this step no longer applies. "
+                f"The page has been refreshed to show what can be done next."
             ),
             "request_status": form_request.request_status,
         },

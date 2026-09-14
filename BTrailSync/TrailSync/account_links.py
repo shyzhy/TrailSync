@@ -1,0 +1,187 @@
+"""Emailed account links: confirming an address, and resetting a password.
+
+One mechanism for both. Nothing about a link is stored in the database: each
+token is an HMAC signed with SECRET_KEY over a few account fields plus a
+timestamp - Django's password-reset token scheme - with its own salt per
+purpose, so an activation token can never reset a password or the reverse.
+
+What goes into each signature is what makes the link single-use:
+  activation - the verified flag, so the link dies once it has been used
+  reset      - the password hash, so the link dies once the password changes
+"""
+import logging
+import threading
+from datetime import timedelta
+
+from django.conf import settings
+from django.contrib.auth.tokens import PasswordResetTokenGenerator
+from django.core.mail import EmailMultiAlternatives
+from django.db import connection
+from django.template.loader import render_to_string
+from django.utils.crypto import constant_time_compare
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import base36_to_int, urlsafe_base64_decode, urlsafe_base64_encode
+
+from .models import Role, User
+
+logger = logging.getLogger(__name__)
+
+
+class TimedLinkTokenGenerator(PasswordResetTokenGenerator):
+    """Django's token scheme, with its own timeout and a reason on failure."""
+
+    timeout = timedelta(hours=1)
+    timeout_text = "1 hour"
+
+    def verify(self, user, token):
+        """'ok', 'expired' or 'invalid'.
+
+        Django's own check_token answers False for both a forged token and a
+        genuine-but-old one. Those need different pages, so the checks run
+        here in order: signature first, then age. A tampered token can
+        therefore never be reported as merely expired.
+        """
+        if not (user and token):
+            return "invalid"
+        try:
+            ts_b36, _ = token.split("-")
+            ts = base36_to_int(ts_b36)
+        except ValueError:
+            return "invalid"
+
+        for secret in [self.secret, *self.secret_fallbacks]:
+            if constant_time_compare(self._make_token_with_timestamp(user, ts, secret), token):
+                break
+        else:
+            return "invalid"
+
+        if (self._num_seconds(self._now()) - ts) > self.timeout.total_seconds():
+            return "expired"
+        return "ok"
+
+
+class EmailActivationTokenGenerator(TimedLinkTokenGenerator):
+    # Unchanged from when this lived in activation.py: changing the salt
+    # would break every confirmation link already sitting in an inbox.
+    key_salt = "TrailSync.activation.EmailActivationTokenGenerator"
+    # Long enough that "I'll do it tonight" still works.
+    timeout = timedelta(hours=24)
+    timeout_text = "24 hours"
+
+    def _make_hash_value(self, user, timestamp):
+        return f"{user.pk}{user.email}{int(bool(user.email_verified))}{timestamp}"
+
+
+class PasswordResetLinkTokenGenerator(TimedLinkTokenGenerator):
+    key_salt = "TrailSync.account_links.PasswordResetLinkTokenGenerator"
+    # Short: a reset link is a key to the account for as long as it works.
+    timeout = timedelta(hours=1)
+    timeout_text = "1 hour"
+
+    def _make_hash_value(self, user, timestamp):
+        # The stored password hash changes the moment the reset succeeds, so
+        # the same link can never be used twice. The email is included so a
+        # link sent before an address change stops working.
+        login = "" if user.last_login is None else user.last_login.replace(microsecond=0, tzinfo=None)
+        return f"{user.pk}{user.password}{login}{user.email}{timestamp}"
+
+
+activation_token = EmailActivationTokenGenerator()
+password_reset_token = PasswordResetLinkTokenGenerator()
+
+
+def user_from_uid(uid):
+    """The User a link's uid names, or None for anything malformed."""
+    try:
+        pk = force_str(urlsafe_base64_decode(uid))
+        return User.objects.get(pk=pk)
+    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+        return None
+
+
+def _uid(user):
+    return urlsafe_base64_encode(force_bytes(user.pk))
+
+
+def activation_link(user):
+    # Points at the React app, not the API: the page POSTs the token. A plain
+    # GET that acted on arrival would also be triggered by the link scanners
+    # many mail providers run over incoming messages.
+    return f"{settings.FRONTEND_BASE_URL}/activate?uid={_uid(user)}&token={activation_token.make_token(user)}"
+
+
+def password_reset_link(user):
+    # Which login the reset page should send them back to is decided here
+    # from the account itself, never from anything the requester sent.
+    is_staff = bool(user.role_id and user.role.role_name == Role.RoleName.REGISTRAR)
+    return (
+        f"{settings.FRONTEND_BASE_URL}/reset-password?uid={_uid(user)}"
+        f"&token={password_reset_token.make_token(user)}&from={'staff' if is_staff else 'student'}"
+    )
+
+
+def _build(template, subject, user, link, expires):
+    context = {
+        "link": link,
+        "expires": expires,
+        "logo_url": f"{settings.FRONTEND_BASE_URL}/trailsync-logo.png",
+        "email": user.email,
+    }
+    message = EmailMultiAlternatives(
+        subject=subject,
+        body=render_to_string(f"emails/{template}.txt", context),
+        from_email=None,  # DEFAULT_FROM_EMAIL
+        to=[user.email],
+    )
+    message.attach_alternative(render_to_string(f"emails/{template}.html", context), "text/html")
+    return message
+
+
+def _send_in_background(build):
+    """Build and send an email without making the HTTP response wait for it.
+
+    For the "we'll email you if that account exists" endpoints this is a
+    security property, not just speed: if the response took longer when an
+    account exists - an SMTP round trip, or even just rendering the templates
+    and signing the token - the timing alone would tell anyone which
+    addresses are registered, exactly what the identical wording is there to
+    hide. So everything that only happens for a real account happens here,
+    after the response has gone.
+    """
+
+    def run():
+        message = None
+        try:
+            message = build()
+            message.send()
+        except Exception:  # noqa: BLE001 - a failed send must be logged, never raised into a dead thread
+            logger.exception("Could not send %r", getattr(message, "subject", "account email"))
+        finally:
+            connection.close()
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def send_activation_email(user, background=False):
+    """Send (or re-send) the confirmation email. Each send mints a fresh link."""
+    def build():
+        return _build(
+            "activation", "Confirm your TrailSync account", user, activation_link(user), activation_token.timeout_text
+        )
+
+    if background:
+        _send_in_background(build)
+    else:
+        build().send()
+
+
+def send_password_reset_email(user):
+    _send_in_background(
+        lambda: _build(
+            "password_reset",
+            "Reset your TrailSync password",
+            user,
+            password_reset_link(user),
+            password_reset_token.timeout_text,
+        )
+    )

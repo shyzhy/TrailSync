@@ -5,6 +5,7 @@ import {
   BusyLabel,
   DownloadIcon,
   EmptyState,
+  ErrorState,
   FONT_SANS,
   FONT_SERIF,
   RegistrarMobileHeader,
@@ -15,6 +16,7 @@ import {
   Toast,
 } from './trailsyncUI.jsx';
 import { STAFF_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { errorFromResponse, toApiError } from '../lib/api.js';
 
 const LOGIN_PATH = STAFF_LOGIN_PATH;
 
@@ -70,7 +72,8 @@ export default function ReleasedDocumentsPage() {
 
   const [rows, setRows] = useState([]);
   const [pageInfo, setPageInfo] = useState({ count: 0, start: 0, end: 0, next: null, previous: null });
-  const [exportState, setExportState] = useState(null); // null | 'working' | 'error'
+  const [exportState, setExportState] = useState(null); // null | 'working'
+  const [loadError, setLoadError] = useState(null);
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
@@ -93,6 +96,7 @@ export default function ReleasedDocumentsPage() {
 
   const load = useCallback(async () => {
     setStatus('loading');
+    setLoadError(null);
     try {
       const params = filterParams();
       params.set('page', String(page));
@@ -102,13 +106,8 @@ export default function ReleasedDocumentsPage() {
         authFetch(`/api/registrar/released/?${params}`),
       ]);
 
-      if ([meRes, listRes].some((r) => r.status === 401)) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
-        return;
-      }
-      if ([meRes, listRes].some((r) => r.status === 403)) throw new Error('forbidden');
-      if (!meRes.ok || !listRes.ok) throw new Error('failed');
+      const failed = [meRes, listRes].find((r) => !r.ok);
+      if (failed) throw await errorFromResponse(failed);
 
       const [meData, listData] = await Promise.all([meRes.json(), listRes.json()]);
       setMe(meData);
@@ -121,7 +120,8 @@ export default function ReleasedDocumentsPage() {
         previous: listData.previous,
       });
       setStatus('ready');
-    } catch {
+    } catch (error) {
+      setLoadError(toApiError(error));
       setStatus('error');
     }
   }, [filterParams, page]);
@@ -151,12 +151,7 @@ export default function ReleasedDocumentsPage() {
     setExportState('working');
     try {
       const res = await authFetch(`/api/registrar/released/export/?${filterParams()}`);
-      if (res.status === 401) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
-        return;
-      }
-      if (!res.ok) throw new Error(String(res.status));
+      if (!res.ok) throw await errorFromResponse(res);
 
       const url = URL.createObjectURL(await res.blob());
       const anchor = document.createElement('a');
@@ -168,8 +163,9 @@ export default function ReleasedDocumentsPage() {
       setTimeout(() => URL.revokeObjectURL(url), 10000);
       setExportState(null);
       setToast({ message: `Downloaded ${pageInfo.count} record${pageInfo.count === 1 ? '' : 's'} as a spreadsheet.` });
-    } catch {
-      setExportState('error');
+    } catch (error) {
+      setExportState(null);
+      setToast({ message: `We couldn’t create the file. ${toApiError(error).message}`, tone: 'error' });
     }
   };
 
@@ -201,7 +197,7 @@ export default function ReleasedDocumentsPage() {
           <button
             type="button"
             onClick={exportToExcel}
-            disabled={exportState === 'working' || (status === 'ready' && rows.length === 0)}
+            disabled={exportState === 'working' || status === 'error' || (status === 'ready' && rows.length === 0)}
             className="ts-btn-primary flex shrink-0 items-center justify-center gap-2 px-5 py-3 text-sm font-medium"
           >
             <BusyLabel busy={exportState === 'working'} busyLabel="Preparing…">
@@ -210,12 +206,6 @@ export default function ReleasedDocumentsPage() {
             </BusyLabel>
           </button>
         </div>
-
-        {exportState === 'error' && (
-          <div role="alert" className="ts-banner ts-banner-error mt-5 px-4 py-3 text-sm">
-            We couldn&rsquo;t create the file just now. Please try again.
-          </div>
-        )}
 
         {/* Two filters, not five. */}
         <div className="ts-card mt-6 p-5">
@@ -274,12 +264,7 @@ export default function ReleasedDocumentsPage() {
         </div>
 
         {status === 'error' && (
-          <div className="ts-banner ts-banner-error mt-6 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>We couldn&rsquo;t load the records. Please check your internet connection.</span>
-            <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
-              Try again
-            </button>
-          </div>
+          <ErrorState className="mt-6" error={loadError} title="We couldn&rsquo;t load the records" onRetry={load} />
         )}
 
         {status === 'loading' && (

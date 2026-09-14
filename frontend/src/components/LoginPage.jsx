@@ -2,15 +2,24 @@ import { useEffect, useState } from 'react';
 import {
   API_BASE_URL,
   BusyLabel,
+  CheckIcon,
   EyeIcon,
   EyeOffIcon,
+  FieldError,
   FONT_SERIF,
   GlassScene,
   WarningIcon,
 } from './trailsyncUI.jsx';
 import ResendEmailButton from './ResendEmailButton.jsx';
-import { STAFF_LOGIN_PATH, STUDENT_LOGIN_PATH, getAccessToken, getStoredUser, saveSession } from '../lib/auth.js';
-import { NETWORK_ERROR, SERVER_ERROR, friendlyMessage } from '../lib/friendlyErrors.js';
+import {
+  STAFF_LOGIN_PATH,
+  STUDENT_LOGIN_PATH,
+  getAccessToken,
+  getStoredUser,
+  saveSession,
+  takeFlash,
+} from '../lib/auth.js';
+import { NETWORK_ERROR, SERVER_ERROR, SESSION_ENDED, friendlyMessage } from '../lib/friendlyErrors.js';
 
 /**
  * Two login pages sharing one form.
@@ -30,8 +39,6 @@ const AUDIENCES = {
     submitLabel: 'Log in to your account',
     // Students can sign in with either, so the message names both.
     wrongDetails: "That email, School ID number or password doesn't match our records.",
-    forgot:
-      'You can’t reset your password online yet. Please ask at Window 6 in the Registrar’s Office, and bring your school ID.',
     otherPortal: {
       title: 'This is a staff account',
       body: 'Registrar staff log in through the Staff Portal instead.',
@@ -46,7 +53,6 @@ const AUDIENCES = {
     placeholder: 'e.g. maria.santos@ustp.edu.ph',
     submitLabel: 'Log in to Staff Portal',
     wrongDetails: "That email or password doesn't match our records.",
-    forgot: 'Staff passwords are reset by your administrator. Contact them and they can set a new one for you.',
     otherPortal: {
       title: 'This is a student account',
       body: 'Students and alumni log in on the student page instead.',
@@ -94,6 +100,24 @@ function LockIcon() {
   );
 }
 
+// Carried over a redirect by lib/auth.js's setFlash. Read once per page load:
+// a module-level cache, because React's development double-render would
+// otherwise consume it on the first render and show nothing on the second.
+let arrivalFlash;
+function readArrivalFlash() {
+  if (arrivalFlash === undefined) arrivalFlash = takeFlash();
+  return arrivalFlash;
+}
+
+const ARRIVAL_NOTICES = {
+  session_expired: { kind: 'info', title: SESSION_ENDED },
+  password_reset: {
+    kind: 'success',
+    title: 'Your password has been changed.',
+    body: 'Log in with your new password.',
+  },
+};
+
 function SwitchIcon() {
   return (
     <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
@@ -123,6 +147,8 @@ function LoginNotice({ notice }) {
     unverified: { className: 'ts-notice-pending', Icon: MailIcon, role: 'status' },
     suspended: { className: 'ts-notice-suspended', Icon: LockIcon, role: 'alert' },
     'other-portal': { className: 'ts-notice-info', Icon: SwitchIcon, role: 'status' },
+    info: { className: 'ts-notice-info', Icon: ClockIcon, role: 'status' },
+    success: { className: 'ts-notice-success', Icon: CheckIcon, role: 'status' },
     error: { className: 'ts-notice-wrong', Icon: WarningIcon, role: 'alert' },
   };
   const { className, Icon, role } = styles[notice.kind] || styles.error;
@@ -154,8 +180,9 @@ function LoginForm({ audience }) {
   const [remember, setRemember] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
-  const [notice, setNotice] = useState(null);
-  const [forgotOpen, setForgotOpen] = useState(false);
+  // Opens with "your session expired" or "password changed" when that's how
+  // the person got here.
+  const [notice, setNotice] = useState(() => ARRIVAL_NOTICES[readArrivalFlash()] || null);
 
   // Already signed in on this side? Skip the form. The stored user is only a
   // hint: if its session has expired, the destination page gets a 401,
@@ -274,11 +301,7 @@ function LoginForm({ audience }) {
           placeholder={config.placeholder}
           className={`ts-input w-full px-3.5 py-2.5 text-sm ${errors.identifier || wrong ? 'ts-input-error' : ''}`}
         />
-        {errors.identifier && (
-          <p id="identifier-error" className="ts-error-text mt-1.5 text-sm">
-            {errors.identifier}
-          </p>
-        )}
+        <FieldError id="identifier">{errors.identifier}</FieldError>
       </div>
 
       <div>
@@ -286,14 +309,9 @@ function LoginForm({ audience }) {
           <label htmlFor="password" className="ts-ink block text-sm font-medium">
             Password
           </label>
-          <button
-            type="button"
-            onClick={() => setForgotOpen((o) => !o)}
-            aria-expanded={forgotOpen}
-            className="ts-link -my-2 py-2 text-sm"
-          >
+          <a href={`/forgot-password?from=${audience}`} className="ts-link -my-2 py-2 text-sm">
             Forgot password?
-          </button>
+          </a>
         </div>
         <div className="relative">
           <input
@@ -322,12 +340,7 @@ function LoginForm({ audience }) {
             {showPassword ? <EyeOffIcon /> : <EyeIcon />}
           </button>
         </div>
-        {errors.password && (
-          <p id="password-error" className="ts-error-text mt-1.5 text-sm">
-            {errors.password}
-          </p>
-        )}
-        {forgotOpen && <p className="ts-info-note mt-2 px-3.5 py-2.5 text-sm">{config.forgot}</p>}
+        <FieldError id="password">{errors.password}</FieldError>
       </div>
 
       {notice && <LoginNotice notice={notice} />}

@@ -57,6 +57,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Last, so it sees any exception the views above didn't handle.
+    'TrailSync.middleware.ApiErrorMiddleware',
 ]
 
 ROOT_URLCONF = 'BTrailSync.urls'
@@ -133,6 +135,8 @@ REST_FRAMEWORK = {
         'register': '10/hour',
         'activation_resend': '5/hour',
         'activation': '30/hour',
+        'password_reset': '5/hour',
+        'password_reset_confirm': '20/hour',
     },
 }
 

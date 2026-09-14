@@ -8,6 +8,7 @@ import {
   greetingForNow,
   Avatar,
   EmptyState,
+  ErrorState,
   InboxIcon,
   ListRowSkeleton,
   SkeletonGroup,
@@ -16,6 +17,7 @@ import {
 } from './trailsyncUI.jsx';
 import { STAFF_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 import { STATUS } from '../lib/requestStatus.js';
+import { errorFromResponse, toApiError } from '../lib/api.js';
 import ReleaseCalendar from './ReleaseCalendar.jsx';
 
 /** "15:00" -> "3:00 PM". Staff read a clock, not a 24-hour timestamp. */
@@ -59,6 +61,9 @@ export default function RegistrarDashboardPage() {
   const [recentSubmissions, setRecentSubmissions] = useState(null);
   const [todaysPickups, setTodaysPickups] = useState(null);
   const [flagged, setFlagged] = useState([]);
+  const [loadError, setLoadError] = useState(null);
+  const [flaggedError, setFlaggedError] = useState(null);
+  const [calendarError, setCalendarError] = useState(null);
   const [calendarCounts, setCalendarCounts] = useState({});
   const [calendarMonth] = useState(() => {
     const now = new Date();
@@ -68,15 +73,18 @@ export default function RegistrarDashboardPage() {
   // The mini calendar loads on its own for the same reason the fraud alert
   // does: a slow or failed month shouldn't hold up the rest of the dashboard.
   const loadCalendar = useCallback(async () => {
+    setCalendarError(null);
     try {
       const res = await authFetch(
         `/api/registrar/release-calendar/?year=${calendarMonth.year}&month=${calendarMonth.month + 1}`,
       );
-      if (!res.ok) return;
+      if (!res.ok) throw await errorFromResponse(res);
       const data = await res.json();
       setCalendarCounts(Object.fromEntries((data.days || []).map((d) => [d.date, d.count])));
-    } catch {
-      // The grid still draws; it just has no numbers until the next load.
+    } catch (error) {
+      // The grid still draws, but blank days would read as "no pickups", so
+      // say plainly that the numbers didn't load.
+      setCalendarError(toApiError(error));
     }
   }, [calendarMonth]);
 
@@ -85,16 +93,20 @@ export default function RegistrarDashboardPage() {
   // hide a flag. Staff-only: the endpoint is IsApprovedRegistrarStaff, and
   // duplicate_flag appears on no student-facing serializer.
   const loadFlagged = useCallback(async () => {
+    setFlaggedError(null);
     try {
       const res = await authFetch('/api/registrar/dashboard/flagged/');
-      if (res.ok) setFlagged(await res.json());
-    } catch {
-      // Left as-is; the next load tries again.
+      if (!res.ok) throw await errorFromResponse(res);
+      setFlagged(await res.json());
+    } catch (error) {
+      // Never silent: no banner must mean "nothing flagged", not "couldn't check".
+      setFlaggedError(toApiError(error));
     }
   }, []);
 
   const load = useCallback(async () => {
     setStatus('loading');
+    setLoadError(null);
     try {
       const [meRes, summaryRes, recentRes, pickupsRes] = await Promise.all([
         authFetch('/api/me/'),
@@ -103,20 +115,11 @@ export default function RegistrarDashboardPage() {
         authFetch('/api/registrar/dashboard/todays-pickups/'),
       ]);
 
-      if ([meRes, summaryRes, recentRes, pickupsRes].some((r) => r.status === 401)) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
-        return;
-      }
-      // 403 here means an authenticated-but-non-staff (or not-yet-approved)
-      // token hit a registrar-only endpoint — the API is the real gate;
-      // this just gives a clear message instead of a half-rendered page.
-      if ([meRes, summaryRes, recentRes, pickupsRes].some((r) => r.status === 403)) {
-        throw new Error('forbidden');
-      }
-      if (!meRes.ok || !summaryRes.ok || !recentRes.ok || !pickupsRes.ok) {
-        throw new Error('One or more requests failed.');
-      }
+      // A 403 means a non-staff (or not-yet-approved) account reached a
+      // registrar-only endpoint; the API is the real gate, and ErrorState
+      // says so plainly instead of drawing a half-empty dashboard.
+      const failed = [meRes, summaryRes, recentRes, pickupsRes].find((r) => !r.ok);
+      if (failed) throw await errorFromResponse(failed);
 
       const [meData, summaryData, recentData, pickupsData] = await Promise.all([
         meRes.json(),
@@ -130,7 +133,8 @@ export default function RegistrarDashboardPage() {
       setRecentSubmissions(recentData);
       setTodaysPickups(pickupsData);
       setStatus('ready');
-    } catch {
+    } catch (error) {
+      setLoadError(toApiError(error));
       setStatus('error');
     }
   }, []);
@@ -181,13 +185,15 @@ export default function RegistrarDashboardPage() {
           <span className="ts-date-badge shrink-0">{todayLong()}</span>
         </div>
 
-        {status === 'error' && (
-          <div className="ts-banner ts-banner-error mb-8 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>We couldn&rsquo;t load the dashboard. Please check your internet connection.</span>
-            <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
-              Try again
-            </button>
-          </div>
+        {flaggedError && (
+          <ErrorState
+            inline
+            className="mb-8"
+            error={flaggedError}
+            title="We couldn&rsquo;t check for flagged requests"
+            message="Possible duplicates may not be shown until this loads."
+            onRetry={loadFlagged}
+          />
         )}
 
         {flagged.length > 0 && (
@@ -219,7 +225,14 @@ export default function RegistrarDashboardPage() {
           </div>
         )}
 
+        {/* When the dashboard fails to load, the counts and lists are replaced
+            by one error state: zeros here would tell staff there's no work. */}
+        {status === 'error' && (
+          <ErrorState error={loadError} title="We couldn&rsquo;t load the dashboard" onRetry={load} />
+        )}
+
         {/* Stat cards */}
+        {status !== 'error' && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {status === 'loading' ? (
             <>
@@ -264,9 +277,11 @@ export default function RegistrarDashboardPage() {
             </>
           )}
         </div>
+        )}
 
         {/* Recent Submissions + Today's Release Slots */}
         <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-5">
+          {status !== 'error' && (
           <div className="lg:col-span-3">
             <div className="flex items-center justify-between">
               <h2 className="ts-ink text-lg font-semibold" style={FONT_SERIF}>
@@ -328,14 +343,9 @@ export default function RegistrarDashboardPage() {
                   ))}
                 </ul>
               )}
-
-              {status === 'error' && (
-                <div className="px-5 py-8 text-center">
-                  <p className="ts-soft text-sm">We couldn&rsquo;t load the newest requests.</p>
-                </div>
-              )}
             </div>
           </div>
+          )}
 
           <div className="lg:col-span-2">
             {/* The month around today, so "today's pickups" below has
@@ -358,8 +368,20 @@ export default function RegistrarDashboardPage() {
                   window.location.href = `/registrar/calendar?date=${iso}`;
                 }}
               />
+              {calendarError && (
+                <ErrorState
+                  inline
+                  className="mt-3"
+                  error={calendarError}
+                  title="Pickup counts didn&rsquo;t load"
+                  message="Days may look empty."
+                  onRetry={loadCalendar}
+                />
+              )}
             </div>
 
+            {status !== 'error' && (
+            <>
             <div className="mt-8 flex items-center justify-between">
               <h2 className="ts-ink text-lg font-semibold" style={FONT_SERIF}>
                 Today&rsquo;s pickups
@@ -414,13 +436,9 @@ export default function RegistrarDashboardPage() {
                   })}
                 </ul>
               )}
-
-              {status === 'error' && (
-                <div className="px-5 py-8 text-center">
-                  <p className="ts-soft text-sm">We couldn&rsquo;t load today&rsquo;s pickups.</p>
-                </div>
-              )}
             </div>
+            </>
+            )}
           </div>
         </div>
       </main>

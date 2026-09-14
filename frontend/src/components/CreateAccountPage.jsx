@@ -1,13 +1,7 @@
 import { useState } from 'react';
-import {
-  API_BASE_URL,
-  BusyLabel,
-  EyeIcon,
-  EyeOffIcon,
-  FONT_SERIF,
-  GlassScene,
-} from './trailsyncUI.jsx';
+import { API_BASE_URL, BusyLabel, FONT_SERIF, GlassScene } from './trailsyncUI.jsx';
 import ResendEmailButton from './ResendEmailButton.jsx';
+import PasswordField from './PasswordField.jsx';
 import { STUDENT_LOGIN_PATH } from '../lib/auth.js';
 import { NETWORK_ERROR, friendlyMessage } from '../lib/friendlyErrors.js';
 
@@ -16,19 +10,6 @@ const LOGIN_PATH = STUDENT_LOGIN_PATH;
 // Any well-formed address - Gmail included. There is deliberately no USTP
 // domain rule: alumni in particular may no longer have a school mailbox.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-
-function passwordStrength(pw) {
-  if (!pw) return null;
-  let score = 0;
-  if (pw.length >= 8) score += 1;
-  if (pw.length >= 12) score += 1;
-  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score += 1;
-  if (/\d/.test(pw)) score += 1;
-  if (/[^A-Za-z0-9]/.test(pw)) score += 1;
-  if (score <= 2) return { label: 'Weak', className: 'ts-soft' };
-  if (score <= 3) return { label: 'Medium', className: 'ts-gold' };
-  return { label: 'Strong', className: 'ts-sage' };
-}
 
 function EnvelopeIcon() {
   return (
@@ -72,45 +53,6 @@ function Journey({ current }) {
   );
 }
 
-function PasswordField({ id, label, value, onChange, error, describedBy, placeholder, autoComplete = 'new-password' }) {
-  const [show, setShow] = useState(false);
-  return (
-    <div>
-      <label htmlFor={id} className="ts-ink mb-1.5 block text-sm font-medium">
-        {label}
-      </label>
-      <div className="relative">
-        <input
-          id={id}
-          name={id}
-          type={show ? 'text' : 'password'}
-          autoComplete={autoComplete}
-          value={value}
-          onChange={onChange}
-          aria-invalid={Boolean(error)}
-          aria-describedby={error ? `${id}-error` : describedBy}
-          placeholder={placeholder}
-          className={`ts-input w-full py-2.5 pl-3.5 pr-12 text-sm ${error ? 'ts-input-error' : ''}`}
-        />
-        <button
-          type="button"
-          onClick={() => setShow((s) => !s)}
-          aria-label={show ? 'Hide password' : 'Show password'}
-          aria-pressed={show}
-          className="ts-eye-btn"
-        >
-          {show ? <EyeOffIcon /> : <EyeIcon />}
-        </button>
-      </div>
-      {error && (
-        <p id={`${id}-error`} className="ts-error-text mt-1.5 text-sm">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
 /**
  * /create-account — an email and a password, nothing else.
  *
@@ -126,7 +68,6 @@ export default function CreateAccountPage() {
   const [errors, setErrors] = useState({});
   const [sentTo, setSentTo] = useState(null);
 
-  const strength = passwordStrength(password);
 
   const clear = (key) => setErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
 
@@ -278,7 +219,7 @@ export default function CreateAccountPage() {
             className={`ts-input w-full px-3.5 py-2.5 text-sm ${errors.email ? 'ts-input-error' : ''}`}
           />
           {errors.email ? (
-            <p id="email-error" className="ts-error-text mt-1.5 text-sm">
+            <p id="email-error" className="ts-field-error">
               {errors.email}
               {/already an account/i.test(errors.email) && (
                 <>
@@ -296,25 +237,18 @@ export default function CreateAccountPage() {
           )}
         </div>
 
-        <div>
-          <PasswordField
-            id="password"
-            label="Password"
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              clear('password');
-            }}
-            error={errors.password}
-            describedBy="password-strength"
-            placeholder="At least 8 characters"
-          />
-          {!errors.password && strength && (
-            <p id="password-strength" className="ts-soft mt-1.5 text-xs">
-              Password strength: <span className={`${strength.className} font-medium`}>{strength.label}</span>
-            </p>
-          )}
-        </div>
+        <PasswordField
+          id="password"
+          label="Password"
+          value={password}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            clear('password');
+          }}
+          error={errors.password}
+          placeholder="At least 8 characters"
+          showStrength
+        />
 
         <PasswordField
           id="confirmPassword"

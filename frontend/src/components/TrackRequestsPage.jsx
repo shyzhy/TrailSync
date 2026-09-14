@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   EmptyState,
+  ErrorState,
   FONT_SERIF,
   SearchIcon,
   SkeletonGroup,
@@ -11,6 +12,7 @@ import StudentShell from './StudentShell.jsx';
 import TicketCard from './TicketCard.jsx';
 import { LIFECYCLE, STATUS, studentStatusLabel } from '../lib/requestStatus.js';
 import { STUDENT_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { errorFromResponse, toApiError } from '../lib/api.js';
 
 const LOGIN_PATH = STUDENT_LOGIN_PATH;
 
@@ -39,6 +41,7 @@ export default function TrackRequestsPage() {
   const [results, setResults] = useState([]);
   const [pageInfo, setPageInfo] = useState({ count: 0, start: 0, end: 0, next: null, previous: null });
   const [expandedId, setExpandedId] = useState(null);
+  const [loadError, setLoadError] = useState(null);
 
   // Debounce search input -> server query, and reset to page 1 whenever the
   // filter or the (debounced) search term changes, so a new search/filter
@@ -54,6 +57,7 @@ export default function TrackRequestsPage() {
 
   const load = useCallback(async () => {
     setStatus('loading');
+    setLoadError(null);
     try {
       const params = new URLSearchParams();
       if (activeFilter !== 'All') params.set('status', activeFilter);
@@ -61,13 +65,8 @@ export default function TrackRequestsPage() {
       params.set('page', String(page));
 
       const [meRes, listRes] = await Promise.all([authFetch('/api/me/'), authFetch(`/api/form-requests/?${params}`)]);
-
-      if ([meRes, listRes].some((r) => r.status === 401)) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
-        return;
-      }
-      if (!meRes.ok || !listRes.ok) throw new Error('One or more requests failed.');
+      const failed = [meRes, listRes].find((r) => !r.ok);
+      if (failed) throw await errorFromResponse(failed);
 
       const [meData, listData] = await Promise.all([meRes.json(), listRes.json()]);
       setMe(meData);
@@ -85,7 +84,8 @@ export default function TrackRequestsPage() {
         previous: listData.previous,
       });
       setStatus('ready');
-    } catch {
+    } catch (error) {
+      setLoadError(toApiError(error));
       setStatus('error');
     }
   }, [activeFilter, search, page, initialSearch]);
@@ -156,12 +156,7 @@ export default function TrackRequestsPage() {
         </div>
 
         {status === 'error' && (
-          <div className="ts-banner ts-banner-error mt-6 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>We couldn&rsquo;t load your requests. Please check your internet connection.</span>
-            <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
-              Try again
-            </button>
-          </div>
+          <ErrorState className="mt-6" error={loadError} title="We couldn&rsquo;t load your requests" onRetry={load} />
         )}
 
         <div className="mt-6 space-y-4">

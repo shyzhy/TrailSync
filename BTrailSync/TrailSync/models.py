@@ -261,6 +261,11 @@ class TransactionType(models.Model):
 
     name = models.CharField(max_length=150, unique=True)
     description = models.TextField(blank=True, null=True)
+    # Lets the Registrar pause a document (a form being revised, a service
+    # suspended) without deleting it and every request that references it.
+    # Unavailable types stay visible in the guide, marked as such, and the
+    # server refuses new requests for them.
+    is_available = models.BooleanField(default=True)
 
     # Shown on the Request a Form page as "You'll need: ..." once a document
     # type is picked, so students know what to prepare before they submit.

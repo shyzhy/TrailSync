@@ -815,6 +815,7 @@ class TransactionTypeSerializer(serializers.ModelSerializer):
             "pricing_unit",
             "common_purposes",
             "special_notes",
+            "is_available",
         ]
 
 
@@ -891,6 +892,43 @@ CERTIFICATION_SUBTYPES = [
 
 MAX_ATTACHMENTS = 5
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+BOARD_EXAM_PHOTO_BYTES = 5 * 1024 * 1024
+
+# Label -> the bytes a real file of that kind starts with. The file's own
+# name and Content-Type come from the uploader and prove nothing; its first
+# bytes do.
+FILE_SIGNATURES = {
+    "JPG": (b"\xff\xd8\xff",),
+    "PNG": (b"\x89PNG\r\n\x1a\n",),
+    "PDF": (b"%PDF-",),
+}
+BOARD_EXAM_PHOTO_TYPES = ("JPG", "PNG")
+ATTACHMENT_TYPES = ("PDF", "JPG", "PNG")
+
+
+def _human_list(items):
+    items = list(items)
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} or {items[-1]}"
+
+
+def check_upload(upload, allowed, max_bytes, label):
+    """Raise a plain-language ValidationError for a wrong type or oversize file.
+
+    Both messages say what IS accepted - the types and the actual limit - so
+    the fix is obvious without guessing.
+    """
+    limit_mb = max_bytes // (1024 * 1024)
+    if upload.size > max_bytes:
+        size_mb = upload.size / (1024 * 1024)
+        raise serializers.ValidationError(
+            f"{label} is {size_mb:.1f} MB. The limit is {limit_mb} MB."
+        )
+    head = upload.read(16)
+    upload.seek(0)
+    if not any(head.startswith(sig) for kind in allowed for sig in FILE_SIGNATURES[kind]):
+        raise serializers.ValidationError(
+            f"{label} isn't a {_human_list(allowed)} file. Please choose a {_human_list(allowed)}."
+        )
 
 
 def serialize_attachments(form_request):
@@ -955,10 +993,24 @@ class CreateFormRequestSerializer(serializers.Serializer):
     enforced, since a flat serializer field can't reach inside them.
     """
 
-    transaction_type = serializers.PrimaryKeyRelatedField(queryset=TransactionType.objects.all())
+    transaction_type = serializers.PrimaryKeyRelatedField(
+        queryset=TransactionType.objects.all(),
+        error_messages={"does_not_exist": "Please choose a document from the list."},
+    )
     form_data = serializers.CharField()
     proxy = serializers.CharField(required=False, allow_blank=True)
     board_exam_photo = serializers.FileField(required=False)
+
+    def validate_transaction_type(self, value):
+        if not value.is_available:
+            raise serializers.ValidationError("This document type isn't currently available for request.")
+        return value
+
+    def validate_board_exam_photo(self, value):
+        # Checked here and not only by the file picker's accept="": the
+        # endpoint can be called without the form.
+        check_upload(value, BOARD_EXAM_PHOTO_TYPES, BOARD_EXAM_PHOTO_BYTES, "The 2x2 photo")
+        return value
 
     # Attachments are NOT declared as a serializer field. They arrive as a
     # repeated multipart key, which only request.FILES.getlist can read - a
@@ -1081,12 +1133,14 @@ class CreateFormRequestSerializer(serializers.Serializer):
         if len(attachments) > MAX_ATTACHMENTS:
             errors["attachments"] = f"Attach at most {MAX_ATTACHMENTS} files."
         else:
-            oversized = [f.name for f in attachments if f.size > MAX_ATTACHMENT_BYTES]
-            if oversized:
-                limit_mb = MAX_ATTACHMENT_BYTES // (1024 * 1024)
-                errors["attachments"] = (
-                    f"These files are larger than {limit_mb}MB: {', '.join(oversized)}"
-                )
+            problems = []
+            for f in attachments:
+                try:
+                    check_upload(f, ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES, f"“{f.name}”")
+                except serializers.ValidationError as exc:
+                    problems.extend(str(d) for d in exc.detail)
+            if problems:
+                errors["attachments"] = " ".join(problems)
 
         proxy = attrs.get("proxy")
         if proxy is not None:
@@ -1219,6 +1273,24 @@ class RegisterSerializer(serializers.Serializer):
 class ActivateAccountSerializer(serializers.Serializer):
     uid = serializers.CharField()
     token = serializers.CharField()
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField(
+        error_messages={"invalid": "Please enter a valid email address, like juan@gmail.com."}
+    )
+
+
+class PasswordResetLinkSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+
+
+class PasswordResetConfirmSerializer(PasswordResetLinkSerializer):
+    new_password = serializers.CharField(write_only=True, error_messages={"blank": "Please choose a new password."})
+    confirm_new_password = serializers.CharField(
+        write_only=True, error_messages={"blank": "Please type your new password again."}
+    )
 
 
 class ResendActivationSerializer(serializers.Serializer):

@@ -5,6 +5,7 @@ import {
   Avatar,
   BellIcon,
   CloseIcon,
+  ErrorState,
   FONT_SANS,
   FONT_SERIF,
   LogoutIcon,
@@ -14,6 +15,7 @@ import {
   Toast,
 } from './trailsyncUI.jsx';
 import { authFetch, updateStoredUser } from '../lib/auth.js';
+import { errorFromResponse, toApiError } from '../lib/api.js';
 
 /**
  * The chrome every student page shares: the sidebar (tablet and desktop), a
@@ -85,10 +87,10 @@ export function markNotificationRead(id) {
 // Notification bell
 // ---------------------------------------------------------------------------
 
-function NotificationBell({ unreadCount, setUnreadCount }) {
+function NotificationBell({ unreadCount, setUnreadCount, notify }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState(null);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState(null); // the ApiError, when the list didn't load
   const [ringing, setRinging] = useState(false);
   const ref = useRef(null);
   const close = useCallback(() => setOpen(false), []);
@@ -112,20 +114,30 @@ function NotificationBell({ unreadCount, setUnreadCount }) {
     return () => clearTimeout(t);
   }, [unreadCount]);
 
+  const loadItems = useCallback(async () => {
+    setFailed(null);
+    try {
+      const res = await authFetch('/api/notifications/?page_size=5');
+      if (!res.ok) throw await errorFromResponse(res);
+      const data = await res.json();
+      setItems(data.results || []);
+    } catch (error) {
+      setFailed(toApiError(error));
+    }
+  }, []);
+
   useEffect(() => {
-    if (!open) return;
-    setFailed(false);
-    authFetch('/api/notifications/?page_size=5')
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((data) => setItems(data.results || []))
-      .catch(() => setFailed(true));
-  }, [open]);
+    if (open) loadItems();
+  }, [open, loadItems]);
 
   const markAll = async () => {
-    const res = await authFetch('/api/notifications/mark-all-read/', { method: 'POST' }).catch(() => null);
-    if (res?.ok) {
+    try {
+      const res = await authFetch('/api/notifications/mark-all-read/', { method: 'POST' });
+      if (!res.ok) throw await errorFromResponse(res);
       setUnreadCount(0);
       setItems((list) => (list || []).map((n) => ({ ...n, is_read: true })));
+    } catch (error) {
+      notify?.(toApiError(error).message, 'error');
     }
   };
 
@@ -161,9 +173,9 @@ function NotificationBell({ unreadCount, setUnreadCount }) {
 
           {items === null && !failed && <p className="ts-soft px-4 py-6 text-center text-sm">Loading…</p>}
           {failed && (
-            <p className="ts-soft px-4 py-6 text-center text-sm">
-              We couldn&rsquo;t load your notifications right now.
-            </p>
+            <div className="p-3">
+              <ErrorState inline error={failed} title="Notifications didn&rsquo;t load" onRetry={loadItems} />
+            </div>
           )}
           {items && items.length === 0 && (
             <div className="px-5 py-7 text-center">
@@ -342,14 +354,14 @@ function BottomNav({ active, me, unreadCount, onLogout }) {
  * are. On tablet and desktop the sidebar carries the title's job, so the bar
  * holds only the bell.
  */
-function StudentTopBar({ title, unreadCount, setUnreadCount }) {
+function StudentTopBar({ title, unreadCount, setUnreadCount, notify }) {
   return (
     <header className="ts-topbar">
       <div className="flex items-center justify-between gap-3 px-5 py-3 md:justify-end md:px-10 md:pt-5 md:pb-0">
         <p className="ts-ink truncate text-lg font-semibold md:hidden" style={FONT_SERIF}>
           {title}
         </p>
-        <NotificationBell unreadCount={unreadCount} setUnreadCount={setUnreadCount} />
+        <NotificationBell unreadCount={unreadCount} setUnreadCount={setUnreadCount} notify={notify} />
       </div>
     </header>
   );
@@ -673,7 +685,7 @@ export default function StudentShell({
         {/* ts-student-main carries the bottom padding that keeps the fixed
             phone nav from covering the end of a page. */}
         <div className="ts-student-main flex min-w-0 flex-1 flex-col">
-          <StudentTopBar title={title} unreadCount={unreadCount} setUnreadCount={setUnreadCount} />
+          <StudentTopBar title={title} unreadCount={unreadCount} setUnreadCount={setUnreadCount} notify={notify} />
           {children}
           {/* Room to scroll the last button clear of the floating help button. */}
           <div className="h-24" aria-hidden="true" />

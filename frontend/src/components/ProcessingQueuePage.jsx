@@ -4,6 +4,7 @@ import {
   ChevronIcon,
   DocumentIcon,
   EmptyState,
+  ErrorState,
   FONT_SANS,
   FONT_SERIF,
   InboxIcon,
@@ -13,6 +14,7 @@ import {
   TableRowSkeleton,
 } from './trailsyncUI.jsx';
 import { STAFF_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { errorFromResponse, toApiError } from '../lib/api.js';
 import {
   STAFF_NEXT_STEP,
   STATUS,
@@ -40,6 +42,7 @@ export default function ProcessingQueuePage() {
 
   const [results, setResults] = useState([]);
   const [pageInfo, setPageInfo] = useState({ count: 0, start: 0, end: 0, next: null, previous: null });
+  const [loadError, setLoadError] = useState(null);
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 350);
@@ -52,6 +55,7 @@ export default function ProcessingQueuePage() {
 
   const load = useCallback(async () => {
     setStatus('loading');
+    setLoadError(null);
     try {
       const params = new URLSearchParams();
       params.set('status', statusFilter);
@@ -65,13 +69,8 @@ export default function ProcessingQueuePage() {
         authFetch(`/api/registrar/queue/?${params}`),
       ]);
 
-      if ([meRes, queueRes].some((r) => r.status === 401)) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
-        return;
-      }
-      if ([meRes, queueRes].some((r) => r.status === 403)) throw new Error('forbidden');
-      if (!meRes.ok || !queueRes.ok) throw new Error('One or more requests failed.');
+      const failed = [meRes, queueRes].find((r) => !r.ok);
+      if (failed) throw await errorFromResponse(failed);
 
       const [meData, queueData] = await Promise.all([meRes.json(), queueRes.json()]);
       setMe(meData);
@@ -84,7 +83,8 @@ export default function ProcessingQueuePage() {
         previous: queueData.previous,
       });
       setStatus('ready');
-    } catch {
+    } catch (error) {
+      setLoadError(toApiError(error));
       setStatus('error');
     }
   }, [statusFilter, dateFrom, dateTo, search, page]);
@@ -188,15 +188,13 @@ export default function ProcessingQueuePage() {
           )}
         </div>
 
+        {/* Replaces the table rather than sitting above an empty one, which
+            would read as "nothing waiting". */}
         {status === 'error' && (
-          <div className="ts-banner ts-banner-error mt-6 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>We couldn&rsquo;t load the requests. Please check your internet connection.</span>
-            <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
-              Try again
-            </button>
-          </div>
+          <ErrorState className="mt-6" error={loadError} title="We couldn&rsquo;t load the requests" onRetry={load} />
         )}
 
+        {status !== 'error' && (
         <div className="ts-card mt-6 overflow-hidden">
           <div
             className="hidden grid-cols-12 gap-3 px-5 py-3 text-xs font-semibold uppercase tracking-wide sm:grid"
@@ -284,6 +282,7 @@ export default function ProcessingQueuePage() {
               </a>
             ))}
         </div>
+        )}
 
         {status === 'ready' && results.length > 0 && (
           <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">

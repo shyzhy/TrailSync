@@ -3,6 +3,7 @@ import {
   APP_CSS,
   CalendarIcon,
   EmptyState,
+  ErrorState,
   FONT_SANS,
   FONT_SERIF,
   ListRowSkeleton,
@@ -12,6 +13,7 @@ import {
 } from './trailsyncUI.jsx';
 import ReleaseCalendar, { todayIso } from './ReleaseCalendar.jsx';
 import { STAFF_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { errorFromResponse, toApiError } from '../lib/api.js';
 import { STATUS } from '../lib/requestStatus.js';
 
 const LOGIN_PATH = STAFF_LOGIN_PATH;
@@ -74,32 +76,27 @@ export default function ReleaseCalendarPage() {
 
   const [counts, setCounts] = useState({});
   const [monthStatus, setMonthStatus] = useState('loading'); // loading | ready | error
+  const [monthError, setMonthError] = useState(null);
   const [day, setDay] = useState([]);
   const [dayStatus, setDayStatus] = useState('loading');
-
-  const bounce = useCallback((res) => {
-    if (res.status === 401) {
-      clearSession();
-      window.location.href = LOGIN_PATH;
-      return true;
-    }
-    return false;
-  }, []);
+  const [dayError, setDayError] = useState(null);
 
   // Dates + counts for the visible month only.
   const loadMonth = useCallback(async () => {
     setMonthStatus('loading');
     try {
       const res = await authFetch(`/api/registrar/release-calendar/?year=${view.year}&month=${view.month + 1}`);
-      if (bounce(res)) return;
-      if (!res.ok) throw new Error(String(res.status));
+      if (!res.ok) throw await errorFromResponse(res);
       const data = await res.json();
       setCounts(Object.fromEntries((data.days || []).map((d) => [d.date, d.count])));
       setMonthStatus('ready');
-    } catch {
+    } catch (error) {
+      // Old numbers from the previous month must not linger under a failure.
+      setCounts({});
+      setMonthError(toApiError(error));
       setMonthStatus('error');
     }
-  }, [view, bounce]);
+  }, [view]);
 
   // Full detail only for the date someone actually opened.
   const loadDay = useCallback(async () => {
@@ -107,15 +104,15 @@ export default function ReleaseCalendarPage() {
     setDayStatus('loading');
     try {
       const res = await authFetch(`/api/registrar/release-calendar/day/?date=${selected}`);
-      if (bounce(res)) return;
-      if (!res.ok) throw new Error(String(res.status));
+      if (!res.ok) throw await errorFromResponse(res);
       const data = await res.json();
       setDay(data.releases || []);
       setDayStatus('ready');
-    } catch {
+    } catch (error) {
+      setDayError(toApiError(error));
       setDayStatus('error');
     }
-  }, [selected, bounce]);
+  }, [selected]);
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -195,12 +192,14 @@ export default function ReleaseCalendarPage() {
             />
             <div className="ts-hairline mt-5 h-px" />
             {monthStatus === 'error' ? (
-              <p className="mt-3 flex items-center justify-between gap-3 text-sm" role="alert" style={{ color: '#991B1B' }}>
-                We couldn&rsquo;t load this month.
-                <button type="button" onClick={loadMonth} className="ts-link font-medium">
-                  Try again
-                </button>
-              </p>
+              <ErrorState
+                inline
+                className="mt-3"
+                error={monthError}
+                title="We couldn&rsquo;t load this month"
+                message="Days may look empty until it loads."
+                onRetry={loadMonth}
+              />
             ) : (
               <p className="ts-soft mt-3 flex items-center gap-2 text-sm">
                 <span className="ts-relcal-count ts-relcal-count-legend" aria-hidden="true">
@@ -233,12 +232,13 @@ export default function ReleaseCalendarPage() {
               )}
 
               {dayStatus === 'error' && (
-                <div role="alert" className="ts-banner ts-banner-error flex items-center justify-between gap-3 px-4 py-3 text-sm">
-                  <span>We couldn&rsquo;t load this day.</span>
-                  <button type="button" onClick={loadDay} className="ts-link shrink-0 font-medium">
-                    Try again
-                  </button>
-                </div>
+                <ErrorState
+                  boxed={false}
+                  className="py-8"
+                  error={dayError}
+                  title="We couldn&rsquo;t load this day"
+                  onRetry={loadDay}
+                />
               )}
 
               {dayStatus === 'ready' && day.length === 0 && (

@@ -110,7 +110,14 @@ export default function CredentialDetailCard({ transactionType, showRequestButto
         </div>
       )}
 
-      {showRequestButton && (
+      {/* A document the office has paused can still be read about, but the
+          button would only lead to a form that refuses it. */}
+      {showRequestButton && t.is_available === false && (
+        <p className="ts-banner ts-banner-pending mt-6 px-4 py-3 text-sm">
+          This document type isn&rsquo;t currently available for request. Please check again later, or ask at Window 6.
+        </p>
+      )}
+      {showRequestButton && t.is_available !== false && (
         <a
           href={`/request-form?transaction_type=${t.id}`}
           className="ts-btn-primary mt-6 flex w-full items-center justify-center py-2.5 text-sm font-medium"

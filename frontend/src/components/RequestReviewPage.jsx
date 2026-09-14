@@ -3,17 +3,19 @@ import {
   APP_CSS,
   DocumentIcon,
   DownloadIcon,
+  ErrorState,
+  FieldError,
   FONT_SANS,
   FONT_SERIF,
   RegistrarMobileHeader,
   RegistrarSidebar,
   BusyLabel,
   DetailPageSkeleton,
-  Spinner,
   Toast,
   WarningIcon,
 } from './trailsyncUI.jsx';
 import { STAFF_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { errorFromResponse, formErrors, toApiError } from '../lib/api.js';
 import { STAFF_NEXT_STEP, STATUS, statusLabel, statusPillClass } from '../lib/requestStatus.js';
 
 const LOGIN_PATH = STAFF_LOGIN_PATH;
@@ -129,7 +131,7 @@ function ConfirmStep({ title, children, confirmLabel, busyLabel, loading, busy, 
 }
 
 export default function RequestReviewPage({ requestId }) {
-  const [status, setStatus] = useState('loading'); // 'loading' | 'ready' | 'error' | 'notfound'
+  const [status, setStatus] = useState('loading'); // 'loading' | 'ready' | 'error'
   const [me, setMe] = useState(() => getStoredUser());
   const [request, setRequest] = useState(null);
 
@@ -145,27 +147,24 @@ export default function RequestReviewPage({ requestId }) {
 
   const [actionLoading, setActionLoading] = useState(null);
   const [actionError, setActionError] = useState('');
+  // Server messages for one action's own inputs (O.R. number, dates, names).
+  const [actionFieldErrors, setActionFieldErrors] = useState({});
+  const [loadError, setLoadError] = useState(null);
   const [toast, setToast] = useState(null);
   const [confirmingClearFlag, setConfirmingClearFlag] = useState(false);
 
   const load = useCallback(async () => {
     setStatus('loading');
+    setLoadError(null);
     try {
       const [meRes, reqRes] = await Promise.all([
         authFetch('/api/me/'),
         authFetch(`/api/registrar/queue/${requestId}/`),
       ]);
-      if ([meRes, reqRes].some((r) => r.status === 401)) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
-        return;
-      }
-      if (reqRes.status === 404) {
-        setStatus('notfound');
-        return;
-      }
-      if ([meRes, reqRes].some((r) => r.status === 403)) throw new Error('forbidden');
-      if (!meRes.ok || !reqRes.ok) throw new Error('failed');
+      // The request's own answer first: a 404 there is "no such request",
+      // which matters more than anything /api/me/ could say.
+      const failed = !reqRes.ok ? reqRes : !meRes.ok ? meRes : null;
+      if (failed) throw await errorFromResponse(failed);
 
       const [meData, reqData] = await Promise.all([meRes.json(), reqRes.json()]);
       setMe(meData);
@@ -183,7 +182,8 @@ export default function RequestReviewPage({ requestId }) {
       const booked = reqData.release_schedule || null;
       setReleaseDate((prev) => prev || booked?.release_date || booked?.slot_date || todayISO());
       setStatus('ready');
-    } catch {
+    } catch (error) {
+      setLoadError(toApiError(error));
       setStatus('error');
     }
   }, [requestId]);
@@ -213,36 +213,34 @@ export default function RequestReviewPage({ requestId }) {
     async (key, path, { method = 'PATCH', body, successMessage }) => {
       setActionLoading(key);
       setActionError('');
+      setActionFieldErrors({});
       try {
         const res = await authFetch(path, {
           method,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body ?? {}),
         });
-        if (res.status === 401) {
-          clearSession();
-          window.location.href = LOGIN_PATH;
-          return;
-        }
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          const message =
-            data.detail ||
-            data.or_number?.[0] ||
-            data.payment_date?.[0] ||
-            data.claimant_name?.[0] ||
-            data.remarks?.[0] ||
-            'Could not complete this action.';
-          setActionError(message);
-          if (res.status === 409) await load();
-          return;
-        }
-        setRequest(data);
+        if (!res.ok) throw await errorFromResponse(res);
+        setRequest(await res.json());
         setConfirming(null);
         setRemarks('');
         setToast({ message: successMessage, tone: 'success' });
-      } catch {
-        setActionError('Unable to reach the server. Please try again.');
+      } catch (error) {
+        const apiError = toApiError(error);
+        // Messages about one input go under that input; the rest (wrong
+        // stage, no permission, no connection) sit above the actions.
+        const { general, ...fields } = formErrors(apiError, [
+          'or_number',
+          'payment_date',
+          'release_date',
+          'claimant_name',
+          'remarks',
+        ]);
+        setActionFieldErrors(fields);
+        setActionError(general || '');
+        if (Object.keys(fields).length) setConfirming(null);
+        // Moved on underneath this page: show the real stage and its actions.
+        if (apiError.kind === 'conflict') await load();
       } finally {
         setActionLoading(null);
       }
@@ -262,20 +260,12 @@ export default function RequestReviewPage({ requestId }) {
     setActionError('');
     try {
       const res = await authFetch(`/api/registrar/queue/${request.id}/clear-flag/`, { method: 'POST' });
-      if (res.status === 401) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
-        return;
-      }
-      if (!res.ok) {
-        setActionError('Could not clear the flag. Please try again.');
-        return;
-      }
+      if (!res.ok) throw await errorFromResponse(res);
       setRequest((prev) => ({ ...prev, duplicate_flag: false }));
       setConfirmingClearFlag(false);
       setToast({ message: 'Flag cleared.', tone: 'success' });
-    } catch {
-      setActionError('Unable to reach the server. Please try again.');
+    } catch (error) {
+      setToast({ message: `The flag wasn’t cleared. ${toApiError(error).message}`, tone: 'error' });
     } finally {
       setActionLoading(null);
     }
@@ -310,21 +300,21 @@ export default function RequestReviewPage({ requestId }) {
 
         {status === 'loading' && <DetailPageSkeleton />}
 
-        {status === 'notfound' && (
-          <div className="ts-card mt-6 px-6 py-14 text-center">
-            <p className="ts-ink text-base font-semibold">We couldn&rsquo;t find that request</p>
-            <p className="ts-soft mt-1.5 text-sm">It may have been removed, or the link may be wrong.</p>
-            <a href={QUEUE_PATH} className="ts-btn-primary mt-5 inline-flex px-6 py-2.5 text-sm font-medium">
-              Back to all requests
-            </a>
-          </div>
-        )}
-
         {status === 'error' && (
-          <div className="ts-banner ts-banner-error mt-6 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>We couldn&rsquo;t load this request. Please check your internet connection.</span>
-            <button type="button" onClick={load} className="ts-link shrink-0 font-medium">Try again</button>
-          </div>
+          <ErrorState
+            className="mt-6"
+            error={loadError}
+            title="We couldn&rsquo;t load this request"
+            message={loadError?.kind === 'not_found' ? 'It may have been removed, or the link may be wrong.' : undefined}
+            onRetry={load}
+            action={
+              loadError?.kind === 'not_found' || loadError?.kind === 'forbidden' ? (
+                <a href={QUEUE_PATH} className="ts-btn-primary inline-flex min-h-[44px] items-center px-6 text-sm font-medium">
+                  Back to all requests
+                </a>
+              ) : null
+            }
+          />
         )}
 
         {status === 'ready' && request && (
@@ -515,8 +505,11 @@ export default function RequestReviewPage({ requestId }) {
                       value={remarks}
                       onChange={(e) => setRemarks(e.target.value)}
                       placeholder="What is missing, or anything worth recording"
-                      className="ts-input w-full px-3.5 py-2.5 text-sm"
+                      aria-invalid={Boolean(actionFieldErrors.remarks)}
+                      aria-describedby={actionFieldErrors.remarks ? 'reviewRemarks-error' : undefined}
+                      className={`ts-input w-full px-3.5 py-2.5 text-sm ${actionFieldErrors.remarks ? 'ts-input-error' : ''}`}
                     />
+                    <FieldError id="reviewRemarks">{actionFieldErrors.remarks}</FieldError>
 
                     {confirming === 'verify' ? (
                       <ConfirmStep
@@ -611,8 +604,11 @@ export default function RequestReviewPage({ requestId }) {
                       value={remarks}
                       onChange={(e) => setRemarks(e.target.value)}
                       placeholder="Anything worth recording, or the reason if you turn it down"
-                      className="ts-input w-full px-3.5 py-2.5 text-sm"
+                      aria-invalid={Boolean(actionFieldErrors.remarks)}
+                      aria-describedby={actionFieldErrors.remarks ? 'approvalRemarks-error' : undefined}
+                      className={`ts-input w-full px-3.5 py-2.5 text-sm ${actionFieldErrors.remarks ? 'ts-input-error' : ''}`}
                     />
+                    <FieldError id="approvalRemarks">{actionFieldErrors.remarks}</FieldError>
 
                     {confirming === 'approve' ? (
                       <ConfirmStep
@@ -706,8 +702,11 @@ export default function RequestReviewPage({ requestId }) {
                           value={orNumber}
                           onChange={(e) => setOrNumber(e.target.value)}
                           placeholder="e.g. OR-104582"
-                          className="ts-input w-full px-3.5 py-2.5 text-sm"
+                          aria-invalid={Boolean(actionFieldErrors.or_number)}
+                          aria-describedby={actionFieldErrors.or_number ? 'orNumber-error' : undefined}
+                          className={`ts-input w-full px-3.5 py-2.5 text-sm ${actionFieldErrors.or_number ? 'ts-input-error' : ''}`}
                         />
+                        <FieldError id="orNumber">{actionFieldErrors.or_number}</FieldError>
                       </div>
                       <div>
                         <label htmlFor="paymentDate" className="ts-ink mb-1.5 block text-sm font-medium">
@@ -718,8 +717,11 @@ export default function RequestReviewPage({ requestId }) {
                           type="date"
                           value={paymentDate}
                           onChange={(e) => setPaymentDate(e.target.value)}
-                          className="ts-input w-full px-3.5 py-2.5 text-sm"
+                          aria-invalid={Boolean(actionFieldErrors.payment_date)}
+                          aria-describedby={actionFieldErrors.payment_date ? 'paymentDate-error' : undefined}
+                          className={`ts-input w-full px-3.5 py-2.5 text-sm ${actionFieldErrors.payment_date ? 'ts-input-error' : ''}`}
                         />
+                        <FieldError id="paymentDate">{actionFieldErrors.payment_date}</FieldError>
                       </div>
                     </div>
                     {confirming === 'approve-log' ? (
@@ -787,8 +789,11 @@ export default function RequestReviewPage({ requestId }) {
                         type="date"
                         value={releaseDate}
                         onChange={(e) => setReleaseDate(e.target.value)}
-                        className="ts-input w-full px-3.5 py-2.5 text-sm"
+                        aria-invalid={Boolean(actionFieldErrors.release_date)}
+                        aria-describedby={actionFieldErrors.release_date ? 'releaseDate-error' : undefined}
+                        className={`ts-input w-full px-3.5 py-2.5 text-sm ${actionFieldErrors.release_date ? 'ts-input-error' : ''}`}
                       />
+                      <FieldError id="releaseDate">{actionFieldErrors.release_date}</FieldError>
                       <p className="ts-soft mt-2 text-sm">
                         Pickup is always between 3:00 and 5:00 PM at Window 6, so you only need the date.
                       </p>
@@ -885,8 +890,11 @@ export default function RequestReviewPage({ requestId }) {
                         value={claimantName}
                         onChange={(e) => setClaimantName(e.target.value)}
                         placeholder={proxy ? `e.g. ${proxy.proxy_full_name}` : 'Full name of the person at the window'}
-                        className="ts-input w-full px-3.5 py-2.5 text-sm"
+                        aria-invalid={Boolean(actionFieldErrors.claimant_name)}
+                        aria-describedby={actionFieldErrors.claimant_name ? 'claimantName-error' : undefined}
+                        className={`ts-input w-full px-3.5 py-2.5 text-sm ${actionFieldErrors.claimant_name ? 'ts-input-error' : ''}`}
                       />
+                      <FieldError id="claimantName">{actionFieldErrors.claimant_name}</FieldError>
                       <p className="ts-soft mt-2 text-sm">
                         Type their name as written on their ID. This is kept as the record of the handover.
                       </p>

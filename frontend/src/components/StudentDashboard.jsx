@@ -7,6 +7,7 @@ import {
   FONT_SERIF,
   greetingForNow,
   EmptyState,
+  ErrorState,
   PlusCircleIcon,
   ListRowSkeleton,
   SearchIcon,
@@ -17,6 +18,7 @@ import {
 import StudentShell from './StudentShell.jsx';
 import MiniCalendar from './MiniCalendar.jsx';
 import { STUDENT_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
+import { errorFromResponse, toApiError } from '../lib/api.js';
 import { LIFECYCLE, STATUS, statusPillClass, studentStatusLabel } from '../lib/requestStatus.js';
 
 const LOGIN_PATH = STUDENT_LOGIN_PATH;
@@ -68,9 +70,11 @@ export default function StudentDashboard() {
   const [summary, setSummary] = useState(null);
   const [recent, setRecent] = useState(null);
   const [upcomingReleaseDates, setUpcomingReleaseDates] = useState([]);
+  const [loadError, setLoadError] = useState(null);
 
   const load = useCallback(async () => {
     setStatus('loading');
+    setLoadError(null);
 
     // Best-effort, off to the side: the calendar's "coming up" dots are a
     // nice-to-have, not core dashboard data, so a missing/failing endpoint
@@ -88,16 +92,9 @@ export default function StudentDashboard() {
         authFetch('/api/dashboard/recent-requests/'),
       ]);
 
-      // A stale/expired token means none of these three can be trusted —
-      // send the student back to log in rather than render half a dashboard.
-      if ([meRes, summaryRes, recentRes].some((r) => r.status === 401)) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
-        return;
-      }
-      if (!meRes.ok || !summaryRes.ok || !recentRes.ok) {
-        throw new Error('One or more dashboard requests failed.');
-      }
+      // An expired session never gets this far: authFetch sends it to log in.
+      const failed = [meRes, summaryRes, recentRes].find((r) => !r.ok);
+      if (failed) throw await errorFromResponse(failed);
 
       const [meData, summaryData, recentData] = await Promise.all([
         meRes.json(),
@@ -109,7 +106,8 @@ export default function StudentDashboard() {
       setSummary(summaryData);
       setRecent(recentData);
       setStatus('ready');
-    } catch {
+    } catch (error) {
+      setLoadError(toApiError(error));
       setStatus('error');
     }
   }, []);
@@ -166,16 +164,15 @@ export default function StudentDashboard() {
               </a>
             </div>
 
+            {/* When loading fails, the numbers and the list are replaced by one
+                error state. Showing the cards with zeros would say "you have
+                no requests" - a wrong answer, not a missing one. */}
             {status === 'error' && (
-              <div className="ts-banner ts-banner-error mb-8 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-                <span>We couldn&rsquo;t load your home page. Please check your internet connection.</span>
-                <button type="button" onClick={load} className="ts-link font-medium shrink-0">
-                  Try again
-                </button>
-              </div>
+              <ErrorState error={loadError} title="We couldn&rsquo;t load your home page" onRetry={load} />
             )}
 
             {/* Stat cards */}
+            {status !== 'error' && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {status === 'loading' ? (
                 <>
@@ -217,6 +214,7 @@ export default function StudentDashboard() {
                 </>
               )}
             </div>
+            )}
 
             {/* Secondary actions, deliberately quieter than the header button
                 so "Request a document" is where the eye lands. The old third
@@ -245,6 +243,7 @@ export default function StudentDashboard() {
             </div>
 
             {/* Recent requests */}
+            {status !== 'error' && (
             <div className="mt-8">
               <div className="flex items-center justify-between">
                 <h2 className="ts-ink text-lg font-semibold" style={FONT_SERIF}>Recent requests</h2>
@@ -307,14 +306,9 @@ export default function StudentDashboard() {
                     })}
                   </ul>
                 )}
-
-                {status === 'error' && (
-                  <div className="px-5 py-8 text-center">
-                    <p className="ts-soft text-sm">We couldn&rsquo;t load your recent requests right now.</p>
-                  </div>
-                )}
               </div>
             </div>
+            )}
           </div>
 
           {/* Right rail: at-a-glance calendar. Stacks below the main column on

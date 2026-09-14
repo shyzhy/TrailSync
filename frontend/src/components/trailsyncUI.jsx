@@ -136,6 +136,10 @@ const FORM_CONTROL_CSS = `
     border-color: rgba(185,28,28,0.5);
     box-shadow: inset 0 2px 4px rgba(185,28,28,0.20), inset 0 -1px 0 rgba(255,255,255,0.7);
   }
+  /* One look for a field-level problem everywhere - login, sign-up,
+     onboarding, the request form, profile, password reset: red text
+     directly under the field, the same size and spacing on every form. */
+  .ts-field-error { color: #B91C1C; margin-top: 0.375rem; font-size: 0.875rem; line-height: 1.4; }
   .ts-select {
     appearance: none;
     -webkit-appearance: none;
@@ -414,6 +418,9 @@ export const SHARED_CSS = `
   /* Right password, wrong door: blue, with a way through. */
   .ts-notice-info { background: rgba(36,64,107,0.07); border-color: rgba(36,64,107,0.26); color: #1B3358; }
   .ts-notice-info .ts-notice-icon { background: rgba(36,64,107,0.12); color: #24406B; }
+  /* Something finished (a password changed): sage, a tick, nothing to do but log in. */
+  .ts-notice-success { background: rgba(79,122,106,0.10); border-color: rgba(79,122,106,0.36); color: #2C4B3F; }
+  .ts-notice-success .ts-notice-icon { background: rgba(79,122,106,0.16); color: #33574A; }
 
   /* ---- Staff scene: charcoal and gold ---------------------------------
      The same photo and glass as the student login, re-tinted to the staff
@@ -1181,6 +1188,8 @@ export const APP_CSS = `
   }
   .ts-select-card:hover { transform: translateY(-2px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.85), 0 18px 34px -18px rgba(31,41,55,0.3); }
   .ts-select-card:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.55); }
+  /* A document the office has paused: readable, visibly not choosable. */
+  .ts-select-card:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: inset 0 1px 0 rgba(255,255,255,0.85); }
   .ts-select-card-selected {
     border-color: rgba(36,64,107,0.55);
     background: linear-gradient(165deg, rgba(255,255,255,0.95) 0%, rgba(234,240,248,0.88) 100%);
@@ -1252,6 +1261,7 @@ export const APP_CSS = `
   }
   .ts-file-drop:hover { border-color: rgba(36,64,107,0.55); background: rgba(255,255,255,0.7); }
   .ts-file-drop-filled { border-style: solid; border-color: rgba(79,122,106,0.5); background: rgba(79,122,106,0.06); }
+  .ts-file-drop-error { border-color: rgba(220,38,38,0.55); background: rgba(220,38,38,0.04); }
 
   /* ---- Track Requests: filter tabs ---- */
   .ts-filter-tab {
@@ -1676,6 +1686,37 @@ export const APP_CSS = `
   }
 
   /* ---- Empty states ---- */
+  /* ---- Error states --------------------------------------------------
+     Deliberately NOT the empty state's look. Empty is calm blue ("nothing
+     here yet"); failed is a warm red edge and a red-tinted icon ("something
+     didn't work - here's the button"). Side by side, the two must never be
+     mistaken for each other. */
+  .ts-error-state {
+    border-top: 3px solid rgba(185,28,28,0.55);
+  }
+  .ts-error-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 999px;
+    color: #B91C1C;
+    background: linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(254,236,236,0.95) 100%);
+    border: 1px solid rgba(220,38,38,0.28);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 4px 12px -6px rgba(185,28,28,0.3);
+  }
+  .ts-error-icon > svg { width: 22px; height: 22px; }
+  .ts-error-state-inline {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    background: rgba(220,38,38,0.06);
+    border: 1px solid rgba(220,38,38,0.28);
+    color: #991B1B;
+  }
+
+
   .ts-empty-icon {
     display: inline-flex;
     align-items: center;
@@ -2100,6 +2141,27 @@ export function CheckIcon() {
   return (
     <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
       <path d="M4.5 10.5 8 14l7.5-8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function WifiOffIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M2.5 7.4a11 11 0 0 1 3.3-2.1M8.6 4.3A11 11 0 0 1 17.5 7.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M5 10.3a7.2 7.2 0 0 1 2.3-1.4M11.9 8.7a7.2 7.2 0 0 1 3.1 1.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M7.6 13.1a3.6 3.6 0 0 1 4.8 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="10" cy="15.9" r="1" fill="currentColor" />
+      <path d="M3 3l14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function LockIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <rect x="4.5" y="9" width="11" height="8" rx="2" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M7 9V6.8a3 3 0 0 1 6 0V9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   );
 }
@@ -2872,6 +2934,169 @@ export function DetailPageSkeleton() {
  * useful to do. An empty list that explains itself reads as the app working;
  * a blank panel reads as the app broken.
  */
+// ---------------------------------------------------------------------------
+// Error states
+// ---------------------------------------------------------------------------
+
+/** What each kind of failure says by default, and which icon it wears. */
+const ERROR_KINDS = {
+  // "Try again" can fix these, so a caller's own headline ("We couldn't load
+  // your requests") leads, and the kind's full sentence explains why.
+  network: {
+    Icon: 'wifi',
+    title: 'Can’t connect right now',
+    message: 'Check your connection and try again.',
+    retry: true,
+  },
+  server: {
+    Icon: 'warning',
+    title: 'Something went wrong on our end',
+    message: 'Please try again in a moment.',
+    retry: true,
+  },
+  rate_limited: {
+    Icon: 'warning',
+    title: 'Too many tries just now',
+    message: 'Please wait a moment, then try again.',
+    retry: true,
+  },
+  conflict: {
+    Icon: 'warning',
+    title: 'This changed while the page was open',
+    message: 'Try again to see the latest.',
+    retry: true,
+  },
+  // Trying again won't change these answers, so their own headline stands.
+  forbidden: {
+    Icon: 'lock',
+    title: 'You don’t have permission to see this',
+    message: 'If you think this is a mistake, ask the Registrar’s office.',
+    retry: false,
+    fixed: true,
+  },
+  not_found: {
+    Icon: 'search',
+    title: 'We couldn’t find that',
+    message: 'It may have been removed, or the link may be wrong.',
+    retry: false,
+    fixed: true,
+  },
+  validation: {
+    Icon: 'warning',
+    title: 'That didn’t work',
+    message: 'Please check what you entered and try again.',
+    retry: false,
+  },
+};
+
+// The generic sentences lib/api.js falls back to. When an error carries one
+// of these, the kind's own wording above says it better in context.
+const GENERIC_ERROR_MESSAGES = new Set([
+  "You don't have permission to do that.",
+  "We couldn't find that. It may have been removed, or the link may be wrong.",
+]);
+
+/**
+ * A section or page that failed to load - the counterpart to EmptyState.
+ *
+ * Same three-part shape (icon, headline, one sentence, action) so the app
+ * stays consistent, but a different look so "failed to load" is never
+ * mistaken for "there's genuinely nothing here". Pass the ApiError from
+ * lib/api.js as `error` and it picks the right words: a lost connection and
+ * a server fault ask for a retry; a missing or forbidden record doesn't
+ * offer one, because trying again won't change the answer.
+ *
+ * @param title   The headline for a retryable failure, e.g. "We couldn't load your requests".
+ * @param message Replaces the explanation entirely.
+ * @param onRetry Shown as "Try again" when the failure is one a retry can fix.
+ * @param action  Extra element (e.g. a "Back to…" link), shown beside retry.
+ * @param inline  A compact one-line strip for a section inside a larger page.
+ */
+export function ErrorState({ error, title, message, onRetry, action, inline = false, boxed = true, className = '' }) {
+  const [retrying, setRetrying] = useState(false);
+  const kind = ERROR_KINDS[error?.kind] || ERROR_KINDS.server;
+  const headline = kind.fixed ? kind.title : title || kind.title;
+  const specific = error?.message && !GENERIC_ERROR_MESSAGES.has(error.message) ? error.message : '';
+  let body = message;
+  if (!body) {
+    if (kind.fixed) body = specific || kind.message;
+    else if (error?.kind === 'validation' || error?.kind === 'conflict') body = specific || kind.message;
+    // network / server / rate limited: with a custom headline, the full
+    // sentence ("Can't connect right now. Check your connection...") keeps
+    // the reason; under the kind's own headline, just the next step.
+    else body = title && specific ? specific : kind.message;
+  }
+  const canRetry = Boolean(onRetry) && kind.retry;
+
+  const retry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      await onRetry();
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const Icon = { wifi: WifiOffIcon, lock: LockIcon, search: SearchIcon, warning: WarningIcon }[kind.Icon];
+  const retryButton = canRetry && (
+    <button
+      type="button"
+      onClick={retry}
+      disabled={retrying}
+      aria-busy={retrying}
+      className={inline ? 'ts-link shrink-0 text-sm font-semibold' : 'ts-btn-primary inline-flex min-h-[44px] items-center px-6 text-sm font-medium'}
+    >
+      <BusyLabel busy={retrying} busyLabel="Trying…">
+        Try again
+      </BusyLabel>
+    </button>
+  );
+
+  if (inline) {
+    return (
+      <div role="alert" className={`ts-error-state-inline text-sm ${className}`}>
+        <span className="min-w-0">
+          <strong className="font-semibold">{headline}.</strong> {body}
+        </span>
+        {retryButton || action}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      role="alert"
+      className={`flex flex-col items-center px-6 py-14 text-center ${boxed ? 'ts-card ts-error-state' : ''} ${className}`}
+    >
+      <span className="ts-error-icon" aria-hidden="true">
+        <Icon />
+      </span>
+      <p className="ts-ink mt-4 text-base font-semibold">{headline}</p>
+      <p className="ts-soft mt-1.5 max-w-sm text-sm leading-relaxed">{body}</p>
+      {(retryButton || action) && (
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+          {retryButton}
+          {action}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The one way a form shows a problem with a single field: red text directly
+ * under it. Give the input aria-invalid and aria-describedby={`${id}-error`}.
+ */
+export function FieldError({ id, children }) {
+  if (!children) return null;
+  return (
+    <p id={`${id}-error`} className="ts-field-error">
+      {children}
+    </p>
+  );
+}
+
 export function EmptyState({
   icon: Icon = InboxIcon,
   title,
@@ -2950,15 +3175,23 @@ export function SuccessSeal({ size = 64 }) {
 }
 
 export function Toast({ message, tone = 'success', onDismiss }) {
+  const isError = tone === 'error';
   useEffect(() => {
     if (!message) return undefined;
-    const timer = setTimeout(() => onDismiss?.(), 4200);
+    // The one error-toast pattern: a failed action stays up long enough to
+    // read and act on, and is announced straight away instead of politely
+    // queued behind whatever the screen reader was saying.
+    const timer = setTimeout(() => onDismiss?.(), isError ? 8000 : 4200);
     return () => clearTimeout(timer);
-  }, [message, onDismiss]);
+  }, [message, onDismiss, isError]);
 
   if (!message) return null;
   return (
-    <div role="status" aria-live="polite" className={`ts-toast ${tone === 'error' ? 'ts-toast-error' : ''}`}>
+    <div
+      role={isError ? 'alert' : 'status'}
+      aria-live={isError ? 'assertive' : 'polite'}
+      className={`ts-toast ${isError ? 'ts-toast-error' : ''}`}
+    >
       <span className="ts-toast-accent" aria-hidden="true" />
       <span className="flex-1">{message}</span>
       {/* Auto-dismiss is the normal path; this is for anyone who wants it

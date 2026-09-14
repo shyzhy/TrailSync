@@ -16,6 +16,7 @@ const ACCESS_KEY = 'trailsync_access_token';
 const REFRESH_KEY = 'trailsync_refresh_token';
 const USER_KEY = 'trailsync_user';
 const ALL_KEYS = [ACCESS_KEY, REFRESH_KEY, USER_KEY];
+const FLASH_KEY = 'trailsync_flash';
 
 function readFirst(key) {
   try {
@@ -24,6 +25,18 @@ function readFirst(key) {
     // Storage can throw in a locked-down/private context; treat as signed out.
     return null;
   }
+}
+
+/** Whichever storage currently holds the session, so updates keep "remember me" intact. */
+function sessionStore() {
+  for (const store of [window.localStorage, window.sessionStorage]) {
+    try {
+      if (store.getItem(ACCESS_KEY)) return store;
+    } catch {
+      // unavailable storage: try the other one
+    }
+  }
+  return null;
 }
 
 export function getAccessToken() {
@@ -67,16 +80,11 @@ export function saveSession({ access, refresh, user }, remember) {
  */
 export function updateStoredUser(user) {
   if (!user) return;
-  for (const store of [window.localStorage, window.sessionStorage]) {
-    try {
-      if (store.getItem(ACCESS_KEY)) {
-        store.setItem(USER_KEY, JSON.stringify(user));
-        return;
-      }
-    } catch {
-      // Storage can be unavailable in a locked-down context; the page's own
-      // state still reflects the change, it just won't outlive a reload.
-    }
+  try {
+    sessionStore()?.setItem(USER_KEY, JSON.stringify(user));
+  } catch {
+    // Storage can be unavailable in a locked-down context; the page's own
+    // state still reflects the change, it just won't outlive a reload.
   }
 }
 
@@ -87,8 +95,87 @@ export function clearSession() {
   });
 }
 
-/** fetch() with the bearer token attached, against the same API host as the rest of the app. */
-export function authFetch(path, options = {}) {
+// ---------------------------------------------------------------------------
+// One-time messages carried across a redirect ("your session expired",
+// "your password was changed"), read once by the login page.
+// ---------------------------------------------------------------------------
+
+export function setFlash(kind) {
+  try {
+    window.sessionStorage.setItem(FLASH_KEY, kind);
+  } catch {
+    // The redirect still happens; the page just can't say why.
+  }
+}
+
+export function takeFlash() {
+  try {
+    const kind = window.sessionStorage.getItem(FLASH_KEY);
+    window.sessionStorage.removeItem(FLASH_KEY);
+    return kind;
+  } catch {
+    return null;
+  }
+}
+
+/** The login page for the part of the app the person is currently in. */
+export function loginPathForHere() {
+  return window.location.pathname.startsWith('/registrar') ? STAFF_LOGIN_PATH : STUDENT_LOGIN_PATH;
+}
+
+/**
+ * The session is over: clear it and send the person to log in again, with a
+ * message saying why rather than a silently broken page. The one place in
+ * the app that does this.
+ */
+export function expireSession() {
+  clearSession();
+  setFlash('session_expired');
+  window.location.replace(loginPathForHere());
+}
+
+// ---------------------------------------------------------------------------
+// Token refresh
+// ---------------------------------------------------------------------------
+
+let refreshing = null;
+
+/**
+ * Trade the refresh token for a new access token, once, however many
+ * requests find their token expired at the same moment - they all wait on
+ * the same attempt instead of each rotating the refresh token in turn.
+ *
+ * Until this existed nothing ever used the refresh token, so every session
+ * ended 30 minutes after login no matter what "Keep me logged in" said.
+ */
+function refreshAccessToken() {
+  if (refreshing) return refreshing;
+  const refresh = readFirst(REFRESH_KEY);
+  const store = sessionStore();
+  if (!refresh || !store) return Promise.resolve(false);
+
+  refreshing = fetch(`${API_BASE_URL}/api/auth/refresh/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh }),
+  })
+    .then(async (res) => {
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (!data.access) return false;
+      store.setItem(ACCESS_KEY, data.access);
+      // ROTATE_REFRESH_TOKENS is on, so a new refresh token comes back too.
+      if (data.refresh) store.setItem(REFRESH_KEY, data.refresh);
+      return true;
+    })
+    .catch(() => false)
+    .finally(() => {
+      refreshing = null;
+    });
+  return refreshing;
+}
+
+function send(path, options) {
   const token = getAccessToken();
   return fetch(`${API_BASE_URL}${path}`, {
     ...options,
@@ -97,4 +184,26 @@ export function authFetch(path, options = {}) {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
+}
+
+/**
+ * fetch() with the bearer token attached - and the ONE place a 401 is handled.
+ *
+ * A 401 first tries a silent token refresh and repeats the request once. If
+ * that can't rescue it, the session is expired centrally (see
+ * expireSession) and the returned promise never settles: the page is being
+ * replaced by the login screen, and resolving would only let the calling
+ * component flash an error state on its way out. No page should check for
+ * 401 itself.
+ */
+export async function authFetch(path, options = {}) {
+  const res = await send(path, options);
+  if (res.status !== 401) return res;
+
+  if (await refreshAccessToken()) {
+    const retried = await send(path, options);
+    if (retried.status !== 401) return retried;
+  }
+  expireSession();
+  return new Promise(() => {});
 }

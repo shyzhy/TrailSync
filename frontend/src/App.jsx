@@ -1,8 +1,11 @@
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import LandingPage from './components/LandingPage.jsx';
 import StudentLoginPage, { RegistrarLoginPage } from './components/LoginPage.jsx';
 import ReleaseCalendarPage from './components/ReleaseCalendarPage.jsx';
 import CreateAccountPage from './components/CreateAccountPage.jsx';
 import ActivatePage from './components/ActivatePage.jsx';
+import ForgotPasswordPage from './components/ForgotPasswordPage.jsx';
+import ResetPasswordPage from './components/ResetPasswordPage.jsx';
 import OnboardingPage from './components/OnboardingPage.jsx';
 import StudentDashboard from './components/StudentDashboard.jsx';
 import RequestFormPage from './components/RequestFormPage.jsx';
@@ -24,7 +27,13 @@ import RequestReviewPage from './components/RequestReviewPage.jsx';
  * document. This softens the arrival, which is the half we can control.
  */
 function Page({ children }) {
-  return <div className="ts-page-enter">{children}</div>;
+  // Every route sits inside its own boundary, so a crash on one page shows
+  // the friendly fallback instead of a blank screen.
+  return (
+    <ErrorBoundary>
+      <div className="ts-page-enter">{children}</div>
+    </ErrorBoundary>
+  );
 }
 
 // Minimal path switch so all screens are reachable without pulling in a
@@ -37,6 +46,10 @@ export default function App() {
   if (pathname.startsWith('/registrar/login')) return <Page><RegistrarLoginPage /></Page>;
   if (pathname.startsWith('/create-account')) return <Page><CreateAccountPage /></Page>;
   if (pathname.startsWith('/activate')) return <Page><ActivatePage /></Page>;
+  // One pair of pages for students and staff; ?from= only picks the look
+  // and which login "Back to login" returns to.
+  if (pathname.startsWith('/forgot-password')) return <Page><ForgotPasswordPage /></Page>;
+  if (pathname.startsWith('/reset-password')) return <Page><ResetPasswordPage /></Page>;
   if (pathname.startsWith('/onboarding')) return <Page><OnboardingPage /></Page>;
   if (pathname.startsWith('/request-form')) return <Page><RequestFormPage /></Page>;
   if (pathname.startsWith('/track-requests')) return <Page><TrackRequestsPage /></Page>;

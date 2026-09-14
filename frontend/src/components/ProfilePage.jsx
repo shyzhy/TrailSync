@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import {
   BusyLabel,
   ChevronIcon,
+  ErrorState,
+  FieldError,
   FONT_SERIF,
   Skeleton,
   SkeletonGroup,
@@ -10,7 +12,7 @@ import {
 import StudentShell from './StudentShell.jsx';
 import { AvatarPicker, AvatarStatus, useAvatarUpload } from './AvatarUploader.jsx';
 import { STUDENT_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser, updateStoredUser } from '../lib/auth.js';
-import { friendlyFieldErrors, friendlySummary, NETWORK_ERROR } from '../lib/friendlyErrors.js';
+import { errorFromResponse, formErrors, toApiError } from '../lib/api.js';
 
 const LOGIN_PATH = STUDENT_LOGIN_PATH;
 
@@ -89,17 +91,14 @@ export default function ProfilePage() {
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [confirmingPassword, setConfirmingPassword] = useState(false);
   const [toast, setToast] = useState(null);
+  const [loadError, setLoadError] = useState(null);
 
   const load = async () => {
     setStatus('loading');
+    setLoadError(null);
     try {
       const res = await authFetch('/api/me/');
-      if (res.status === 401) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
-        return;
-      }
-      if (!res.ok) throw new Error('Request failed.');
+      if (!res.ok) throw await errorFromResponse(res);
       const data = await res.json();
       setMe(data);
       updateStoredUser(data);
@@ -108,7 +107,8 @@ export default function ProfilePage() {
       setContactNumber(data.contact_number || '');
       setMiddleName(data.profile?.middle_name || '');
       setStatus('ready');
-    } catch {
+    } catch (error) {
+      setLoadError(toApiError(error));
       setStatus('error');
     }
   };
@@ -164,22 +164,14 @@ export default function ProfilePage() {
           contact_number: contactNumber.trim(),
         }),
       });
-      if (res.status === 401) {
-        clearSession();
-        window.location.href = LOGIN_PATH;
-        return;
-      }
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setProfileErrors(friendlyFieldErrors(data));
-        return;
-      }
+      if (!res.ok) throw await errorFromResponse(res);
+      const data = await res.json();
       setMe(data);
       updateStoredUser(data);
       setProfileSuccess(true);
       setToast({ message: 'Your changes are saved.' });
-    } catch {
-      setProfileErrors({ general: NETWORK_ERROR });
+    } catch (error) {
+      setProfileErrors(formErrors(error, ['first_name', 'last_name', 'contact_number']));
     } finally {
       setProfileSaving(false);
       setConfirmingName(false);
@@ -191,10 +183,6 @@ export default function ProfilePage() {
       setMe(data);
       updateStoredUser(data);
       setToast({ message: kind === 'removed' ? 'Profile picture removed.' : 'Profile picture updated.' });
-    },
-    onUnauthorized: () => {
-      clearSession();
-      window.location.href = LOGIN_PATH;
     },
   });
 
@@ -215,15 +203,12 @@ export default function ProfilePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ new_email: newEmail.trim() }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setEmailError(friendlySummary(data, "We couldn't send the link. Please try again."));
-        return;
-      }
+      if (!res.ok) throw await errorFromResponse(res);
+      const data = await res.json();
       setEmailSentMessage(data.detail);
       setNewEmail('');
-    } catch {
-      setEmailError(NETWORK_ERROR);
+    } catch (error) {
+      setEmailError(toApiError(error).message);
     } finally {
       setEmailSending(false);
       setConfirmingEmail(false);
@@ -260,18 +245,14 @@ export default function ProfilePage() {
           confirm_new_password: confirmNewPassword,
         }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setPasswordErrors(friendlyFieldErrors(data));
-        return;
-      }
+      if (!res.ok) throw await errorFromResponse(res);
       setPasswordSuccess(true);
       setToast({ message: 'Your password is changed.' });
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
-    } catch {
-      setPasswordErrors({ general: NETWORK_ERROR });
+    } catch (error) {
+      setPasswordErrors(formErrors(error, ['current_password', 'new_password', 'confirm_new_password']));
     } finally {
       setPasswordSaving(false);
       setConfirmingPassword(false);
@@ -287,12 +268,7 @@ export default function ProfilePage() {
         <p className="ts-soft mt-1.5 text-base">Your account details. You can change your photo, name, contact number, email and password here.</p>
 
         {status === 'error' && (
-          <div className="ts-banner ts-banner-error mt-6 flex items-center justify-between gap-4 px-4 py-3 text-sm">
-            <span>We couldn&rsquo;t load your profile. Please check your internet connection.</span>
-            <button type="button" onClick={load} className="ts-link shrink-0 font-medium">
-              Try again
-            </button>
-          </div>
+          <ErrorState className="mt-6" error={loadError} title="We couldn&rsquo;t load your profile" onRetry={load} />
         )}
 
         {status === 'loading' && (
@@ -404,9 +380,11 @@ export default function ProfilePage() {
                         setConfirmingEmail(false);
                       }}
                       placeholder="new.email@ustp.edu.ph"
-                      className="ts-input w-full px-3.5 py-2.5 text-sm"
+                      aria-invalid={Boolean(emailError)}
+                      aria-describedby={emailError ? 'newEmail-error' : undefined}
+                      className={`ts-input w-full px-3.5 py-2.5 text-sm ${emailError ? 'ts-input-error' : ''}`}
                     />
-                    {emailError && <p className="ts-error-text mt-1.5 text-sm">{emailError}</p>}
+                    <FieldError id="newEmail">{emailError}</FieldError>
                     {emailSentMessage && (
                       <p className="mt-1.5 text-sm" style={{ color: '#33574A' }}>
                         {emailSentMessage} Open the link in that email within 1 hour. Your email stays the same until
@@ -470,9 +448,11 @@ export default function ProfilePage() {
                       setConfirmingName(false);
                       clearProfileError('first_name');
                     }}
+                    aria-invalid={Boolean(profileErrors.first_name)}
+                    aria-describedby={profileErrors.first_name ? 'firstName-error' : undefined}
                     className={`ts-input w-full px-3.5 py-2.5 text-sm ${profileErrors.first_name ? 'ts-input-error' : ''}`}
                   />
-                  {profileErrors.first_name && <p className="ts-error-text mt-1.5 text-sm">{profileErrors.first_name}</p>}
+                  <FieldError id="firstName">{profileErrors.first_name}</FieldError>
                 </div>
 
                 <div>
@@ -488,9 +468,11 @@ export default function ProfilePage() {
                       setConfirmingName(false);
                       clearProfileError('last_name');
                     }}
+                    aria-invalid={Boolean(profileErrors.last_name)}
+                    aria-describedby={profileErrors.last_name ? 'lastName-error' : undefined}
                     className={`ts-input w-full px-3.5 py-2.5 text-sm ${profileErrors.last_name ? 'ts-input-error' : ''}`}
                   />
-                  {profileErrors.last_name && <p className="ts-error-text mt-1.5 text-sm">{profileErrors.last_name}</p>}
+                  <FieldError id="lastName">{profileErrors.last_name}</FieldError>
                 </div>
 
                 <div>
@@ -522,13 +504,13 @@ export default function ProfilePage() {
                       clearProfileError('contact_number');
                     }}
                     placeholder="09XXXXXXXXX"
+                    aria-invalid={Boolean(profileErrors.contact_number)}
+                    aria-describedby={profileErrors.contact_number ? 'contactNumber-error' : undefined}
                     className={`ts-input w-full px-3.5 py-2.5 text-sm ${
                       profileErrors.contact_number ? 'ts-input-error' : ''
                     }`}
                   />
-                  {profileErrors.contact_number && (
-                    <p className="ts-error-text mt-1.5 text-sm">{profileErrors.contact_number}</p>
-                  )}
+                  <FieldError id="contactNumber">{profileErrors.contact_number}</FieldError>
                 </div>
               </div>
 
@@ -625,13 +607,13 @@ export default function ProfilePage() {
                         setConfirmingPassword(false);
                         setPasswordErrors((p) => ({ ...p, current_password: undefined }));
                       }}
+                      aria-invalid={Boolean(passwordErrors.current_password)}
+                      aria-describedby={passwordErrors.current_password ? 'currentPassword-error' : undefined}
                       className={`ts-input w-full px-3.5 py-2.5 text-sm ${
                         passwordErrors.current_password ? 'ts-input-error' : ''
                       }`}
                     />
-                    {passwordErrors.current_password && (
-                      <p className="ts-error-text mt-1.5 text-sm">{passwordErrors.current_password}</p>
-                    )}
+                    <FieldError id="currentPassword">{passwordErrors.current_password}</FieldError>
                   </div>
 
                   <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -648,13 +630,13 @@ export default function ProfilePage() {
                           setConfirmingPassword(false);
                           setPasswordErrors((p) => ({ ...p, new_password: undefined }));
                         }}
+                        aria-invalid={Boolean(passwordErrors.new_password)}
+                        aria-describedby={passwordErrors.new_password ? 'newPassword-error' : undefined}
                         className={`ts-input w-full px-3.5 py-2.5 text-sm ${
                           passwordErrors.new_password ? 'ts-input-error' : ''
                         }`}
                       />
-                      {passwordErrors.new_password && (
-                        <p className="ts-error-text mt-1.5 text-sm">{passwordErrors.new_password}</p>
-                      )}
+                      <FieldError id="newPassword">{passwordErrors.new_password}</FieldError>
                     </div>
 
                     <div>
@@ -670,13 +652,13 @@ export default function ProfilePage() {
                           setConfirmingPassword(false);
                           setPasswordErrors((p) => ({ ...p, confirm_new_password: undefined }));
                         }}
+                        aria-invalid={Boolean(passwordErrors.confirm_new_password)}
+                        aria-describedby={passwordErrors.confirm_new_password ? 'confirmNewPassword-error' : undefined}
                         className={`ts-input w-full px-3.5 py-2.5 text-sm ${
                           passwordErrors.confirm_new_password ? 'ts-input-error' : ''
                         }`}
                       />
-                      {passwordErrors.confirm_new_password && (
-                        <p className="ts-error-text mt-1.5 text-sm">{passwordErrors.confirm_new_password}</p>
-                      )}
+                      <FieldError id="confirmNewPassword">{passwordErrors.confirm_new_password}</FieldError>
                     </div>
                   </div>
 
