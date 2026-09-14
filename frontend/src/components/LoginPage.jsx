@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   API_BASE_URL,
+  BusyLabel,
   EyeIcon,
   EyeOffIcon,
   FONT_SERIF,
@@ -257,8 +258,9 @@ export default function LoginPage() {
           disabled={loading}
           className="ts-btn-primary flex w-full items-center justify-center gap-2 py-2.5 text-sm font-medium"
         >
-          {loading && <Spinner />}
-          {loading ? 'Logging in…' : 'Log in'}
+          <BusyLabel busy={loading} busyLabel="Logging in…">
+            Log in
+          </BusyLabel>
         </button>
       </form>
 

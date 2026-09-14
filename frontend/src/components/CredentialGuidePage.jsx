@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   CloseIcon,
   DocumentIcon,
+  EmptyState,
   FONT_SERIF,
+  GuideCardSkeleton,
   SearchIcon,
 } from './trailsyncUI.jsx';
 import StudentShell from './StudentShell.jsx';
@@ -149,15 +151,14 @@ export default function CredentialGuidePage() {
           </div>
         )}
 
-        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div
+          className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2"
+          role={status === 'loading' ? 'status' : undefined}
+          aria-busy={status === 'loading' ? 'true' : undefined}
+          aria-label={status === 'loading' ? 'Loading documents' : undefined}
+        >
           {status === 'loading' &&
-            Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="ts-card space-y-3 p-5">
-                <div className="ts-skeleton h-5 w-40" />
-                <div className="ts-skeleton h-3 w-full" />
-                <div className="ts-skeleton h-6 w-32" />
-              </div>
-            ))}
+            Array.from({ length: 4 }).map((_, i) => <GuideCardSkeleton key={i} />)}
 
           {status === 'ready' &&
             filtered.map((t) => (
@@ -178,25 +179,24 @@ export default function CredentialGuidePage() {
         </div>
 
         {status === 'ready' && filtered.length === 0 && (
-          <div className="ts-card mt-2 flex flex-col items-center px-6 py-14 text-center">
-            <p className="ts-ink text-base font-semibold">
-              {search.trim() ? `Nothing matches “${search.trim()}”` : 'No documents for this purpose'}
-            </p>
-            <p className="ts-soft mt-1.5 max-w-sm text-sm">
-              Try a shorter word, or show every document and browse. Still unsure? Ask at Window 6 &mdash; they can
-              tell you which one you need.
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                setSearch('');
-                setActivePurpose('All');
-              }}
-              className="ts-btn-primary mt-5 px-6 py-2.5 text-sm font-medium"
-            >
-              Show all documents
-            </button>
-          </div>
+          <EmptyState
+            className="mt-2"
+            icon={SearchIcon}
+            title="No documents match your search"
+            message="Try a shorter word or clear your filters. Still unsure? Ask at Window 6 — they can tell you which one you need."
+            action={
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('');
+                  setActivePurpose('All');
+                }}
+                className="ts-btn-primary px-6 py-2.5 text-sm font-medium"
+              >
+                Show all documents
+              </button>
+            }
+          />
         )}
       </main>
 

@@ -7,6 +7,8 @@ import {
   FONT_SERIF,
   RegistrarMobileHeader,
   RegistrarSidebar,
+  BusyLabel,
+  DetailPageSkeleton,
   Spinner,
   Toast,
   WarningIcon,
@@ -109,8 +111,9 @@ function ConfirmStep({ title, children, confirmLabel, busyLabel, loading, busy, 
           onClick={onConfirm}
           className={`${tone === 'danger' ? 'ts-btn-outline-danger' : 'ts-btn-primary'} flex items-center justify-center gap-2 py-3 text-sm font-medium`}
         >
-          {loading && <Spinner />}
-          {loading ? busyLabel : confirmLabel}
+          <BusyLabel busy={loading} busyLabel={busyLabel}>
+            {confirmLabel}
+          </BusyLabel>
         </button>
         <button
           type="button"
@@ -305,16 +308,7 @@ export default function RequestReviewPage({ requestId }) {
           <span aria-hidden="true">&larr;</span> Back to all requests
         </a>
 
-        {status === 'loading' && (
-          <div className="mt-6">
-            <div className="ts-skeleton h-9 w-72" />
-            <div className="ts-skeleton mt-3 h-4 w-56" />
-            <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
-              <div className="ts-card h-80 lg:col-span-3" />
-              <div className="ts-card h-60 lg:col-span-2" />
-            </div>
-          </div>
-        )}
+        {status === 'loading' && <DetailPageSkeleton />}
 
         {status === 'notfound' && (
           <div className="ts-card mt-6 px-6 py-14 text-center">

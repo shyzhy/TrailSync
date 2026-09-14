@@ -1,22 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BellIcon, ChevronIcon, FONT_SERIF } from './trailsyncUI.jsx';
+import { BellIcon, ChevronIcon, EmptyState, FONT_SERIF, ListRowSkeleton, SkeletonGroup } from './trailsyncUI.jsx';
 import StudentShell, { markNotificationRead, notificationHref, timeAgo, useStudentShell } from './StudentShell.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 
 const LOGIN_PATH = '/';
-
-function RowSkeleton() {
-  return (
-    <div className="flex gap-3 px-5 py-5">
-      <div className="ts-skeleton mt-1.5 h-2 w-2 rounded-full" />
-      <div className="flex-1 space-y-2">
-        <div className="ts-skeleton h-4 w-48" />
-        <div className="ts-skeleton h-4 w-full" />
-        <div className="ts-skeleton h-3 w-24" />
-      </div>
-    </div>
-  );
-}
 
 /**
  * The body lives in its own component so it can reach the shell's context:
@@ -123,27 +110,27 @@ function NotificationsBody() {
 
       <div className="ts-card mt-5 overflow-hidden">
         {status === 'loading' && (
-          <>
-            <RowSkeleton />
+          <SkeletonGroup label="Loading your notifications">
+            <ListRowSkeleton avatar={false} />
             <div className="ts-row-divider" />
-            <RowSkeleton />
-          </>
+            <ListRowSkeleton avatar={false} />
+            <div className="ts-row-divider" />
+            <ListRowSkeleton avatar={false} />
+          </SkeletonGroup>
         )}
 
         {status === 'ready' && items.length === 0 && (
-          <div className="flex flex-col items-center px-6 py-14 text-center">
-            <span className="ts-soft">
-              <BellIcon />
-            </span>
-            <p className="ts-ink mt-4 text-base font-semibold">No notifications yet</p>
-            <p className="ts-soft mt-1.5 max-w-sm text-sm">
-              When the Registrar moves one of your requests forward, a message will appear here &mdash; and on the bell at
-              the top of every page.
-            </p>
-            <a href="/request-form" className="ts-btn-primary mt-6 inline-flex px-6 py-2.5 text-sm font-medium">
-              Request a document
-            </a>
-          </div>
+          <EmptyState
+            boxed={false}
+            icon={BellIcon}
+            title="You&rsquo;re all caught up"
+            message="New updates about your requests will show up here, and on the bell at the top of every page."
+            action={
+              <a href="/request-form" className="ts-btn-primary inline-flex px-6 py-2.5 text-sm font-medium">
+                Request a document
+              </a>
+            }
+          />
         )}
 
         {status === 'ready' &&

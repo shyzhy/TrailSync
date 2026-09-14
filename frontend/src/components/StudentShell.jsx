@@ -11,6 +11,7 @@ import {
   MenuIcon,
   NAV_ITEMS,
   QuestionIcon,
+  Toast,
 } from './trailsyncUI.jsx';
 import { authFetch, updateStoredUser } from '../lib/auth.js';
 
@@ -32,6 +33,9 @@ const ShellContext = createContext({
   unreadCount: 0,
   setUnreadCount: () => {},
   startTour: () => {},
+  // Pages call this for "it worked" messages: one toast component, one
+  // corner, on both sides of the app.
+  notify: () => {},
 });
 
 /** For pages that change the unread count themselves (the Notifications page). */
@@ -85,9 +89,28 @@ function NotificationBell({ unreadCount, setUnreadCount }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState(null);
   const [failed, setFailed] = useState(false);
+  const [ringing, setRinging] = useState(false);
   const ref = useRef(null);
   const close = useCallback(() => setOpen(false), []);
   useDismiss(open, close, ref);
+
+  /**
+   * Shake the bell when the count goes UP.
+   *
+   * Only upwards: reading notifications drops the number, and a bell that
+   * jiggles because you just cleared it is noise. seenRef starts at the
+   * first count this component ever sees, so arriving on a page with five
+   * unread is not treated as five things arriving right now.
+   */
+  const seenRef = useRef(null);
+  useEffect(() => {
+    const previous = seenRef.current;
+    seenRef.current = unreadCount;
+    if (previous === null || unreadCount <= previous) return undefined;
+    setRinging(true);
+    const t = setTimeout(() => setRinging(false), 750);
+    return () => clearTimeout(t);
+  }, [unreadCount]);
 
   useEffect(() => {
     if (!open) return;
@@ -119,7 +142,9 @@ function NotificationBell({ unreadCount, setUnreadCount }) {
         aria-expanded={open}
         data-tour="bell"
       >
-        <BellIcon />
+        <span className={ringing ? 'ts-bell-ring' : undefined}>
+          <BellIcon />
+        </span>
         {unreadCount > 0 && <span className="ts-bell-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
@@ -590,6 +615,8 @@ export default function StudentShell({
   children,
 }) {
   const [unreadCount, setUnreadCount] = useState(0);
+  const [toast, setToast] = useState(null);
+  const notify = useCallback((message, tone = 'success') => setToast({ message, tone }), []);
   const [tourOpen, setTourOpen] = useState(false);
   const offeredRef = useRef(false);
 
@@ -630,7 +657,7 @@ export default function StudentShell({
   const startTour = useCallback(() => setTourOpen(true), []);
 
   return (
-    <ShellContext.Provider value={{ unreadCount, setUnreadCount, startTour, refreshUnread }}>
+    <ShellContext.Provider value={{ unreadCount, setUnreadCount, startTour, refreshUnread, notify }}>
       <div className="ts-app-shell ts-student md:flex" style={FONT_SANS}>
         <style>{APP_CSS}</style>
         <AppSidebar active={active} onLogout={onLogout} me={me} unreadCount={unreadCount} />
@@ -644,6 +671,7 @@ export default function StudentShell({
         </div>
         <HelpButton onStartTour={startTour} />
         <BottomNav active={active} me={me} unreadCount={unreadCount} onLogout={onLogout} />
+        <Toast message={toast?.message} tone={toast?.tone} onDismiss={() => setToast(null)} />
         {tourOpen && <GuidedTour onClose={finishTour} />}
       </div>
     </ShellContext.Provider>

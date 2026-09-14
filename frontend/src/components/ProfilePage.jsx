@@ -3,9 +3,13 @@ import {
   Avatar,
   avatarUrlFor,
   CameraIcon,
+  BusyLabel,
   ChevronIcon,
   FONT_SERIF,
+  Skeleton,
+  SkeletonGroup,
   Spinner,
+  Toast,
 } from './trailsyncUI.jsx';
 import StudentShell from './StudentShell.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser, updateStoredUser } from '../lib/auth.js';
@@ -96,8 +100,9 @@ function ConfirmPanel({ title, children, confirmLabel, busyLabel, busy, onConfir
           disabled={busy}
           className="ts-btn-primary flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium"
         >
-          {busy && <Spinner />}
-          {busy ? busyLabel : confirmLabel}
+          <BusyLabel busy={busy} busyLabel={busyLabel}>
+            {confirmLabel}
+          </BusyLabel>
         </button>
       </div>
     </div>
@@ -151,6 +156,7 @@ export default function ProfilePage() {
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [confirmingPassword, setConfirmingPassword] = useState(false);
+  const [toast, setToast] = useState(null);
 
   const load = async () => {
     setStatus('loading');
@@ -239,6 +245,7 @@ export default function ProfilePage() {
       setMe(data);
       updateStoredUser(data);
       setProfileSuccess(true);
+      setToast({ message: 'Your changes are saved.' });
     } catch {
       setProfileErrors({ general: NETWORK_ERROR });
     } finally {
@@ -321,6 +328,7 @@ export default function ProfilePage() {
       updateStoredUser(data);
       setAvatarPreview(null);
       setAvatarNotice('Profile picture updated');
+      setToast({ message: 'Profile picture updated.' });
     } catch {
       setAvatarError(NETWORK_ERROR);
       setAvatarPreview(null);
@@ -348,6 +356,7 @@ export default function ProfilePage() {
       setMe(data);
       updateStoredUser(data);
       setAvatarNotice('Profile picture removed');
+      setToast({ message: 'Profile picture removed.' });
     } catch {
       setAvatarError(NETWORK_ERROR);
     } finally {
@@ -423,6 +432,7 @@ export default function ProfilePage() {
         return;
       }
       setPasswordSuccess(true);
+      setToast({ message: 'Your password is changed.' });
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
@@ -452,11 +462,35 @@ export default function ProfilePage() {
         )}
 
         {status === 'loading' && (
-          <div className="ts-card mt-6 space-y-4 p-6">
-            <div className="ts-skeleton h-4 w-40" />
-            <div className="ts-skeleton h-4 w-64" />
-            <div className="ts-skeleton h-4 w-52" />
-          </div>
+          <SkeletonGroup label="Loading your profile" className="mt-6 space-y-6">
+            {/* Same three cards this page renders, so nothing jumps. */}
+            <div className="ts-skeleton-card flex items-center gap-5 p-6 sm:p-8">
+              <Skeleton className="ts-avatar-frame shrink-0 rounded-full" />
+              <div className="min-w-0 flex-1 space-y-3">
+                <Skeleton className="h-5 w-48 max-w-full" />
+                <Skeleton className="h-3.5 w-40 max-w-full" />
+                <Skeleton className="h-3 w-56 max-w-full" />
+              </div>
+            </div>
+            <div className="ts-skeleton-card space-y-4 p-6 sm:p-8">
+              <Skeleton className="h-4 w-24" />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="space-y-2">
+                    <Skeleton className="h-3 w-24" />
+                    <Skeleton className="h-4 w-36 max-w-full" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="ts-skeleton-card space-y-4 p-6 sm:p-8">
+              <Skeleton className="h-4 w-44" />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Skeleton className="h-11 w-full rounded-lg" />
+                <Skeleton className="h-11 w-full rounded-lg" />
+              </div>
+            </div>
+          </SkeletonGroup>
         )}
 
         {status === 'ready' && (
@@ -768,8 +802,9 @@ export default function ProfilePage() {
                     disabled={profileSaving}
                     className="ts-btn-primary flex w-full items-center justify-center gap-2 px-6 py-2.5 text-sm font-medium sm:w-auto"
                   >
-                    {profileSaving && <Spinner />}
-                    {profileSaving ? 'Saving…' : 'Save changes'}
+                    <BusyLabel busy={profileSaving} busyLabel="Saving…">
+                      Save changes
+                    </BusyLabel>
                   </button>
                 </div>
               )}
@@ -906,6 +941,8 @@ export default function ProfilePage() {
           </>
         )}
       </main>
+
+      <Toast message={toast?.message} tone={toast?.tone} onDismiss={() => setToast(null)} />
     </StudentShell>
   );
 }

@@ -595,8 +595,10 @@ export const APP_CSS = `
      foot so it stays visible after an action scrolls the page, and given the
      same glass construction as .ts-card rather than a flat notification bar. */
   .ts-toast {
-    position: fixed; left: 50%; bottom: 24px; z-index: 60;
-    transform: translateX(-50%);
+    /* One home for every confirmation in the app: top-right on anything
+       tablet-sized or bigger. On a phone it spans the top instead, where a
+       right-corner card would cover the bell. */
+    position: fixed; top: 16px; right: 16px; left: 16px; z-index: 65;
     display: flex; align-items: center; gap: 10px;
     max-width: min(92vw, 460px);
     padding: 12px 18px;
@@ -609,10 +611,23 @@ export const APP_CSS = `
     animation: ts-toast-in 0.26s cubic-bezier(0.2, 0.9, 0.3, 1);
   }
   .ts-toast-accent { width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0; background: #7AAD99; }
+  .ts-toast-close {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; margin: -4px -6px -4px 0;
+    border-radius: 999px;
+    color: rgba(247,245,239,0.7);
+    cursor: pointer;
+  }
+  .ts-toast-close:hover { color: #F7F5EF; background: rgba(255,255,255,0.12); }
+  .ts-toast-close:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,135,43,0.65); }
   .ts-toast-error .ts-toast-accent { background: #E2857F; }
+  @media (min-width: 768px) {
+    .ts-toast { left: auto; max-width: 420px; }
+  }
   @keyframes ts-toast-in {
-    from { opacity: 0; transform: translateX(-50%) translateY(10px); }
-    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+    from { opacity: 0; transform: translateY(-10px); }
+    to   { opacity: 1; transform: none; }
   }
   @media (prefers-reduced-motion: reduce) { .ts-toast { animation: none; } }
 
@@ -1504,6 +1519,155 @@ export const APP_CSS = `
   .ts-btn-outline-danger:disabled { opacity: 0.45; cursor: not-allowed; }
 
   /* =====================================================================
+     LOADING, EMPTY AND MOTION
+     ===================================================================== */
+
+  /* Placeholder surfaces read as unlit glass: the same paper tone as a real
+     card with a light sweep passing over it, rather than a grey box that
+     belongs to some other app. The sweep is a pseudo-element transform, not
+     an animated background-position, so it stays smooth on a long list. */
+  .ts-skeleton {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(180deg, rgba(236,232,221,0.95) 0%, rgba(228,223,210,0.9) 100%);
+    border-radius: 8px;
+  }
+  .ts-skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      rgba(255,255,255,0) 0%,
+      rgba(255,255,255,0.38) 45%,
+      rgba(255,255,255,0.62) 55%,
+      rgba(255,255,255,0) 100%
+    );
+    animation: ts-sweep 1.5s ease-in-out infinite;
+  }
+  @keyframes ts-sweep { to { transform: translateX(100%); } }
+
+  /* A skeleton standing in for a whole card keeps the card's own glass
+     edge, so the page does not visibly change shape when data lands. */
+  .ts-skeleton-card {
+    position: relative;
+    border-radius: 14px;
+    background: linear-gradient(165deg, rgba(255,255,255,0.86) 0%, rgba(250,248,243,0.70) 100%);
+    border: 1px solid rgba(255,255,255,0.65);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), 0 14px 30px -18px rgba(31,41,55,0.26);
+  }
+
+  /* ---- Empty states ---- */
+  .ts-empty-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 999px;
+    color: #24406B;
+    background: linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(236,240,246,0.9) 100%);
+    border: 1px solid rgba(227,223,210,0.95);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 4px 12px -6px rgba(31,41,55,0.25);
+  }
+  .ts-empty-icon > svg { width: 22px; height: 22px; }
+
+  /* ---- Busy buttons -------------------------------------------------
+     The idle and busy labels sit in the same grid cell, so the button is
+     always as wide as the longer of the two and nothing beside it moves
+     when the label changes. */
+  .ts-busy-label { display: inline-grid; align-items: center; justify-items: center; }
+  .ts-busy-label > * { grid-area: 1 / 1; display: inline-flex; align-items: center; gap: 8px; }
+  .ts-busy-label > .ts-busy-on { visibility: hidden; }
+  .ts-busy-label[data-busy='1'] > .ts-busy-off { visibility: hidden; }
+  .ts-busy-label[data-busy='1'] > .ts-busy-on { visibility: visible; }
+
+  /* ---- Success seal: circle drawn, then the tick ---- */
+  .ts-seal-circle {
+    stroke-dasharray: 166;
+    stroke-dashoffset: 166;
+    animation: ts-draw 0.42s ease-out forwards;
+  }
+  .ts-seal-check {
+    stroke-dasharray: 48;
+    stroke-dashoffset: 48;
+    animation: ts-draw 0.26s ease-out 0.34s forwards;
+  }
+  @keyframes ts-draw { to { stroke-dashoffset: 0; } }
+
+  /* ---- Page and step transitions ----------------------------------
+     The page wrapper fades and must NOT transform. Every fixed element in
+     the app - the toast, the help button, the phone nav bar, the tour
+     spotlight - is a descendant of this wrapper, and ANY transform on an
+     ancestor (an identity matrix included, which is what animation-fill-mode
+     leaves behind) makes position: fixed resolve against that ancestor
+     instead of the viewport. They then scroll away with the page. Opacity
+     creates a stacking context but not a containing block, so it is safe. */
+  .ts-page-enter { animation: ts-page-fade 0.22s ease-out both; }
+  @keyframes ts-page-fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  /* The slight rise lives on the page's own content, which never contains a
+     fixed element. */
+  .ts-page-enter main { animation: ts-page-rise 0.24s ease-out both; }
+  @keyframes ts-page-rise {
+    from { opacity: 0; transform: translateY(7px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .ts-step-enter-fwd { animation: ts-step-fwd 0.24s cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+  .ts-step-enter-back { animation: ts-step-back 0.24s cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+  @keyframes ts-step-fwd {
+    from { opacity: 0; transform: translateX(22px); }
+    to   { opacity: 1; transform: none; }
+  }
+  @keyframes ts-step-back {
+    from { opacity: 0; transform: translateX(-22px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* ---- The bell, when something new arrives ---- */
+  .ts-bell-ring { animation: ts-ring 0.7s ease-in-out; transform-origin: 50% 12%; }
+  @keyframes ts-ring {
+    0%, 100% { transform: rotate(0); }
+    12% { transform: rotate(-13deg); }
+    26% { transform: rotate(11deg); }
+    40% { transform: rotate(-8deg); }
+    54% { transform: rotate(6deg); }
+    68% { transform: rotate(-3deg); }
+  }
+
+  /* Every card that does something now also presses IN when clicked, not
+     only up on hover: ts-quick-card had this, the document picker and the
+     catalogue cards did not, so the same gesture felt different depending
+     on which screen you were on. */
+  .ts-select-card:active, .ts-guide-card:active, .ts-card-hoverable:active {
+    transform: translateY(1px);
+    box-shadow: inset 0 3px 9px rgba(31,41,55,0.15), inset 0 -1px 0 rgba(255,255,255,0.45);
+  }
+  .ts-card-hoverable { transition: transform 150ms ease, box-shadow 150ms ease; }
+
+  /* Interactive rows lift the same way cards do, so "this does something"
+     looks the same everywhere. */
+  .ts-row-hover { transition: background 150ms ease, transform 150ms ease, box-shadow 150ms ease; }
+  .ts-row-hover:hover {
+    background: rgba(36,64,107,0.045);
+    box-shadow: inset 3px 0 0 rgba(184,135,43,0.55);
+  }
+  .ts-row-hover:active { background: rgba(36,64,107,0.07); }
+
+  /* ---- One switch for everything above ----------------------------- */
+  @media (prefers-reduced-motion: reduce) {
+    .ts-skeleton::after { animation: none; }
+    .ts-seal-circle, .ts-seal-check { animation: none; stroke-dashoffset: 0; }
+    .ts-page-enter, .ts-page-enter main, .ts-step-enter-fwd, .ts-step-enter-back, .ts-bell-ring { animation: none; }
+    .ts-card-hoverable:hover, .ts-guide-card:hover, .ts-ticket-clickable:hover, .ts-row-hover:hover {
+      transform: none;
+    }
+  }
+
+  /* =====================================================================
      PHONE OVERRIDES — deliberately last in this sheet.
      Everything here overrides a rule defined above it. A media query adds
      no specificity, so source order is what makes these win.
@@ -2384,6 +2548,221 @@ export function RegistrarMobileHeader({ active, onLogout }) {
  * did deliberately, so a screen reader should mention it without cutting off
  * whatever it is currently reading.
  */
+
+// ---------------------------------------------------------------------------
+// Loading placeholders
+// ---------------------------------------------------------------------------
+
+/**
+ * One shimmering placeholder bar. Everything below is built from this, so
+ * the loading look is defined in exactly one place.
+ *
+ * Shapes are deliberately close to the real content's: a stat card's
+ * placeholder is a stat card, not a grey rectangle, so nothing jumps or
+ * reflows when the data lands.
+ */
+export function Skeleton({ className = '', style }) {
+  return <div className={`ts-skeleton ${className}`} style={style} aria-hidden="true" />;
+}
+
+/** Wrapper that announces a loading region once, instead of every bar. */
+export function SkeletonGroup({ label = 'Loading', children, className = '' }) {
+  return (
+    <div role="status" aria-busy="true" aria-label={label} className={className}>
+      {children}
+    </div>
+  );
+}
+
+/** Dashboard stat card: icon tile, big number, caption. */
+export function StatCardSkeleton() {
+  return (
+    <div className="ts-skeleton-card p-5">
+      <Skeleton className="h-10 w-10 rounded-xl" />
+      <Skeleton className="mt-4 h-8 w-14" />
+      <Skeleton className="mt-2.5 h-3.5 w-28" />
+    </div>
+  );
+}
+
+/** A list row with an avatar/dot, a title line and a meta line. */
+export function ListRowSkeleton({ avatar = true }) {
+  return (
+    <div className="flex items-center gap-3 px-5 py-4">
+      {avatar && <Skeleton className="h-8 w-8 shrink-0 rounded-full" />}
+      <div className="min-w-0 flex-1 space-y-2">
+        <Skeleton className="h-3.5 w-40 max-w-full" />
+        <Skeleton className="h-3 w-24 max-w-full" />
+      </div>
+    </div>
+  );
+}
+
+/** The perforated ticket on Track Requests: stub block plus body. */
+export function TicketSkeleton() {
+  return (
+    <div className="ts-skeleton-card flex overflow-hidden">
+      <Skeleton className="m-3 h-20 w-24 shrink-0 rounded-lg" />
+      <div className="flex-1 space-y-2.5 p-4">
+        <Skeleton className="h-4 w-48 max-w-full" />
+        <Skeleton className="h-3 w-32 max-w-full" />
+        <Skeleton className="mt-3 h-2 w-full" />
+      </div>
+    </div>
+  );
+}
+
+/** A Credential Guide catalogue card. */
+export function GuideCardSkeleton() {
+  return (
+    <div className="ts-skeleton-card space-y-3 p-5">
+      <Skeleton className="h-9 w-9 rounded-xl" />
+      <Skeleton className="h-4 w-40 max-w-full" />
+      <Skeleton className="h-3 w-full" />
+      <Skeleton className="h-3 w-2/3" />
+      <div className="flex gap-2 pt-1">
+        <Skeleton className="h-6 w-24 rounded-full" />
+        <Skeleton className="h-6 w-20 rounded-full" />
+      </div>
+    </div>
+  );
+}
+
+/** One row of a records table, sized by its column widths (in grid units). */
+export function TableRowSkeleton({ widths = [2, 4, 2, 3, 1] }) {
+  const total = widths.reduce((a, b) => a + b, 0);
+  return (
+    <div className="grid items-center gap-3 px-5 py-4" style={{ gridTemplateColumns: `repeat(${total}, minmax(0, 1fr))` }}>
+      {widths.map((w, i) => (
+        <Skeleton key={i} className="h-4" style={{ gridColumn: `span ${w} / span ${w}` }} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The Request Review page while its one request loads. Mirrors that page's
+ * two-column shape so the real content lands in the same places.
+ */
+export function DetailPageSkeleton() {
+  return (
+    <SkeletonGroup label="Loading this request" className="mt-4">
+      <Skeleton className="h-9 w-56 max-w-full" />
+      <Skeleton className="mt-3 h-4 w-72 max-w-full" />
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
+        <div className="ts-skeleton-card space-y-4 p-6 lg:col-span-3">
+          <Skeleton className="h-5 w-28" />
+          <Skeleton className="h-4 w-56 max-w-full" />
+          <Skeleton className="h-3 w-44 max-w-full" />
+          <div className="grid grid-cols-1 gap-4 pt-3 sm:grid-cols-2">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="space-y-2">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-4 w-32 max-w-full" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="ts-skeleton-card space-y-4 p-6 lg:col-span-2">
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-5 w-40 max-w-full" />
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="mt-6 h-11 w-full rounded-lg" />
+        </div>
+      </div>
+    </SkeletonGroup>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Empty states
+// ---------------------------------------------------------------------------
+
+/**
+ * What a list looks like when there is legitimately nothing in it.
+ *
+ * Always the same three parts in the same order - line-art icon, one
+ * headline, one sentence - with an action only when there is something
+ * useful to do. An empty list that explains itself reads as the app working;
+ * a blank panel reads as the app broken.
+ */
+export function EmptyState({
+  icon: Icon = InboxIcon,
+  title,
+  message,
+  action,
+  className = '',
+  boxed = true,
+}) {
+  return (
+    <div
+      className={`flex flex-col items-center px-6 py-14 text-center ${boxed ? 'ts-card' : ''} ${className}`}
+    >
+      <span className="ts-empty-icon" aria-hidden="true">
+        <Icon />
+      </span>
+      <p className="ts-ink mt-4 text-base font-semibold">{title}</p>
+      {message && <p className="ts-soft mt-1.5 max-w-sm text-sm leading-relaxed">{message}</p>}
+      {action && <div className="mt-5">{action}</div>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Busy buttons
+// ---------------------------------------------------------------------------
+
+/**
+ * The label of a button that can be working.
+ *
+ * Both labels occupy the same grid cell, so the button keeps the width of
+ * the longer one and nothing around it shifts when it starts working. Pair
+ * it with disabled={busy}, which is what actually stops a second submit.
+ */
+export function BusyLabel({ busy, busyLabel, children }) {
+  return (
+    <span className="ts-busy-label" data-busy={busy ? '1' : '0'}>
+      <span className="ts-busy-off">{children}</span>
+      <span className="ts-busy-on">
+        <Spinner />
+        {busyLabel || children}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * A seal that draws itself: the circle, then the tick.
+ *
+ * For the two moments worth marking - a request sent, an account created -
+ * where a toast would be too quiet. Everything smaller uses a toast.
+ */
+export function SuccessSeal({ size = 64 }) {
+  return (
+    <svg viewBox="0 0 64 64" width={size} height={size} fill="none" aria-hidden="true">
+      <circle cx="32" cy="32" r="26.5" fill="rgba(79,122,106,0.10)" />
+      <circle
+        className="ts-seal-circle"
+        cx="32"
+        cy="32"
+        r="26.5"
+        stroke="#4F7A6A"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        transform="rotate(-90 32 32)"
+      />
+      <path
+        className="ts-seal-check"
+        d="M20.5 33.5 L28.5 41.5 L44 25"
+        stroke="#33574A"
+        strokeWidth="3.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function Toast({ message, tone = 'success', onDismiss }) {
   useEffect(() => {
     if (!message) return undefined;
@@ -2395,7 +2774,12 @@ export function Toast({ message, tone = 'success', onDismiss }) {
   return (
     <div role="status" aria-live="polite" className={`ts-toast ${tone === 'error' ? 'ts-toast-error' : ''}`}>
       <span className="ts-toast-accent" aria-hidden="true" />
-      <span>{message}</span>
+      <span className="flex-1">{message}</span>
+      {/* Auto-dismiss is the normal path; this is for anyone who wants it
+          gone now, or who cannot wait out the timer. */}
+      <button type="button" onClick={() => onDismiss?.()} aria-label="Dismiss" className="ts-toast-close">
+        <CloseIcon />
+      </button>
     </div>
   );
 }

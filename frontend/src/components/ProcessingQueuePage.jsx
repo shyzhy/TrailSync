@@ -2,10 +2,15 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   APP_CSS,
   ChevronIcon,
+  DocumentIcon,
+  EmptyState,
   FONT_SANS,
   FONT_SERIF,
+  InboxIcon,
   RegistrarMobileHeader,
   RegistrarSidebar,
+  SkeletonGroup,
+  TableRowSkeleton,
 } from './trailsyncUI.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 import {
@@ -21,18 +26,6 @@ const LOGIN_PATH = '/';
 /** Where Review goes. Real navigation now rather than inline selection — a
  *  review is a page of its own, so it can be linked, reloaded and shared. */
 const reviewPath = (id) => `/registrar/queue/${id}`;
-
-function RowSkeleton() {
-  return (
-    <div className="grid grid-cols-12 items-center gap-3 px-5 py-4">
-      <div className="ts-skeleton col-span-2 h-4" />
-      <div className="ts-skeleton col-span-4 h-4" />
-      <div className="ts-skeleton col-span-2 h-4" />
-      <div className="ts-skeleton col-span-3 h-5 rounded-full" />
-      <div className="ts-skeleton col-span-1 h-7 rounded-md" />
-    </div>
-  );
-}
 
 export default function ProcessingQueuePage() {
   const [status, setStatus] = useState('loading'); // 'loading' | 'ready' | 'error'
@@ -217,29 +210,34 @@ export default function ProcessingQueuePage() {
           </div>
 
           {status === 'loading' && (
-            <>
+            <SkeletonGroup label="Loading requests">
+              {/* Column spans match the real table's, so rows do not jump
+                  sideways when the data arrives. */}
               <div className="ts-row-divider" />
-              <RowSkeleton />
+              <TableRowSkeleton widths={[2, 4, 2, 3, 1]} />
               <div className="ts-row-divider" />
-              <RowSkeleton />
+              <TableRowSkeleton widths={[2, 4, 2, 3, 1]} />
               <div className="ts-row-divider" />
-              <RowSkeleton />
-            </>
+              <TableRowSkeleton widths={[2, 4, 2, 3, 1]} />
+            </SkeletonGroup>
           )}
 
           {status === 'ready' && results.length === 0 && (
-            <div className="px-6 py-16 text-center">
-              <p className="ts-ink text-base font-semibold">
-                {statusFilter === STATUS.SUBMITTED && !search && !dateFrom && !dateTo
-                  ? 'Nothing waiting for review'
-                  : 'Nothing here right now'}
-              </p>
-              <p className="ts-soft mx-auto mt-1.5 max-w-md text-sm">
-                {statusFilter === STATUS.SUBMITTED && !search && !dateFrom && !dateTo
-                  ? 'You are all caught up. New requests appear here as students send them.'
-                  : 'No requests are at this stage. Try another stage, a wider date range, or a different search.'}
-              </p>
-            </div>
+            statusFilter === STATUS.SUBMITTED && !search && !dateFrom && !dateTo ? (
+              <EmptyState
+                boxed={false}
+                icon={InboxIcon}
+                title="No pending reviews right now"
+                message="New submissions will appear here as students send them."
+              />
+            ) : (
+              <EmptyState
+                boxed={false}
+                icon={DocumentIcon}
+                title="Nothing at this stage"
+                message="No requests are here right now. Try another stage, a wider date range, or a different search."
+              />
+            )
           )}
 
           {status === 'ready' &&

@@ -6,9 +6,13 @@ import {
   DocumentIcon,
   FONT_SERIF,
   greetingForNow,
-  InboxIcon,
+  EmptyState,
   PlusCircleIcon,
+  ListRowSkeleton,
   SearchIcon,
+  SkeletonGroup,
+  StatCardSkeleton,
+  TicketIcon,
 } from './trailsyncUI.jsx';
 import StudentShell from './StudentShell.jsx';
 import MiniCalendar from './MiniCalendar.jsx';
@@ -175,9 +179,9 @@ export default function StudentDashboard() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {status === 'loading' ? (
                 <>
-                  <StatSkeleton />
-                  <StatSkeleton />
-                  <StatSkeleton />
+                  <StatCardSkeleton />
+                  <StatCardSkeleton />
+                  <StatCardSkeleton />
                 </>
               ) : (
                 <>
@@ -253,27 +257,27 @@ export default function StudentDashboard() {
 
               <div className="ts-card mt-4 overflow-hidden">
                 {status === 'loading' && (
-                  <>
-                    <RowSkeleton />
+                  <SkeletonGroup label="Loading your recent requests">
+                    <ListRowSkeleton avatar={false} />
                     <div className="ts-row-divider" />
-                    <RowSkeleton />
+                    <ListRowSkeleton avatar={false} />
                     <div className="ts-row-divider" />
-                    <RowSkeleton />
-                  </>
+                    <ListRowSkeleton avatar={false} />
+                  </SkeletonGroup>
                 )}
 
                 {status === 'ready' && recent?.length === 0 && (
-                  <div className="flex flex-col items-center px-6 py-12 text-center">
-                    <InboxIcon />
-                    <p className="ts-ink mt-4 text-base font-semibold">No requests yet</p>
-                    <p className="ts-soft mt-1.5 max-w-sm text-sm">
-                      You haven&rsquo;t requested any documents yet. Tap below to request your first one &mdash; it
-                      only takes a few minutes.
-                    </p>
-                    <a href="/request-form" className="ts-btn-primary mt-5 inline-flex px-6 py-2.5 text-sm font-medium">
-                      Request my first document
-                    </a>
-                  </div>
+                  <EmptyState
+                    boxed={false}
+                    icon={TicketIcon}
+                    title="You haven&rsquo;t requested anything yet"
+                    message="Your first request takes a few taps, and you can follow it right here afterwards."
+                    action={
+                      <a href="/request-form" className="ts-btn-primary inline-flex px-6 py-2.5 text-sm font-medium">
+                        Request my first document
+                      </a>
+                    }
+                  />
                 )}
 
                 {status === 'ready' && recent && recent.length > 0 && (

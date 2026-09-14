@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
   API_BASE_URL,
-  CheckSealIcon,
+  BusyLabel,
+  SuccessSeal,
   ChevronIcon,
   EyeIcon,
   EyeOffIcon,
@@ -223,7 +224,7 @@ export default function CreateAccountPage() {
         <div className="ts-rule mt-3" />
 
         <div className="mt-10">
-          <CheckSealIcon />
+          <SuccessSeal />
           <h2 className="ts-ink mt-5 text-2xl font-semibold" style={FONT_SERIF}>
             Account created!
           </h2>
@@ -550,8 +551,9 @@ export default function CreateAccountPage() {
           disabled={loading}
           className="ts-btn-primary flex w-full items-center justify-center gap-2 py-2.5 text-sm font-medium"
         >
-          {loading && <Spinner />}
-          {loading ? 'Creating your account…' : 'Create account'}
+          <BusyLabel busy={loading} busyLabel="Creating your account…">
+            Create account
+          </BusyLabel>
         </button>
       </form>
 

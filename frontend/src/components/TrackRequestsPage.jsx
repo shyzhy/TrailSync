@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  EmptyState,
   FONT_SERIF,
-  InboxIcon,
   SearchIcon,
+  SkeletonGroup,
+  TicketIcon,
+  TicketSkeleton,
 } from './trailsyncUI.jsx';
 import StudentShell from './StudentShell.jsx';
 import TicketCard from './TicketCard.jsx';
@@ -19,19 +22,6 @@ const FILTER_TABS = [
   ...LIFECYCLE.map((value) => ({ value, label: studentStatusLabel(value) })),
   { value: STATUS.REJECTED, label: studentStatusLabel(STATUS.REJECTED) },
 ];
-
-function TicketSkeleton() {
-  return (
-    <div className="ts-card flex overflow-hidden">
-      <div className="ts-skeleton m-3 h-20 w-24 shrink-0 rounded-lg" />
-      <div className="flex-1 space-y-2 p-4">
-        <div className="ts-skeleton h-4 w-48" />
-        <div className="ts-skeleton h-3 w-32" />
-        <div className="ts-skeleton mt-3 h-2 w-full" />
-      </div>
-    </div>
-  );
-}
 
 export default function TrackRequestsPage() {
   const [status, setStatus] = useState('loading'); // 'loading' | 'ready' | 'error'
@@ -176,44 +166,43 @@ export default function TrackRequestsPage() {
 
         <div className="mt-6 space-y-4">
           {status === 'loading' && (
-            <>
+            <SkeletonGroup label="Loading your requests" className="space-y-4">
               <TicketSkeleton />
               <TicketSkeleton />
               <TicketSkeleton />
-            </>
+            </SkeletonGroup>
           )}
 
           {status === 'ready' && results.length === 0 && (
-            <div className="ts-card flex flex-col items-center px-6 py-14 text-center">
-              <InboxIcon />
-              {/* Two different situations that used to share one message: a
-                  filter hiding everything needs "show all", not "request". */}
-              {activeFilter !== 'All' || search ? (
-                <>
-                  <p className="ts-ink mt-4 text-base font-semibold">
-                    {search ? `No requests match “${search}”` : 'No requests here yet'}
-                  </p>
-                  <p className="ts-soft mt-1.5 max-w-sm text-sm">
-                    {search
-                      ? 'Check the tracking number on your form or claim stub, or show all your requests instead.'
-                      : 'None of your requests are at this step right now.'}
-                  </p>
-                  <button type="button" onClick={clearFilters} className="ts-btn-primary mt-5 px-6 py-2.5 text-sm font-medium">
+            /* Two different situations that used to share one message: a
+               filter hiding everything needs "show all", not "request". */
+            activeFilter !== 'All' || search ? (
+              <EmptyState
+                icon={SearchIcon}
+                title="No requests found"
+                message={
+                  search
+                    ? 'Check the tracking number on your form or claim stub, or show all your requests instead.'
+                    : 'None of your requests are at this step right now. Try another step, or show them all.'
+                }
+                action={
+                  <button type="button" onClick={clearFilters} className="ts-btn-primary px-6 py-2.5 text-sm font-medium">
                     Show all my requests
                   </button>
-                </>
-              ) : (
-                <>
-                  <p className="ts-ink mt-4 text-base font-semibold">No requests yet</p>
-                  <p className="ts-soft mt-1.5 max-w-sm text-sm">
-                    You haven&rsquo;t requested any documents yet. Tap below to request your first one.
-                  </p>
-                  <a href="/request-form" className="ts-btn-primary mt-5 px-6 py-2.5 text-sm font-medium">
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={TicketIcon}
+                title="You haven&rsquo;t requested anything yet"
+                message="Your first request takes a few taps, and you can follow it right here afterwards."
+                action={
+                  <a href="/request-form" className="ts-btn-primary px-6 py-2.5 text-sm font-medium">
                     Request my first document
                   </a>
-                </>
-              )}
-            </div>
+                }
+              />
+            )
           )}
 
           {status === 'ready' &&

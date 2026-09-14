@@ -7,7 +7,11 @@ import {
   RegistrarSidebar,
   greetingForNow,
   Avatar,
+  EmptyState,
   InboxIcon,
+  ListRowSkeleton,
+  SkeletonGroup,
+  StatCardSkeleton,
   WarningIcon,
 } from './trailsyncUI.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
@@ -45,28 +49,6 @@ function formatRelativeTime(iso) {
 
 function todayLong() {
   return new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-}
-
-function StatSkeleton() {
-  return (
-    <div className="ts-card p-5">
-      <div className="ts-skeleton h-4 w-24" />
-      <div className="ts-skeleton mt-4 h-7 w-14" />
-      <div className="ts-skeleton mt-2 h-3.5 w-28" />
-    </div>
-  );
-}
-
-function RowSkeleton() {
-  return (
-    <div className="flex items-center gap-3 px-5 py-4">
-      <div className="ts-skeleton h-8 w-8 shrink-0 rounded-full" />
-      <div className="min-w-0 flex-1 space-y-2">
-        <div className="ts-skeleton h-3.5 w-32" />
-        <div className="ts-skeleton h-3 w-24" />
-      </div>
-    </div>
-  );
 }
 
 export default function RegistrarDashboardPage() {
@@ -219,10 +201,10 @@ export default function RegistrarDashboardPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {status === 'loading' ? (
             <>
-              <StatSkeleton />
-              <StatSkeleton />
-              <StatSkeleton />
-              <StatSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
             </>
           ) : (
             <>
@@ -275,21 +257,22 @@ export default function RegistrarDashboardPage() {
 
             <div className="ts-card mt-4 overflow-hidden">
               {status === 'loading' && (
-                <>
-                  <RowSkeleton />
+                <SkeletonGroup label="Loading the newest requests">
+                  <ListRowSkeleton />
                   <div className="ts-row-divider" />
-                  <RowSkeleton />
+                  <ListRowSkeleton />
                   <div className="ts-row-divider" />
-                  <RowSkeleton />
-                </>
+                  <ListRowSkeleton />
+                </SkeletonGroup>
               )}
 
               {status === 'ready' && recentSubmissions?.length === 0 && (
-                <div className="flex flex-col items-center px-6 py-12 text-center">
-                  <InboxIcon />
-                  <p className="ts-ink mt-4 text-base font-semibold">Nothing waiting</p>
-                  <p className="ts-soft mt-1 text-sm">New requests will show up here as students send them.</p>
-                </div>
+                <EmptyState
+                  boxed={false}
+                  icon={InboxIcon}
+                  title="No pending reviews right now"
+                  message="New submissions will appear here as students send them."
+                />
               )}
 
               {status === 'ready' && recentSubmissions && recentSubmissions.length > 0 && (
@@ -344,21 +327,20 @@ export default function RegistrarDashboardPage() {
 
             <div className="ts-card mt-4 overflow-hidden">
               {status === 'loading' && (
-                <>
-                  <RowSkeleton />
+                <SkeletonGroup label="Loading today's pickups">
+                  <ListRowSkeleton avatar={false} />
                   <div className="ts-row-divider" />
-                  <RowSkeleton />
-                </>
+                  <ListRowSkeleton avatar={false} />
+                </SkeletonGroup>
               )}
 
               {status === 'ready' && todaysPickups?.length === 0 && (
-                <div className="flex flex-col items-center px-6 py-12 text-center">
-                  <InboxIcon />
-                  <p className="ts-ink mt-4 text-base font-semibold">No pickups today</p>
-                  <p className="ts-soft mt-1 text-sm">
-                    Documents you mark ready show up here on their pickup date.
-                  </p>
-                </div>
+                <EmptyState
+                  boxed={false}
+                  icon={InboxIcon}
+                  title="No pickups today"
+                  message="Documents you mark ready show up here on their pickup date."
+                />
               )}
 
               {status === 'ready' && todaysPickups && todaysPickups.length > 0 && (

@@ -2,13 +2,17 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   APP_CSS,
   ArchiveIcon,
+  BusyLabel,
   DownloadIcon,
+  EmptyState,
   FONT_SANS,
   FONT_SERIF,
   RegistrarMobileHeader,
   RegistrarSidebar,
   SearchIcon,
-  Spinner,
+  SkeletonGroup,
+  TableRowSkeleton,
+  Toast,
 } from './trailsyncUI.jsx';
 import { authFetch, clearSession, getAccessToken, getStoredUser } from '../lib/auth.js';
 
@@ -67,6 +71,7 @@ export default function ReleasedDocumentsPage() {
   const [rows, setRows] = useState([]);
   const [pageInfo, setPageInfo] = useState({ count: 0, start: 0, end: 0, next: null, previous: null });
   const [exportState, setExportState] = useState(null); // null | 'working' | 'error'
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 350);
@@ -162,6 +167,7 @@ export default function ReleasedDocumentsPage() {
       anchor.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
       setExportState(null);
+      setToast({ message: `Downloaded ${pageInfo.count} record${pageInfo.count === 1 ? '' : 's'} as a spreadsheet.` });
     } catch {
       setExportState('error');
     }
@@ -198,8 +204,10 @@ export default function ReleasedDocumentsPage() {
             disabled={exportState === 'working' || (status === 'ready' && rows.length === 0)}
             className="ts-btn-primary flex shrink-0 items-center justify-center gap-2 px-5 py-3 text-sm font-medium"
           >
-            {exportState === 'working' ? <Spinner /> : <DownloadIcon />}
-            {exportState === 'working' ? 'Preparing…' : 'Export to Excel'}
+            <BusyLabel busy={exportState === 'working'} busyLabel="Preparing…">
+              <DownloadIcon />
+              Export to Excel
+            </BusyLabel>
           </button>
         </div>
 
@@ -275,31 +283,33 @@ export default function ReleasedDocumentsPage() {
         )}
 
         {status === 'loading' && (
-          <div className="ts-card mt-6 space-y-4 p-6">
-            <div className="ts-skeleton h-4 w-48" />
-            <div className="ts-skeleton h-4 w-full" />
-            <div className="ts-skeleton h-4 w-full" />
-            <div className="ts-skeleton h-4 w-2/3" />
-          </div>
+          <SkeletonGroup label="Loading released documents" className="ts-card mt-6 overflow-hidden">
+            <TableRowSkeleton widths={[2, 2, 3, 3, 2, 2, 2, 3]} />
+            <div className="ts-row-divider" />
+            <TableRowSkeleton widths={[2, 2, 3, 3, 2, 2, 2, 3]} />
+            <div className="ts-row-divider" />
+            <TableRowSkeleton widths={[2, 2, 3, 3, 2, 2, 2, 3]} />
+          </SkeletonGroup>
         )}
 
         {status === 'ready' && rows.length === 0 && (
-          <div className="ts-card mt-6 flex flex-col items-center px-6 py-16 text-center">
-            <ArchiveIcon />
-            <p className="ts-ink mt-4 text-base font-semibold">
-              {filtered ? 'Nothing matches these filters' : 'No documents released this month yet'}
-            </p>
-            <p className="ts-soft mt-1.5 max-w-md text-sm">
-              {filtered
-                ? 'Try a wider date range, or a different name or request code.'
-                : 'Documents appear here as soon as you release them at Window 6.'}
-            </p>
-            {filtered && (
-              <button type="button" onClick={resetFilters} className="ts-btn-primary mt-5 px-6 py-2.5 text-sm font-medium">
-                Show this month
-              </button>
-            )}
-          </div>
+          <EmptyState
+            className="mt-6"
+            icon={ArchiveIcon}
+            title={filtered ? 'No documents released in this period' : 'Nothing released this month yet'}
+            message={
+              filtered
+                ? 'Try a different date range, or another name or request code.'
+                : 'Documents appear here as soon as you release them at Window 6.'
+            }
+            action={
+              filtered ? (
+                <button type="button" onClick={resetFilters} className="ts-btn-primary px-6 py-2.5 text-sm font-medium">
+                  Show this month
+                </button>
+              ) : null
+            }
+          />
         )}
 
         {status === 'ready' && rows.length > 0 && (
@@ -412,6 +422,8 @@ export default function ReleasedDocumentsPage() {
           </>
         )}
       </main>
+
+      <Toast message={toast?.message} tone={toast?.tone} onDismiss={() => setToast(null)} />
     </div>
   );
 }

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BookIcon,
   CheckIcon,
-  CheckSealIcon,
+  BusyLabel,
+  SuccessSeal,
   ChevronIcon,
   DocumentIcon,
   FONT_SERIF,
@@ -353,10 +354,22 @@ export default function RequestFormPage() {
   const step3Valid = step3Missing.length === 0;
   const step4Valid = confirmAccurate;
 
+  // Which way the content should travel. Moving to a later step slides in
+  // from the right, going back slides in from the left, so the movement
+  // agrees with the numbers in the step indicator above it.
+  const [stepDirection, setStepDirection] = useState('fwd');
+
   const goToStep = (n) => {
     setGeneralError('');
+    setStepDirection(n >= step ? 'fwd' : 'back');
     setStep(n);
   };
+
+  // The key remounts the panel so the animation replays on every move; it
+  // is passed explicitly rather than spread, since React reads key before
+  // props and warns when it arrives through a spread.
+  const stepKey = `step-${step}`;
+  const stepMotion = { className: `ts-step-enter-${stepDirection}` };
 
   const handleSubmit = async () => {
     setGeneralError('');
@@ -423,7 +436,7 @@ export default function RequestFormPage() {
       <main className="mx-auto w-full max-w-2xl flex-1 px-6 pb-8 pt-4 sm:pb-10 sm:pt-6 lg:pt-3 lg:px-10">
           <div className="ts-card p-8 text-center sm:p-10">
             <div className="flex justify-center">
-              <CheckSealIcon />
+              <SuccessSeal />
             </div>
             <h1 className="ts-ink mt-5 text-2xl font-semibold" style={FONT_SERIF}>
               Your request has been sent!
@@ -497,7 +510,7 @@ export default function RequestFormPage() {
           <>
             {/* ============================ STEP 1 ============================ */}
             {step === 1 && (
-              <div>
+              <div key={stepKey} {...stepMotion}>
                 <h1 className="ts-ink text-2xl font-semibold" style={FONT_SERIF}>
                   Which document do you need?
                 </h1>
@@ -552,7 +565,7 @@ export default function RequestFormPage() {
 
             {/* ============================ STEP 2 ============================ */}
             {step === 2 && (
-              <div>
+              <div key={stepKey} {...stepMotion}>
                 <h1 className="ts-ink text-2xl font-semibold" style={FONT_SERIF}>
                   A few details about your {selectedType?.name || 'document'}
                 </h1>
@@ -943,7 +956,7 @@ export default function RequestFormPage() {
 
             {/* ============================ STEP 3 ============================ */}
             {step === 3 && (
-              <div>
+              <div key={stepKey} {...stepMotion}>
                 <div className="flex items-center">
                   <h1 className="ts-ink text-2xl font-semibold" style={FONT_SERIF}>
                     Who will pick it up?
@@ -1079,7 +1092,7 @@ export default function RequestFormPage() {
 
             {/* ============================ STEP 4 ============================ */}
             {step === 4 && (
-              <div>
+              <div key={stepKey} {...stepMotion}>
                 <h1 className="ts-ink text-2xl font-semibold" style={FONT_SERIF}>
                   Check your request
                 </h1>
@@ -1280,8 +1293,9 @@ export default function RequestFormPage() {
                     onClick={handleSubmit}
                     className="ts-btn-primary flex items-center justify-center gap-2 px-6 py-2.5 text-sm font-medium"
                   >
-                    {submitting && <Spinner />}
-                    {submitting ? 'Sending…' : 'Send request'}
+                    <BusyLabel busy={submitting} busyLabel="Sending…">
+                      Send request
+                    </BusyLabel>
                   </button>
                 </div>
               </div>
