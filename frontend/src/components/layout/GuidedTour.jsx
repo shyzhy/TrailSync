@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FONT_SERIF } from '../../styles/fonts.js';
+import { useBackButton } from '../../lib/backButton.js';
 
 // Each step lists targets in order of preference; the first one visible wins, so one tour works on desktop and phone.
 const TOUR_STEPS = [
@@ -46,6 +47,7 @@ export function GuidedTour({ onClose }) {
   const [rect, setRect] = useState(null);
   const [viaMenu, setViaMenu] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
+  useBackButton(true, onClose, { overlay: true });
   const cardRef = useRef(null);
   const primaryRef = useRef(null);
   const step = TOUR_STEPS[index];

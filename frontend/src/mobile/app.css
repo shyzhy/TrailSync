@@ -1,0 +1,73 @@
+/* The student app only. The page is drawn under Android's status and navigation bars (viewport-fit=cover), and
+   env(safe-area-inset-*) reports how much of it they cover. Rules are scoped to .ts-native-app so they outrank the
+   page styles that load later in <style> tags. */
+
+html.ts-native-app {
+  background: #FAF8F3;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* An app doesn't reload or rubber-band when pulled past the top, and a long press doesn't select the label under it. */
+html.ts-native-app,
+html.ts-native-app body {
+  overscroll-behavior: none;
+}
+html.ts-native-app body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+html.ts-native-app :is(input, textarea, select, [contenteditable="true"]) {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+html.ts-native-app img {
+  -webkit-user-drag: none;
+}
+
+/* A frosted strip behind the status bar, so content scrolling up never runs under the clock and icons.
+   Above the top bar, bottom nav and help button; below the toast, sheets and the tour, which dim it with the page. */
+html.ts-native-app body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  height: env(safe-area-inset-top, 0px);
+  background: linear-gradient(180deg, rgba(250, 248, 243, 0.96) 0%, rgba(250, 248, 243, 0.86) 100%);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+}
+
+/* The body is already padded below the status bar, so full-height screens lose that much height. */
+html.ts-native-app .min-h-screen {
+  min-height: calc(100vh - env(safe-area-inset-top, 0px));
+}
+html.ts-native-app .ts-topbar {
+  top: env(safe-area-inset-top, 0px);
+}
+html.ts-native-app .ts-toast {
+  top: calc(16px + env(safe-area-inset-top, 0px));
+}
+@media (min-width: 768px) {
+  html.ts-native-app .ts-sidebar {
+    top: env(safe-area-inset-top, 0px);
+    height: calc(100vh - env(safe-area-inset-top, 0px));
+  }
+}
+
+/* Content that ends a page without the bottom nav (login, sign-up) stays clear of the gesture bar. */
+html.ts-native-app .ts-page {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* While the keyboard is up, the bottom nav and help button would ride on top of it and cover the field being typed in. */
+html.ts-native-app:has(:is(input:not([type="checkbox"], [type="radio"], [type="file"]), textarea):focus) :is(.ts-bottom-nav, .ts-help-fab) {
+  display: none;
+}

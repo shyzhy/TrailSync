@@ -2,12 +2,13 @@ import { GlassScene } from '../../components/layout/GlassScene.jsx';
 import { HomeLink, LoginForm } from '../../components/auth/LoginForm.jsx';
 import { FONT_SERIF } from '../../styles/fonts.js';
 import { STAFF_LOGIN_PATH } from '../../lib/auth.js';
+import { IS_MOBILE_APP } from '../../lib/platform.js';
 
 // /login: students and alumni.
 export default function StudentLoginPage() {
   return (
     <GlassScene maxWidth="420px">
-      <HomeLink />
+      {!IS_MOBILE_APP && <HomeLink />}
 
       {/* The PNG's mark fills only ~45% of its canvas, so it is scaled up and the negative margin hides the padding. */}
       <div className="mt-3 flex items-center gap-1">
@@ -38,12 +39,14 @@ export default function StudentLoginPage() {
           Create one
         </a>
       </p>
-      <p className="ts-soft mt-2 text-sm">
-        Registrar staff?{' '}
-        <a href={STAFF_LOGIN_PATH} className="ts-link font-medium">
-          Staff Portal login &rarr;
-        </a>
-      </p>
+      {!IS_MOBILE_APP && (
+        <p className="ts-soft mt-2 text-sm">
+          Registrar staff?{' '}
+          <a href={STAFF_LOGIN_PATH} className="ts-link font-medium">
+            Staff Portal login &rarr;
+          </a>
+        </p>
+      )}
 
       <p className="ts-soft mt-10 text-xs">Window 6 · Registrar&rsquo;s Office · Open Mon–Fri, 8:00–5:00</p>
     </GlassScene>

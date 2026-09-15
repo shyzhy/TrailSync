@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:mobile": "vite build --mode mobile",
+    "mobile:sync": "npm run build:mobile && cap sync android",
+    "mobile:run": "npm run mobile:sync && cap run android",
+    "mobile:open": "cap open android",
+    "mobile:assets": "capacitor-assets generate --android --iconBackgroundColor \"#FAF8F3\" --iconBackgroundColorDark \"#FAF8F3\" --splashBackgroundColor \"#FAF8F3\" --splashBackgroundColorDark \"#FAF8F3\""
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",

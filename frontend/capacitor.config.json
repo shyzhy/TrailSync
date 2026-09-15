@@ -1,0 +1,30 @@
+{
+  "appId": "ph.edu.ustp.trailsync",
+  "appName": "TrailSync",
+  "webDir": "dist-mobile",
+  "backgroundColor": "#FAF8F3",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "native",
+      "initialViewportFitValueHint": "cover",
+      "style": "LIGHT"
+    },
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "LIGHT"
+    },
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "launchAutoHide": true,
+      "backgroundColor": "#FAF8F3",
+      "showSpinner": false
+    }
+  }
+}

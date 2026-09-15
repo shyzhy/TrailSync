@@ -1,4 +1,4 @@
-import ErrorBoundary from './components/layout/ErrorBoundary.jsx';
+import Page from './components/layout/Page.jsx';
 import AccountSetupPage from './pages/auth/AccountSetupPage.jsx';
 import ActivatePage from './pages/auth/ActivatePage.jsx';
 import AdminLoginPage from './pages/auth/AdminLoginPage.jsx';
@@ -23,15 +23,6 @@ import ProfilePage from './pages/student/ProfilePage.jsx';
 import RequestFormPage from './pages/student/request-form/RequestFormPage.jsx';
 import StudentDashboard from './pages/student/StudentDashboard.jsx';
 import TrackRequestsPage from './pages/student/TrackRequestsPage.jsx';
-
-// Every screen fades in on arrival and sits inside its own error boundary.
-function Page({ children }) {
-  return (
-    <ErrorBoundary>
-      <div className="ts-page-enter">{children}</div>
-    </ErrorBoundary>
-  );
-}
 
 // Minimal path switch; replace with react-router when routing lands.
 export default function App() {

@@ -10,6 +10,7 @@ import {
   getStoredUser,
   STUDENT_LOGIN_PATH,
 } from '../../../lib/auth.js';
+import { useBackButton } from '../../../lib/backButton.js';
 import ChooseDocumentStep from './ChooseDocumentStep.jsx';
 import DetailsStep from './DetailsStep.jsx';
 import PickupStep from './PickupStep.jsx';
@@ -226,6 +227,7 @@ export default function RequestFormPage() {
     setStepDirection(n >= step ? 'fwd' : 'back');
     setStep(n);
   };
+  useBackButton(status === 'ready' && step > 1 && !submitting, () => goToStep(step - 1));
 
   // The key remounts the panel so the animation replays; passed explicitly, since React warns about key in a spread.
   const stepKey = `step-${step}`;

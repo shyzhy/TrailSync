@@ -18,6 +18,7 @@ import {
   getStoredUser,
   STUDENT_LOGIN_PATH,
 } from '../../lib/auth.js';
+import { useBackButton } from '../../lib/backButton.js';
 
 const LOGIN_PATH = STUDENT_LOGIN_PATH;
 
@@ -34,6 +35,7 @@ export default function CredentialGuidePage() {
   const [search, setSearch] = useState('');
   const [activePurpose, setActivePurpose] = useState('All');
   const [selected, setSelected] = useState(null);
+  useBackButton(Boolean(selected), () => setSelected(null), { overlay: true });
   const [loadError, setLoadError] = useState(null);
 
   const load = async () => {

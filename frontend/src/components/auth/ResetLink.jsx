@@ -4,16 +4,20 @@ import { FONT_SERIF } from '../../styles/fonts.js';
 import { errorFromResponse, formErrors, toApiError } from '../../lib/api.js';
 import { ADMIN_LOGIN_PATH, STAFF_LOGIN_PATH, STUDENT_LOGIN_PATH } from '../../lib/auth.js';
 import { API_BASE_URL } from '../../lib/config.js';
+import { IS_MOBILE_APP } from '../../lib/platform.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 // Which login the person came from; it only picks the look and the back-to-login target.
 export function resetAudience() {
+  if (IS_MOBILE_APP) return 'student';
   const from = new URLSearchParams(window.location.search).get('from');
   return from === 'staff' || from === 'admin' ? from : 'student';
 }
 
-export const LOGIN_FOR = { admin: ADMIN_LOGIN_PATH, staff: STAFF_LOGIN_PATH, student: STUDENT_LOGIN_PATH };
+export const LOGIN_FOR = IS_MOBILE_APP
+  ? { student: STUDENT_LOGIN_PATH }
+  : { admin: ADMIN_LOGIN_PATH, staff: STAFF_LOGIN_PATH, student: STUDENT_LOGIN_PATH };
 
 function EnvelopeIcon() {
   return (
@@ -26,7 +30,7 @@ function EnvelopeIcon() {
 
 // The logo lockup both password pages open with, in each audience's style.
 export function AuthHeader({ audience }) {
-  if (audience === 'admin') {
+  if (!IS_MOBILE_APP && audience === 'admin') {
     return (
       <div className="flex items-center gap-2.5">
         <img src="/trailsync-logo.png" alt="" aria-hidden="true" className="ts-logo shrink-0" style={{ height: '46px', width: 'auto', margin: '-7px 0' }} />
@@ -34,7 +38,7 @@ export function AuthHeader({ audience }) {
       </div>
     );
   }
-  if (audience === 'staff') {
+  if (!IS_MOBILE_APP && audience === 'staff') {
     return (
       <div className="flex items-center gap-2.5">
         <img src="/trailsync-logo.png" alt="" aria-hidden="true" className="ts-logo shrink-0" style={{ height: '46px', width: 'auto', margin: '-7px 0' }} />

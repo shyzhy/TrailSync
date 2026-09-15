@@ -1,4 +1,5 @@
 import { API_BASE_URL } from './config.js';
+import { IS_MOBILE_APP } from './platform.js';
 
 // Separate login pages, because one form with a Student/Staff toggle left it unclear who you'd log in as.
 export const STUDENT_LOGIN_PATH = '/login';
@@ -95,6 +96,7 @@ export function takeFlash() {
 
 // The login page for the part of the app the person is currently in.
 export function loginPathForHere() {
+  if (IS_MOBILE_APP) return STUDENT_LOGIN_PATH;
   const { pathname } = window.location;
   if (pathname.startsWith('/admin')) return ADMIN_LOGIN_PATH;
   if (pathname.startsWith('/registrar')) return STAFF_LOGIN_PATH;

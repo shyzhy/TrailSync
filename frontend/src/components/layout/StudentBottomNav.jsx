@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NAV_ITEMS } from './StudentSidebar.jsx';
 import { Avatar, LogoutIcon, MenuIcon } from '../ui/index.js';
+import { useBackButton } from '../../lib/backButton.js';
 
 // Tabs for four items plus More; a sixth tab would make labels too small to read at 360px.
 const BOTTOM_NAV_KEYS = ['home', 'request', 'track', 'notifications'];
@@ -16,6 +17,7 @@ const TAB_LABEL = {
 
 function MoreSheet({ active, me, onLogout, onClose }) {
   const items = MORE_KEYS.map((key) => NAV_ITEMS.find((i) => i.key === key)).filter(Boolean);
+  useBackButton(true, onClose, { overlay: true });
 
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();

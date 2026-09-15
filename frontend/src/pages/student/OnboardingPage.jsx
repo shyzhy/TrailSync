@@ -22,6 +22,8 @@ import {
   STUDENT_LOGIN_PATH,
   updateStoredUser,
 } from '../../lib/auth.js';
+import { useBackButton } from '../../lib/backButton.js';
+import { IS_MOBILE_APP } from '../../lib/platform.js';
 
 const LOGIN_PATH = STUDENT_LOGIN_PATH;
 
@@ -148,8 +150,13 @@ export default function OnboardingPage() {
         const data = await res.json();
         const p = data.profile;
         if (!p?.onboarding) {
-          // Staff have no student profile to set up.
-          window.location.replace('/registrar/dashboard');
+          // Staff have no student profile to set up; the app has no staff side, so there they are signed out.
+          if (IS_MOBILE_APP) {
+            clearSession();
+            window.location.replace(LOGIN_PATH);
+          } else {
+            window.location.replace('/registrar/dashboard');
+          }
           return;
         }
         if (p.onboarding.complete) {
@@ -198,6 +205,7 @@ export default function OnboardingPage() {
     setStep(n);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+  useBackButton(status === 'ready' && step > 1 && step !== DONE && !saving, () => go(step - 1));
 
   // Per-step checks, in the same plain words as the server's.
   const validate = (n) => {

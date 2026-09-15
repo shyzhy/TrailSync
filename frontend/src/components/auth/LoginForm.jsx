@@ -12,43 +12,55 @@ import {
 } from '../../lib/auth.js';
 import { API_BASE_URL } from '../../lib/config.js';
 import { friendlyMessage, NETWORK_ERROR, SERVER_ERROR, SESSION_ENDED } from '../../lib/friendlyErrors.js';
+import { IS_MOBILE_APP } from '../../lib/platform.js';
 
-// The login pages share one form; everything that differs between them lives in this table.
-const AUDIENCES = {
-  student: {
-    roles: ['Student', 'Alumni'],
-    home: '/portal',
-    identifierLabel: 'Email or School ID number',
-    placeholder: 'e.g. 2021300123 or juan.delacruz@ustp.edu.ph',
-    submitLabel: 'Log in to your account',
-    // Students can sign in with either, so the message names both.
-    wrongDetails: "That email, School ID number or password doesn't match our records.",
-  },
-  staff: {
-    roles: ['Registrar Staff'],
-    home: '/registrar/dashboard',
-    identifierLabel: 'Staff email',
-    placeholder: 'e.g. maria.santos@ustp.edu.ph',
-    submitLabel: 'Log in to Staff Portal',
-    wrongDetails: "That email or password doesn't match our records.",
-  },
-  admin: {
-    roles: ['Admin'],
-    home: '/admin/dashboard',
-    identifierLabel: 'Admin email',
-    placeholder: 'e.g. admin@ustp.edu.ph',
-    submitLabel: 'Log in to Admin Portal',
-    wrongDetails: "That email or password doesn't match our records.",
-  },
+const STUDENT_AUDIENCE = {
+  roles: ['Student', 'Alumni'],
+  home: '/portal',
+  identifierLabel: 'Email or School ID number',
+  placeholder: 'e.g. 2021300123 or juan.delacruz@ustp.edu.ph',
+  submitLabel: 'Log in to your account',
+  // Students can sign in with either, so the message names both.
+  wrongDetails: "That email, School ID number or password doesn't match our records.",
 };
 
-// Right password, wrong door: point the person at the login for the account they actually have.
-const PORTAL_FOR_ROLE = {
-  Student: { title: 'This is a student account', body: 'Students and alumni log in on the student page instead.', href: STUDENT_LOGIN_PATH, linkLabel: 'Go to the student login' },
-  Alumni: { title: 'This is an alumni account', body: 'Students and alumni log in on the student page instead.', href: STUDENT_LOGIN_PATH, linkLabel: 'Go to the student login' },
-  'Registrar Staff': { title: 'This is a staff account', body: 'Registrar staff log in through the Staff Portal instead.', href: STAFF_LOGIN_PATH, linkLabel: 'Go to the Staff Portal login' },
-  Admin: { title: 'This is an administrator account', body: 'Administrators log in through the Admin Portal instead.', href: ADMIN_LOGIN_PATH, linkLabel: 'Go to the Admin Portal login' },
-};
+// The login pages share one form; everything that differs between them lives in this table. The app build has only
+// the student login, so the staff and admin entries aren't part of it.
+const AUDIENCES = IS_MOBILE_APP
+  ? { student: STUDENT_AUDIENCE }
+  : {
+      student: STUDENT_AUDIENCE,
+      staff: {
+        roles: ['Registrar Staff'],
+        home: '/registrar/dashboard',
+        identifierLabel: 'Staff email',
+        placeholder: 'e.g. maria.santos@ustp.edu.ph',
+        submitLabel: 'Log in to Staff Portal',
+        wrongDetails: "That email or password doesn't match our records.",
+      },
+      admin: {
+        roles: ['Admin'],
+        home: '/admin/dashboard',
+        identifierLabel: 'Admin email',
+        placeholder: 'e.g. admin@ustp.edu.ph',
+        submitLabel: 'Log in to Admin Portal',
+        wrongDetails: "That email or password doesn't match our records.",
+      },
+    };
+
+// Right password, wrong door: point the person at the login for the account they actually have. The app is for
+// students and alumni only, so there staff and admins are pointed at the website, with no link into it.
+const PORTAL_FOR_ROLE = IS_MOBILE_APP
+  ? {
+      'Registrar Staff': { title: 'This is a staff account', body: 'The TrailSync app is for students and alumni. Registrar staff log in to the Staff Portal on the TrailSync website.' },
+      Admin: { title: 'This is an administrator account', body: 'The TrailSync app is for students and alumni. Administrators log in to the Admin Portal on the TrailSync website.' },
+    }
+  : {
+      Student: { title: 'This is a student account', body: 'Students and alumni log in on the student page instead.', href: STUDENT_LOGIN_PATH, linkLabel: 'Go to the student login' },
+      Alumni: { title: 'This is an alumni account', body: 'Students and alumni log in on the student page instead.', href: STUDENT_LOGIN_PATH, linkLabel: 'Go to the student login' },
+      'Registrar Staff': { title: 'This is a staff account', body: 'Registrar staff log in through the Staff Portal instead.', href: STAFF_LOGIN_PATH, linkLabel: 'Go to the Staff Portal login' },
+      Admin: { title: 'This is an administrator account', body: 'Administrators log in through the Admin Portal instead.', href: ADMIN_LOGIN_PATH, linkLabel: 'Go to the Admin Portal login' },
+    };
 
 function ClockIcon() {
   return (
@@ -351,6 +363,13 @@ export function LoginForm({ audience }) {
 }
 
 export function HomeLink() {
+  if (IS_MOBILE_APP) {
+    return (
+      <a href={STUDENT_LOGIN_PATH} className="ts-link -ml-1 inline-flex min-h-[44px] items-center gap-1 px-1 text-sm font-medium">
+        <span aria-hidden="true">&larr;</span> Back to login
+      </a>
+    );
+  }
   return (
     <a href="/" className="ts-link -ml-1 inline-flex min-h-[44px] items-center gap-1 px-1 text-sm font-medium">
       <span aria-hidden="true">&larr;</span> TrailSync home

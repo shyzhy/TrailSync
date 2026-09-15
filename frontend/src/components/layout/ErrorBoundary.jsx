@@ -3,9 +3,11 @@ import { WarningIcon } from '../ui/index.js';
 import { APP_CSS } from '../../styles/appCss.js';
 import { FONT_SANS, FONT_SERIF } from '../../styles/fonts.js';
 import { getStoredUser } from '../../lib/auth.js';
+import { IS_MOBILE_APP } from '../../lib/platform.js';
 
 // Where "Back to the Dashboard" goes for whoever is looking at the crash.
 function homeFor(user) {
+  if (IS_MOBILE_APP) return user ? { href: '/portal', label: 'Back to Home' } : { href: '/login', label: 'Back to login' };
   if (!user) return { href: '/', label: 'Back to the home page' };
   if (user.role === 'Admin') return { href: '/admin/dashboard', label: 'Back to the Dashboard' };
   if (user.role === 'Registrar Staff') return { href: '/registrar/dashboard', label: 'Back to the Dashboard' };

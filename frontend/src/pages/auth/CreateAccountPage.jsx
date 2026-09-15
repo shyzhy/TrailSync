@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { GlassScene } from '../../components/layout/GlassScene.jsx';
 import { BusyLabel, PasswordField } from '../../components/ui/index.js';
+import { HomeLink } from '../../components/auth/LoginForm.jsx';
 import ResendEmailButton from '../../components/auth/ResendEmailButton.jsx';
 import { FONT_SERIF } from '../../styles/fonts.js';
 import { STUDENT_LOGIN_PATH } from '../../lib/auth.js';
@@ -117,9 +118,7 @@ export default function CreateAccountPage() {
   if (sentTo) {
     return (
       <GlassScene maxWidth="440px">
-        <a href="/" className="ts-link -ml-1 inline-flex min-h-[44px] items-center gap-1 px-1 text-sm font-medium">
-          <span aria-hidden="true">&larr;</span> TrailSync home
-        </a>
+        <HomeLink />
         <Journey current={1} />
         <div className="mt-8" role="status">
           <EnvelopeIcon />
@@ -166,9 +165,7 @@ export default function CreateAccountPage() {
   // Step 1: the form.
   return (
     <GlassScene maxWidth="420px">
-      <a href="/" className="ts-link -ml-1 inline-flex min-h-[44px] items-center gap-1 px-1 text-sm font-medium">
-        <span aria-hidden="true">&larr;</span> TrailSync home
-      </a>
+      <HomeLink />
 
       <div className="mt-3 flex items-center gap-1">
         <img
