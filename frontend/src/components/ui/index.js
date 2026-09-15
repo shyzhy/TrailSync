@@ -5,6 +5,7 @@ export { EmptyState } from './EmptyState.jsx';
 export { ErrorState } from './ErrorState.jsx';
 export { FieldError } from './FieldError.jsx';
 export { HelpTip } from './HelpTip.jsx';
+export { Modal } from './Modal.jsx';
 export { default as PasswordField } from './PasswordField.jsx';
 export { passwordStrength } from './PasswordField.jsx';
 export {
@@ -50,6 +51,8 @@ export {
   SearchIcon,
   ShieldIcon,
   TicketIcon,
+  UserPlusIcon,
+  UsersIcon,
   UploadIcon,
   WarningIcon,
   WifiOffIcon,

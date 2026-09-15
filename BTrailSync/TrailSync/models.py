@@ -38,6 +38,10 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
         extra_fields.setdefault("status", "Active")
+        extra_fields.setdefault("email_verified", True)
+        # A superuser is the Admin portal's bootstrap account, so it gets that role unless told otherwise.
+        if "role" not in extra_fields and "role_id" not in extra_fields:
+            extra_fields["role"] = Role.objects.filter(role_name=Role.RoleName.ADMIN).first()
 
         if extra_fields.get("is_staff") is not True:
             raise ValueError("Superuser must have is_staff=True")
@@ -181,6 +185,8 @@ class StaffProfile(models.Model):
         related_name="staff_profile",
     )
 
+    # Staff have no UserProfile, so the middle name an admin enters lives here.
+    middle_name = models.CharField(max_length=150, blank=True, null=True)
     employee_id = models.CharField(max_length=50, unique=True)
     assigned_window = models.CharField(max_length=50, blank=True, null=True)
     position = models.CharField(max_length=100, blank=True, null=True)
@@ -210,6 +216,11 @@ class StaffProfile(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def awaiting_setup(self):
+        """True until the staff member has chosen a password through their setup link."""
+        return not self.user.has_usable_password()
 
     def __str__(self):
         return f"{self.employee_id} - {self.user.get_full_name()}"

@@ -226,6 +226,26 @@ export function WarningIcon() {
   );
 }
 
+export function UsersIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <circle cx="7.5" cy="7" r="2.75" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2.5 16c.4-2.6 2.4-4.25 5-4.25s4.6 1.65 5 4.25" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M13 4.6a2.6 2.6 0 0 1 0 5M14.6 11.9c1.6.5 2.7 1.9 2.9 4.1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function UserPlusIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">
+      <circle cx="8" cy="7" r="2.75" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M3 16c.4-2.6 2.4-4.25 5-4.25 1.3 0 2.4.4 3.3 1.1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M15.5 11v5M13 13.5h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function GridIcon() {
   return (
     <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5" aria-hidden="true">

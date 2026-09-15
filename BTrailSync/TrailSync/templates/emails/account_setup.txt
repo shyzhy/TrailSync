@@ -1,0 +1,14 @@
+{% autoescape off %}TrailSync — USTP–CDO Registrar
+
+Hi {{ first_name }},
+
+A TrailSync administrator has created a Registrar Staff account for you. Choose your own password to finish setting it up:
+
+{{ link }}
+
+This link works for {{ expires }} and can only be used once. If it expires, ask your administrator to send a new one.
+
+This account was created for {{ email }}. If you weren't expecting it, you can ignore this email and contact your Registrar's Office.
+
+— Office of the Registrar, Window 6
+{% endautoescape %}

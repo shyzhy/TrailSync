@@ -1,11 +1,13 @@
 import { SHARED_CSS } from '../../styles/authCss.js';
 import { FONT_SANS } from '../../styles/fonts.js';
 
+const SCENE_CLASS = { staff: 'ts-scene-staff', admin: 'ts-scene-admin' };
+
 // The split-screen auth scene: photo on the right, glass fading into it on the left, content on the glass.
 export function GlassScene({ children, maxWidth = '420px', variant = 'student' }) {
   return (
     <div
-      className={`ts-page relative flex min-h-screen w-full flex-col lg:flex-row ${variant === 'staff' ? 'ts-scene-staff' : ''}`}
+      className={`ts-page relative flex min-h-screen w-full flex-col lg:flex-row ${SCENE_CLASS[variant] || ''}`}
       style={FONT_SANS}
     >
       <style>{SHARED_CSS}</style>

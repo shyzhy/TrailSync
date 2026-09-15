@@ -14,7 +14,7 @@ export default function ForgotPasswordPage() {
   const [sent, setSent] = useState(null);
 
   return (
-    <GlassScene maxWidth="420px" variant={audience === 'staff' ? 'staff' : 'student'}>
+    <GlassScene maxWidth="420px" variant={audience}>
       <AuthHeader audience={audience} />
 
       <div className="mt-8" aria-live="polite">

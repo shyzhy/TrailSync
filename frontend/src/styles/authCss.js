@@ -198,6 +198,59 @@ export const SHARED_CSS = `
   }
   .ts-scene-staff .ts-link { color: #7A5719; }
   .ts-scene-staff .ts-input:focus { border-color: rgba(184,135,43,0.7); }
+  /* Admin scene: the same photo and glass in deep plum. */
+  .ts-scene-admin { background: #1E1128; }
+  .ts-scene-admin .ts-photo { filter: saturate(0.5) brightness(0.88); }
+  .ts-scene-admin .ts-photo-tint {
+    background: linear-gradient(90deg, rgba(38,18,52,0.44) 0%, rgba(38,18,52,0.22) 55%, rgba(38,18,52,0.40) 100%);
+  }
+  @media (min-width: 1024px) {
+    .ts-scene-admin .ts-glass-b {
+      background: linear-gradient(to right,
+        rgba(250,248,243,0.26) 0%,
+        rgba(250,248,243,0.18) 45%,
+        rgba(58,34,84,0.22) 74%,
+        rgba(58,34,84,0.05) 100%);
+    }
+  }
+  @media (max-width: 1023px) {
+    .ts-scene-admin .ts-glass-b {
+      background: linear-gradient(to bottom,
+        rgba(58,34,84,0.20) 0%,
+        rgba(250,248,243,0.20) 16%,
+        rgba(250,248,243,0.28) 100%);
+    }
+  }
+  .ts-scene-admin .ts-btn-primary {
+    color: #FAF8F3;
+    background: linear-gradient(180deg, #7B55A0 0%, #56367A 55%, #3A2254 100%);
+    border-color: rgba(58,34,84,0.7);
+    border-top-color: rgba(220,194,245,0.55);
+    box-shadow:
+      0 8px 18px rgba(58,34,84,0.34),
+      0 2px 4px rgba(58,34,84,0.26),
+      inset 0 1px 0 rgba(220,194,245,0.4);
+  }
+  .ts-scene-admin .ts-btn-primary:active:not(:disabled) {
+    background: linear-gradient(180deg, #3A2254 0%, #56367A 50%, #7B55A0 100%);
+    box-shadow: inset 0 3px 8px rgba(0,0,0,0.45), inset 0 -1px 0 rgba(220,194,245,0.2);
+  }
+  .ts-scene-admin .ts-btn-primary:focus-visible {
+    box-shadow: 0 0 0 3px rgba(201,167,235,0.7), 0 8px 18px rgba(58,34,84,0.34);
+  }
+  .ts-scene-admin .ts-link { color: #5A3780; }
+  .ts-scene-admin .ts-input:focus { border-color: rgba(123,85,160,0.7); box-shadow: inset 0 2px 4px rgba(31,41,55,0.12), 0 0 0 3px rgba(155,109,201,0.42); }
+  .ts-scene-admin .ts-checkbox-input:checked + .ts-checkbox-well { background: linear-gradient(180deg, #7B55A0 0%, #3A2254 100%); border-color: rgba(58,34,84,0.7); }
+  .ts-admin-eyebrow {
+    display: inline-flex; align-items: center;
+    padding: 5px 11px;
+    border-radius: 999px;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
+    color: #DCC2F5;
+    background: linear-gradient(180deg, #4E3066 0%, #2A1838 100%);
+    border: 1px solid rgba(201,167,235,0.38);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 2px 6px rgba(38,18,52,0.3);
+  }
   .ts-staff-eyebrow {
     display: inline-flex; align-items: center;
     padding: 5px 11px;

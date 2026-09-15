@@ -97,7 +97,7 @@ AUTH_USER_MODEL = "TrailSync.User"
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'TrailSync.authentication.StatusAwareJWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
@@ -109,6 +109,7 @@ REST_FRAMEWORK = {
         'activation': '30/hour',
         'password_reset': '5/hour',
         'password_reset_confirm': '20/hour',
+        'account_setup': '20/hour',
     },
 }
 
@@ -118,6 +119,8 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': False,
     'AUTH_HEADER_TYPES': ('Bearer',),
+    # Refresh is refused for suspended accounts too, not only for deleted or inactive ones.
+    'USER_AUTHENTICATION_RULE': 'TrailSync.authentication.active_account_rule',
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
 }

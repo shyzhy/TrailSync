@@ -7,6 +7,7 @@ import { getStoredUser } from '../../lib/auth.js';
 // Where "Back to the Dashboard" goes for whoever is looking at the crash.
 function homeFor(user) {
   if (!user) return { href: '/', label: 'Back to the home page' };
+  if (user.role === 'Admin') return { href: '/admin/dashboard', label: 'Back to the Dashboard' };
   if (user.role === 'Registrar Staff') return { href: '/registrar/dashboard', label: 'Back to the Dashboard' };
   return { href: '/portal', label: 'Back to the Dashboard' };
 }

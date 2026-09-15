@@ -3,6 +3,7 @@ import { API_BASE_URL } from './config.js';
 // Separate login pages, because one form with a Student/Staff toggle left it unclear who you'd log in as.
 export const STUDENT_LOGIN_PATH = '/login';
 export const STAFF_LOGIN_PATH = '/registrar/login';
+export const ADMIN_LOGIN_PATH = '/admin/login';
 
 const ACCESS_KEY = 'trailsync_access_token';
 const REFRESH_KEY = 'trailsync_refresh_token';
@@ -94,7 +95,10 @@ export function takeFlash() {
 
 // The login page for the part of the app the person is currently in.
 export function loginPathForHere() {
-  return window.location.pathname.startsWith('/registrar') ? STAFF_LOGIN_PATH : STUDENT_LOGIN_PATH;
+  const { pathname } = window.location;
+  if (pathname.startsWith('/admin')) return ADMIN_LOGIN_PATH;
+  if (pathname.startsWith('/registrar')) return STAFF_LOGIN_PATH;
+  return STUDENT_LOGIN_PATH;
 }
 
 // End the session and send the person to their login with a reason; the only place that does this.

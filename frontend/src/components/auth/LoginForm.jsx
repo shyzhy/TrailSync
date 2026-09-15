@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BusyLabel, CheckIcon, EyeIcon, EyeOffIcon, FieldError, WarningIcon } from '../ui/index.js';
 import ResendEmailButton from './ResendEmailButton.jsx';
 import {
+  ADMIN_LOGIN_PATH,
   getAccessToken,
   getStoredUser,
   saveSession,
@@ -12,7 +13,7 @@ import {
 import { API_BASE_URL } from '../../lib/config.js';
 import { friendlyMessage, NETWORK_ERROR, SERVER_ERROR, SESSION_ENDED } from '../../lib/friendlyErrors.js';
 
-// Two login pages sharing one form; everything that differs between them lives in this table.
+// The login pages share one form; everything that differs between them lives in this table.
 const AUDIENCES = {
   student: {
     roles: ['Student', 'Alumni'],
@@ -22,12 +23,6 @@ const AUDIENCES = {
     submitLabel: 'Log in to your account',
     // Students can sign in with either, so the message names both.
     wrongDetails: "That email, School ID number or password doesn't match our records.",
-    otherPortal: {
-      title: 'This is a staff account',
-      body: 'Registrar staff log in through the Staff Portal instead.',
-      href: STAFF_LOGIN_PATH,
-      linkLabel: 'Go to the Staff Portal login',
-    },
   },
   staff: {
     roles: ['Registrar Staff'],
@@ -36,13 +31,23 @@ const AUDIENCES = {
     placeholder: 'e.g. maria.santos@ustp.edu.ph',
     submitLabel: 'Log in to Staff Portal',
     wrongDetails: "That email or password doesn't match our records.",
-    otherPortal: {
-      title: 'This is a student account',
-      body: 'Students and alumni log in on the student page instead.',
-      href: STUDENT_LOGIN_PATH,
-      linkLabel: 'Go to the student login',
-    },
   },
+  admin: {
+    roles: ['Admin'],
+    home: '/admin/dashboard',
+    identifierLabel: 'Admin email',
+    placeholder: 'e.g. admin@ustp.edu.ph',
+    submitLabel: 'Log in to Admin Portal',
+    wrongDetails: "That email or password doesn't match our records.",
+  },
+};
+
+// Right password, wrong door: point the person at the login for the account they actually have.
+const PORTAL_FOR_ROLE = {
+  Student: { title: 'This is a student account', body: 'Students and alumni log in on the student page instead.', href: STUDENT_LOGIN_PATH, linkLabel: 'Go to the student login' },
+  Alumni: { title: 'This is an alumni account', body: 'Students and alumni log in on the student page instead.', href: STUDENT_LOGIN_PATH, linkLabel: 'Go to the student login' },
+  'Registrar Staff': { title: 'This is a staff account', body: 'Registrar staff log in through the Staff Portal instead.', href: STAFF_LOGIN_PATH, linkLabel: 'Go to the Staff Portal login' },
+  Admin: { title: 'This is an administrator account', body: 'Administrators log in through the Admin Portal instead.', href: ADMIN_LOGIN_PATH, linkLabel: 'Go to the Admin Portal login' },
 };
 
 function ClockIcon() {
@@ -92,6 +97,11 @@ const ARRIVAL_NOTICES = {
     kind: 'success',
     title: 'Your password has been changed.',
     body: 'Log in with your new password.',
+  },
+  account_ready: {
+    kind: 'success',
+    title: 'Your account is ready.',
+    body: 'Log in with the password you just chose.',
   },
 };
 
@@ -223,7 +233,10 @@ export function LoginForm({ audience }) {
       const userRole = data.user?.role;
       if (!config.roles.includes(userRole)) {
         // Checked before saving the session, so a correct password on the wrong page never half signs anyone in.
-        setNotice({ kind: 'other-portal', ...config.otherPortal });
+        setNotice({
+          kind: 'other-portal',
+          ...(PORTAL_FOR_ROLE[userRole] || { title: 'This account has no portal yet', body: 'Please contact the Registrar\u2019s Office.' }),
+        });
         return;
       }
 

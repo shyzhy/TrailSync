@@ -2,17 +2,18 @@ import { useState } from 'react';
 import { BusyLabel, FieldError } from '../ui/index.js';
 import { FONT_SERIF } from '../../styles/fonts.js';
 import { errorFromResponse, formErrors, toApiError } from '../../lib/api.js';
-import { STAFF_LOGIN_PATH, STUDENT_LOGIN_PATH } from '../../lib/auth.js';
+import { ADMIN_LOGIN_PATH, STAFF_LOGIN_PATH, STUDENT_LOGIN_PATH } from '../../lib/auth.js';
 import { API_BASE_URL } from '../../lib/config.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 // Which login the person came from; it only picks the look and the back-to-login target.
 export function resetAudience() {
-  return new URLSearchParams(window.location.search).get('from') === 'staff' ? 'staff' : 'student';
+  const from = new URLSearchParams(window.location.search).get('from');
+  return from === 'staff' || from === 'admin' ? from : 'student';
 }
 
-export const LOGIN_FOR = { staff: STAFF_LOGIN_PATH, student: STUDENT_LOGIN_PATH };
+export const LOGIN_FOR = { admin: ADMIN_LOGIN_PATH, staff: STAFF_LOGIN_PATH, student: STUDENT_LOGIN_PATH };
 
 function EnvelopeIcon() {
   return (
@@ -25,6 +26,14 @@ function EnvelopeIcon() {
 
 // The logo lockup both password pages open with, in each audience's style.
 export function AuthHeader({ audience }) {
+  if (audience === 'admin') {
+    return (
+      <div className="flex items-center gap-2.5">
+        <img src="/trailsync-logo.png" alt="" aria-hidden="true" className="ts-logo shrink-0" style={{ height: '46px', width: 'auto', margin: '-7px 0' }} />
+        <span className="ts-admin-eyebrow">TrailSync · Admin</span>
+      </div>
+    );
+  }
   if (audience === 'staff') {
     return (
       <div className="flex items-center gap-2.5">

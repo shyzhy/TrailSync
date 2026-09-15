@@ -4,6 +4,16 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from TrailSync.admin_api import (
+    AdminAccountDetailView,
+    AdminAccountListView,
+    AdminAccountStatusView,
+    AdminActivityView,
+    AdminCreateRegistrarView,
+    AdminDashboardSummaryView,
+    AdminResendSetupView,
+)
+
 from TrailSync.views import (
     RegistrarFlaggedRequestsView,
     RegistrarClearFlagView,
@@ -45,6 +55,13 @@ from TrailSync.views import (
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/auth/', include('TrailSync.urls')),
+    path('api/admin/dashboard/summary/', AdminDashboardSummaryView.as_view(), name='admin-dashboard-summary'),
+    path('api/admin/dashboard/activity/', AdminActivityView.as_view(), name='admin-dashboard-activity'),
+    path('api/admin/accounts/', AdminAccountListView.as_view(), name='admin-accounts'),
+    path('api/admin/accounts/registrar/', AdminCreateRegistrarView.as_view(), name='admin-accounts-create-registrar'),
+    path('api/admin/accounts/<int:pk>/', AdminAccountDetailView.as_view(), name='admin-account-detail'),
+    path('api/admin/accounts/<int:pk>/status/', AdminAccountStatusView.as_view(), name='admin-account-status'),
+    path('api/admin/accounts/<int:pk>/resend-setup/', AdminResendSetupView.as_view(), name='admin-account-resend-setup'),
     path('api/me/', MeView.as_view(), name='me'),
     path('api/me/avatar/', MeAvatarView.as_view(), name='me-avatar'),
     path('api/me/tour/', MeTourView.as_view(), name='me-tour'),

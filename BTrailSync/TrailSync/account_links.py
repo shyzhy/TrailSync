@@ -67,8 +67,18 @@ class PasswordResetLinkTokenGenerator(TimedLinkTokenGenerator):
         return f"{user.pk}{user.password}{login}{user.email}{timestamp}"
 
 
+class AccountSetupTokenGenerator(PasswordResetLinkTokenGenerator):
+    """The first-password link for an admin-created staff account; single-use for the same reason as a reset link."""
+
+    key_salt = "TrailSync.account_links.AccountSetupTokenGenerator"
+    # Long enough for someone who only checks email on workdays.
+    timeout = timedelta(hours=72)
+    timeout_text = "3 days"
+
+
 activation_token = EmailActivationTokenGenerator()
 password_reset_token = PasswordResetLinkTokenGenerator()
+account_setup_token = AccountSetupTokenGenerator()
 
 
 def user_from_uid(uid):
@@ -89,13 +99,26 @@ def activation_link(user):
     return f"{settings.FRONTEND_BASE_URL}/activate?uid={_uid(user)}&token={activation_token.make_token(user)}"
 
 
+def login_audience(user):
+    """Which login page an account belongs to: 'admin', 'staff' or 'student'."""
+    role = user.role.role_name if user.role_id else None
+    if role == Role.RoleName.ADMIN:
+        return "admin"
+    if role == Role.RoleName.REGISTRAR:
+        return "staff"
+    return "student"
+
+
 def password_reset_link(user):
     # Which login to return to is decided from the account, never from anything the requester sent.
-    is_staff = bool(user.role_id and user.role.role_name == Role.RoleName.REGISTRAR)
     return (
         f"{settings.FRONTEND_BASE_URL}/reset-password?uid={_uid(user)}"
-        f"&token={password_reset_token.make_token(user)}&from={'staff' if is_staff else 'student'}"
+        f"&token={password_reset_token.make_token(user)}&from={login_audience(user)}"
     )
+
+
+def account_setup_link(user):
+    return f"{settings.FRONTEND_BASE_URL}/account-setup?uid={_uid(user)}&token={account_setup_token.make_token(user)}"
 
 
 def _build(template, subject, user, link, expires):
@@ -104,6 +127,7 @@ def _build(template, subject, user, link, expires):
         "expires": expires,
         "logo_url": f"{settings.FRONTEND_BASE_URL}/trailsync-logo.png",
         "email": user.email,
+        "first_name": user.first_name or "there",
     }
     message = EmailMultiAlternatives(
         subject=subject,
@@ -154,3 +178,16 @@ def send_password_reset_email(user):
             password_reset_token.timeout_text,
         )
     )
+
+
+def send_account_setup_email(user, background=False):
+    """Send the setup link; synchronous by default, so an admin is told if it could not be sent."""
+    def build():
+        return _build(
+            "account_setup", "Set up your TrailSync account", user, account_setup_link(user), account_setup_token.timeout_text
+        )
+
+    if background:
+        _send_in_background(build)
+    else:
+        build().send()

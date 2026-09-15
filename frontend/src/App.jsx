@@ -1,5 +1,7 @@
 import ErrorBoundary from './components/layout/ErrorBoundary.jsx';
+import AccountSetupPage from './pages/auth/AccountSetupPage.jsx';
 import ActivatePage from './pages/auth/ActivatePage.jsx';
+import AdminLoginPage from './pages/auth/AdminLoginPage.jsx';
 import ConfirmEmailPage from './pages/auth/ConfirmEmailPage.jsx';
 import CreateAccountPage from './pages/auth/CreateAccountPage.jsx';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage.jsx';
@@ -7,6 +9,8 @@ import RegistrarLoginPage from './pages/auth/RegistrarLoginPage.jsx';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage.jsx';
 import StudentLoginPage from './pages/auth/StudentLoginPage.jsx';
 import LandingPage from './pages/LandingPage.jsx';
+import AdminDashboardPage from './pages/admin/AdminDashboardPage.jsx';
+import ManageAccountsPage from './pages/admin/ManageAccountsPage.jsx';
 import ProcessingQueuePage from './pages/registrar/ProcessingQueuePage.jsx';
 import RegistrarDashboardPage from './pages/registrar/RegistrarDashboardPage.jsx';
 import ReleaseCalendarPage from './pages/registrar/ReleaseCalendarPage.jsx';
@@ -35,11 +39,15 @@ export default function App() {
   // Exact match for /login; /registrar/login must be caught before the /registrar/* pages.
   if (pathname === '/login' || pathname === '/login/') return <Page><StudentLoginPage /></Page>;
   if (pathname.startsWith('/registrar/login')) return <Page><RegistrarLoginPage /></Page>;
+  if (pathname.startsWith('/admin/login')) return <Page><AdminLoginPage /></Page>;
+  if (pathname.startsWith('/admin/dashboard')) return <Page><AdminDashboardPage /></Page>;
+  if (pathname.startsWith('/admin/accounts')) return <Page><ManageAccountsPage /></Page>;
   if (pathname.startsWith('/create-account')) return <Page><CreateAccountPage /></Page>;
   if (pathname.startsWith('/activate')) return <Page><ActivatePage /></Page>;
   // One pair of pages for both audiences; ?from= only picks the look and the back-to-login target.
   if (pathname.startsWith('/forgot-password')) return <Page><ForgotPasswordPage /></Page>;
   if (pathname.startsWith('/reset-password')) return <Page><ResetPasswordPage /></Page>;
+  if (pathname.startsWith('/account-setup')) return <Page><AccountSetupPage /></Page>;
   if (pathname.startsWith('/onboarding')) return <Page><OnboardingPage /></Page>;
   if (pathname.startsWith('/request-form')) return <Page><RequestFormPage /></Page>;
   if (pathname.startsWith('/track-requests')) return <Page><TrackRequestsPage /></Page>;

@@ -38,8 +38,11 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 
 from .account_links import (
+    account_setup_token,
     activation_token,
+    login_audience,
     password_reset_token,
+    send_account_setup_email,
     send_activation_email,
     send_password_reset_email,
     user_from_uid,
@@ -308,19 +311,43 @@ class PasswordResetRequestView(APIView):
         )
         if user is not None and user.has_usable_password():
             send_password_reset_email(user)
+        elif user is not None and hasattr(user, "staff_profile"):
+            # A staff member who never finished setup gets a fresh setup link instead.
+            send_account_setup_email(user, background=True)
         return Response({"detail": PASSWORD_RESET_SENT})
 
 
-def _reset_link_user(serializer):
-    """(user, None) for a usable reset link, or (None, error Response); expired and used links are reported the same."""
+RESET_LINK_DEAD = "This reset link has expired or already been used."
+SETUP_LINK_DEAD = "This setup link has expired or already been used."
+
+
+def _reset_link_user(serializer, generator=password_reset_token, dead_message=RESET_LINK_DEAD):
+    """(user, None) for a usable emailed link, or (None, error Response); expired and used links are reported the same."""
     user = user_from_uid(serializer.validated_data["uid"])
-    result = password_reset_token.verify(user, serializer.validated_data["token"]) if user else "invalid"
+    result = generator.verify(user, serializer.validated_data["token"]) if user else "invalid"
     if result != "ok":
-        return None, Response(
-            {"code": result, "detail": "This reset link has expired or already been used."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+        return None, Response({"code": result, "detail": dead_message}, status=status.HTTP_400_BAD_REQUEST)
     return user, None
+
+
+def _set_password_from_link(user, data):
+    """Validate and save a password chosen through an emailed link; returns an error Response or None."""
+    if data["new_password"] != data["confirm_new_password"]:
+        return Response({"confirm_new_password": ["Passwords don't match."]}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        validate_password(data["new_password"], user)
+    except DjangoValidationError as exc:
+        return Response({"new_password": list(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+    user.set_password(data["new_password"])
+    fields = ["password"]
+    # Opening this link proves the inbox, so an unconfirmed account is confirmed too.
+    if not user.email_verified:
+        user.email_verified = True
+        user.email_verified_at = timezone.now()
+        fields += ["email_verified", "email_verified_at"]
+    user.save(update_fields=fields)
+    return None
 
 
 class PasswordResetValidateView(APIView):
@@ -333,10 +360,7 @@ class PasswordResetValidateView(APIView):
     def post(self, request):
         serializer = PasswordResetLinkSerializer(data=request.data)
         if not serializer.is_valid():
-            return Response(
-                {"code": "invalid", "detail": "This reset link has expired or already been used."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"code": "invalid", "detail": RESET_LINK_DEAD}, status=status.HTTP_400_BAD_REQUEST)
         _, error = _reset_link_user(serializer)
         return error or Response({"valid": True})
 
@@ -355,27 +379,46 @@ class PasswordResetConfirmView(APIView):
         if error:
             return error
 
-        data = serializer.validated_data
-        if data["new_password"] != data["confirm_new_password"]:
-            return Response(
-                {"confirm_new_password": ["Passwords don't match."]}, status=status.HTTP_400_BAD_REQUEST
-            )
-        try:
-            validate_password(data["new_password"], user)
-        except DjangoValidationError as exc:
-            return Response({"new_password": list(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        error = _set_password_from_link(user, serializer.validated_data)
+        if error:
+            return error
+        return Response({"detail": "Your password has been changed.", "login": login_audience(user)})
 
-        user.set_password(data["new_password"])
-        fields = ["password"]
-        # Opening this link proves the inbox, so an unconfirmed account is confirmed too.
-        if not user.email_verified:
-            user.email_verified = True
-            user.email_verified_at = timezone.now()
-            fields += ["email_verified", "email_verified_at"]
-        user.save(update_fields=fields)
 
-        is_staff = bool(user.role_id and user.role.role_name == Role.RoleName.REGISTRAR)
-        return Response({"detail": "Your password has been changed.", "login": "staff" if is_staff else "student"})
+class AccountSetupValidateView(APIView):
+    """POST /api/auth/account-setup/validate/ {uid, token} - is this setup link still good, and whose is it?"""
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "account_setup"
+
+    def post(self, request):
+        serializer = PasswordResetLinkSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({"code": "invalid", "detail": SETUP_LINK_DEAD}, status=status.HTTP_400_BAD_REQUEST)
+        user, error = _reset_link_user(serializer, account_setup_token, SETUP_LINK_DEAD)
+        if error:
+            return error
+        return Response({"valid": True, "email": user.email, "first_name": user.first_name})
+
+
+class AccountSetupConfirmView(APIView):
+    """POST /api/auth/account-setup/confirm/ - choose the first password for an admin-created account."""
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "account_setup"
+
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user, error = _reset_link_user(serializer, account_setup_token, SETUP_LINK_DEAD)
+        if error:
+            return error
+        error = _set_password_from_link(user, serializer.validated_data)
+        if error:
+            return error
+        return Response({"detail": "Your account is ready.", "login": login_audience(user)})
 
 
 # What a filed request was made under; year level, academic level and graduation date stay editable.
