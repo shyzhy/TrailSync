@@ -1,30 +1,12 @@
-/**
- * One way to call the API and one shape for everything that can go wrong.
- *
- * Every failure becomes an ApiError with a `kind` the UI switches on and a
- * plain-language `message` it can show as-is:
- *
- *   network      the request never reached the server
- *   validation   400/422 - `fieldErrors` maps each problem to its form field
- *   forbidden    403 - not theirs, or not their role
- *   not_found    404
- *   conflict     409 - e.g. a request that moved on while the page was open
- *   rate_limited 429
- *   server       5xx, or a response that wasn't the JSON it should have been
- *
- * 401 never appears here: authFetch handles it centrally (refresh, or send
- * the person back to log in).
- */
-import { authFetch } from './auth.js';
 import {
   FORBIDDEN_ERROR,
+  friendlyFieldErrors,
+  friendlyMessage,
+  friendlySummary,
   NETWORK_ERROR,
   NOT_FOUND_ERROR,
   RATE_LIMITED_ERROR,
   SERVER_ERROR,
-  friendlyFieldErrors,
-  friendlyMessage,
-  friendlySummary,
 } from './friendlyErrors.js';
 
 export class ApiError extends Error {
@@ -38,11 +20,10 @@ export class ApiError extends Error {
   }
 }
 
-// DRF's stock permission sentence says nothing useful; anything more specific
-// (a staff account still pending, a locked record) is worth showing as-is.
+// DRF's stock permission sentence says nothing useful; more specific 403 details are shown as-is.
 const GENERIC_FORBIDDEN = /^(You do not have permission to perform this action|Authentication credentials were not provided)\.?$/i;
 
-/** Build the ApiError for a response that wasn't ok. */
+// Build the ApiError for a response that wasn't ok.
 export async function errorFromResponse(res, fallback) {
   const data = await res.json().catch(() => null);
   const detail = data && typeof data.detail === 'string' ? data.detail : '';
@@ -65,7 +46,7 @@ export async function errorFromResponse(res, fallback) {
   return new ApiError('server', SERVER_ERROR, { status, data });
 }
 
-/** Whatever was thrown, as an ApiError. A TypeError from fetch means no connection. */
+// Whatever was thrown, as an ApiError. A TypeError from fetch means no connection.
 export function toApiError(error) {
   if (error instanceof ApiError) return error;
   if (error instanceof TypeError) return new ApiError('network', NETWORK_ERROR);
@@ -74,17 +55,7 @@ export function toApiError(error) {
   return new ApiError('server', SERVER_ERROR);
 }
 
-/**
- * Whatever went wrong with a form submit, ready to put on the form.
- *
- * Validation messages for fields the form shows land under those fields;
- * everything else - a field the form doesn't display, a permission problem,
- * a lost connection - is gathered into `general`, so no message is ever
- * silently dropped.
- *
- * @param fields  Server field names the form shows, or { serverName: formName }.
- * @returns { [formName]: message, general?: message }
- */
+// Maps a failed form submit onto the form's fields; anything without a visible field goes to `general`.
 export function formErrors(error, fields = []) {
   const err = toApiError(error);
   if (err.kind !== 'validation') return { general: err.message };
@@ -98,36 +69,4 @@ export function formErrors(error, fields = []) {
   });
   if (loose.length) out.general = [...new Set(loose)].join(' ');
   return out;
-}
-
-/**
- * GET/POST/PATCH and get the parsed JSON back, or an ApiError thrown.
- *
- * @param path     '/api/...'
- * @param options  fetch options; pass `json` for a JSON body
- */
-export async function apiJson(path, { json, ...options } = {}) {
-  let res;
-  try {
-    res = await authFetch(path, {
-      ...options,
-      ...(json !== undefined
-        ? { body: JSON.stringify(json), headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } }
-        : {}),
-    });
-  } catch (error) {
-    throw toApiError(error);
-  }
-  if (!res.ok) throw await errorFromResponse(res);
-  if (res.status === 204) return null;
-  try {
-    return await res.json();
-  } catch {
-    throw new ApiError('server', SERVER_ERROR, { status: res.status });
-  }
-}
-
-/** Several GETs at once; the first failure wins. */
-export function apiAll(paths) {
-  return Promise.all(paths.map((p) => apiJson(p)));
 }

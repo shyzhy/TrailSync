@@ -77,14 +77,7 @@ from .serializers import (
 
 
 class IsApprovedRegistrarStaff(BasePermission):
-    """Gate for every registrar-facing endpoint below.
-
-    Mirrors the exact check LoginView already does at login time — role is
-    Registrar Staff AND staff_profile.approval_status is Approved — so a
-    pending or rejected staff account (or a student token, or a Registrar
-    Staff account that was later un-approved) gets a 403 here even if it
-    somehow still holds a valid JWT.
-    """
+    """Gate for every registrar endpoint: Registrar Staff role and an approved staff profile, checked on every call."""
 
     message = "Only approved registrar staff may access this."
 
@@ -99,12 +92,7 @@ class IsApprovedRegistrarStaff(BasePermission):
 
 
 class RegisterView(APIView):
-    """POST /api/auth/register/ - create an account and email a confirmation link.
-
-    Returns no tokens: the account cannot be used until the address is
-    confirmed (see LoginView and ActivateAccountView). Throttled, because each
-    call sends an email to whatever address it is given.
-    """
+    """POST /api/auth/register/ - create an account and email a confirmation link. Throttled; returns no tokens."""
 
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
@@ -112,9 +100,7 @@ class RegisterView(APIView):
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
-        # raise_exception=True turns serializer errors into a 400 whose body is
-        # {"field": ["message"]}, which is what the React form maps to its
-        # per-field inline errors.
+        # Serializer errors become {"field": ["message"]}, which the React forms map to inline errors.
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         send_activation_email(user)
@@ -166,10 +152,7 @@ class LoginView(APIView):
 
         role_name = user.role.role_name if user.role_id else None
 
-        # Same shape as the staff-approval block below: the password was
-        # right (so nothing is revealed to someone guessing), but the account
-        # isn't usable yet. Scoped to self-registered roles - staff accounts
-        # are provisioned by an admin, not confirmed by email.
+        # Right password but unconfirmed address; staff accounts are provisioned by an admin, not confirmed by email.
         if role_name in SELF_REGISTERED_ROLES and not user.email_verified:
             return Response(
                 {
@@ -195,11 +178,7 @@ class LoginView(APIView):
 
 
 def _session_payload(user):
-    """Tokens plus the user, in the shape the frontend saves as a session.
-
-    Shared by login and account activation, so someone who arrives through
-    their confirmation link holds exactly what a normal login would give them.
-    """
+    """Tokens plus the user, in the shape the frontend saves as a session (shared by login and activation)."""
     refresh = RefreshToken.for_user(user)
     return {
         "access": str(refresh.access_token),
@@ -219,17 +198,7 @@ SELF_REGISTERED_ROLES = (Role.RoleName.STUDENT, Role.RoleName.ALUMNI)
 
 
 class ActivateAccountView(APIView):
-    """POST /api/auth/activate/ {uid, token} - the link from the confirmation email.
-
-    On success the address is marked verified and the student is signed in
-    straight away, so they land in onboarding rather than on a login form
-    asking for the password they typed two minutes ago.
-
-    Answers carry a `code` the page switches on:
-      already_active - the link was used before; log in normally
-      expired        - genuine but older than 24 hours; offer a new one
-      invalid        - malformed, tampered with, or superseded
-    """
+    """POST /api/auth/activate/ {uid, token} - confirm the address and sign in. Errors carry a code: already_active, expired or invalid."""
 
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
@@ -251,9 +220,7 @@ class ActivateAccountView(APIView):
             )
 
         if user.email_verified:
-            # Checked before the token, because using a link flips the flag
-            # the token is signed over - a second click would otherwise read
-            # as a broken link rather than as "you're already in".
+            # Checked before the token, because activation flips the flag the token is signed over.
             return Response(
                 {"code": "already_active", "detail": "Your account is already active.", "email": user.email},
                 status=status.HTTP_409_CONFLICT,
@@ -284,13 +251,7 @@ class ActivateAccountView(APIView):
 
 
 class ResendActivationView(APIView):
-    """POST /api/auth/resend-activation/ {email} - send a fresh confirmation link.
-
-    Always answers the same way, whether or not the address has an account
-    and whether or not it is already confirmed. Anything else would let this
-    endpoint be used to check who is registered. Throttled, since each call
-    can send an email.
-    """
+    """POST /api/auth/resend-activation/ {email} - send a fresh link. Always answers the same, and throttled."""
 
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
@@ -311,8 +272,7 @@ class ResendActivationView(APIView):
             .first()
         )
         if user is not None:
-            # Background, for the same timing reason as password reset: the
-            # answer must not take longer only when the account exists.
+            # Background, so the answer takes the same time whether or not the account exists.
             send_activation_email(user, background=True)
 
         return Response(
@@ -332,13 +292,7 @@ PASSWORD_RESET_SENT = (
 
 
 class PasswordResetRequestView(APIView):
-    """POST /api/auth/password-reset/ {email} - email a reset link if the account exists.
-
-    The answer is identical, word for word and in timing, whether or not the
-    address is registered: the email goes out on a background thread, so the
-    response never waits on the mail server only for real accounts. One flow
-    for students and staff alike - resetting a password doesn't depend on role.
-    """
+    """POST /api/auth/password-reset/ {email} - email a reset link if the account exists; identical answer and timing either way."""
 
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
@@ -358,13 +312,7 @@ class PasswordResetRequestView(APIView):
 
 
 def _reset_link_user(serializer):
-    """(user, None) for a usable reset link, or (None, error Response).
-
-    Expired and already-used links are reported the same way on purpose:
-    both mean "ask for a new one", and a used link fails the signature check
-    (the password it was signed over has changed), so the two can't be told
-    apart honestly anyway.
-    """
+    """(user, None) for a usable reset link, or (None, error Response); expired and used links are reported the same."""
     user = user_from_uid(serializer.validated_data["uid"])
     result = password_reset_token.verify(user, serializer.validated_data["token"]) if user else "invalid"
     if result != "ok":
@@ -376,11 +324,7 @@ def _reset_link_user(serializer):
 
 
 class PasswordResetValidateView(APIView):
-    """POST /api/auth/password-reset/validate/ {uid, token} - is this link still good?
-
-    Asked when the reset page opens, so someone with a dead link is told so
-    straight away instead of after choosing and typing a new password.
-    """
+    """POST /api/auth/password-reset/validate/ {uid, token} - is this link still good?"""
 
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
@@ -398,11 +342,7 @@ class PasswordResetValidateView(APIView):
 
 
 class PasswordResetConfirmView(APIView):
-    """POST /api/auth/password-reset/confirm/ {uid, token, new_password, confirm_new_password}.
-
-    Sets the new password and deliberately does NOT sign the person in: they
-    log in fresh with it, which is also the moment they find out it works.
-    """
+    """POST /api/auth/password-reset/confirm/ - set the new password. Deliberately does not sign the person in."""
 
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
@@ -427,9 +367,7 @@ class PasswordResetConfirmView(APIView):
 
         user.set_password(data["new_password"])
         fields = ["password"]
-        # Opening this link proved they read that inbox - the same thing the
-        # activation link proves - so an unconfirmed account is confirmed too,
-        # rather than resetting the password only to be refused at login.
+        # Opening this link proves the inbox, so an unconfirmed account is confirmed too.
         if not user.email_verified:
             user.email_verified = True
             user.email_verified_at = timezone.now()
@@ -440,22 +378,12 @@ class PasswordResetConfirmView(APIView):
         return Response({"detail": "Your password has been changed.", "login": "staff" if is_staff else "student"})
 
 
-# What a filed request was made under. Year level moves on every year and
-# academic level/graduation date were never asked before, so those stay open.
+# What a filed request was made under; year level, academic level and graduation date stay editable.
 LOCKED_ACADEMIC_FIELDS = ("school_id_number", "course", "user_category")
 
 
 class MeOnboardingView(APIView):
-    """PATCH /api/me/onboarding/ {step, ...fields} - save one wizard step.
-
-    Saved step by step so closing the browser loses nothing. The response is
-    the full /api/me/ payload, whose profile.onboarding says which step is
-    next - the wizard never has to work that out for itself.
-
-    Academic details (ID number, course, category) are official records.
-    They can be set here while the student has never filed a request; once a
-    request exists, changes go through Window 6 like any other record change.
-    """
+    """PATCH /api/me/onboarding/ {step, ...fields} - save one wizard step; academic records lock once a request exists."""
 
     permission_classes = [IsAuthenticated]
 
@@ -478,10 +406,7 @@ class MeOnboardingView(APIView):
         serializer = serializer_class(data=request.data, context={"user": request.user})
         serializer.is_valid(raise_exception=True)
 
-        # The lock is on CHANGING a record a request was filed under, not on
-        # filling a blank: an account that already has requests but predates
-        # academic_level must still be able to finish onboarding, or it would
-        # be asked for a field it is then forbidden to save.
+        # The lock is on changing a record a request was filed under, not on filling a blank.
         if step == "academic" and request.user.form_requests.exists():
             changed = [
                 field
@@ -507,16 +432,7 @@ class MeOnboardingView(APIView):
 
 
 class MeView(APIView):
-    """GET /api/me/ - who the current token belongs to.
-
-    Exists so the dashboard can refresh identity/profile on a page load
-    without re-running login (e.g. after a hard refresh, or once the access
-    token has outlived whatever was cached client-side from login).
-
-    PATCH updates the Profile page's editable "Personal Information" fields
-    only (see UpdateProfileSerializer) — school ID, course, category, and
-    year level are official records and stay read-only here.
-    """
+    """GET /api/me/ - who the token belongs to. PATCH - the Profile page's editable fields."""
 
     permission_classes = [IsAuthenticated]
 
@@ -531,21 +447,7 @@ class MeView(APIView):
 
 
 class MeAvatarView(APIView):
-    """PATCH /api/me/avatar/ - set or replace the profile picture.
-    DELETE /api/me/avatar/ - remove it, reverting to initials everywhere.
-
-    Its own endpoint rather than a field on PATCH /api/me/: an image upload is
-    multipart, the Personal Information form is JSON, and mixing the two would
-    make every name edit a multipart request and every photo change carry the
-    whole form along with it.
-
-    The upload is re-validated and re-encoded here regardless of what the
-    browser already did (see avatars.process_avatar) - this endpoint can be
-    called directly, and the client's checks are a convenience, not a guard.
-
-    Students and alumni only. Staff accounts have a StaffProfile rather than a
-    UserProfile, so there is nowhere to store one; they keep their initials.
-    """
+    """PATCH /api/me/avatar/ - set the profile picture (re-validated server-side). DELETE - remove it. Students and alumni only."""
 
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
@@ -575,9 +477,7 @@ class MeAvatarView(APIView):
         except AvatarRejected as exc:
             return Response({"image": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Write the new file before removing the old one, so a failure
-        # halfway through leaves the student with the photo they had rather
-        # than with none.
+        # Write the new file before removing the old one, so a failure leaves the photo they had.
         previous = profile.profile_picture.name if profile.profile_picture else None
         profile.profile_picture.save(processed.name, processed, save=False)
         profile.save(update_fields=["profile_picture", "updated_at"])
@@ -592,8 +492,7 @@ class MeAvatarView(APIView):
             return error
 
         if profile.profile_picture:
-            # delete(save=False) removes the file from storage; the column is
-            # then cleared explicitly so the row never points at a missing file.
+            # Remove the file, then clear the column so the row never points at a missing file.
             profile.profile_picture.delete(save=False)
         profile.profile_picture = None
         profile.save(update_fields=["profile_picture", "updated_at"])
@@ -601,11 +500,7 @@ class MeAvatarView(APIView):
 
 
 class MeTourView(APIView):
-    """POST /api/me/tour/ - the student finished or skipped the walkthrough.
-
-    Idempotent: replaying the tour from the Help button later does not move
-    the original timestamp, which records when they first saw it.
-    """
+    """POST /api/me/tour/ - the walkthrough was finished or skipped. Idempotent."""
 
     permission_classes = [IsAuthenticated]
 
@@ -623,7 +518,7 @@ class MeTourView(APIView):
 
 
 class ChangePasswordView(APIView):
-    """POST /api/me/change-password/ - Profile page's Change Password card."""
+    """POST /api/me/change-password/ - the Profile page's Change Password card."""
 
     permission_classes = [IsAuthenticated]
 
@@ -635,12 +530,7 @@ class ChangePasswordView(APIView):
 
 
 class ChangeEmailRequestView(APIView):
-    """POST /api/me/change-email/request/ - step 1 of the email-change flow:
-    validate the new address and mail a confirmation link to it. The
-    account's actual email is untouched until that link is used (see
-    ChangeEmailConfirmView) — this only ever sends mail to the NEW address,
-    never changes anything by itself.
-    """
+    """POST /api/me/change-email/request/ - mail a confirmation link to the new address; nothing changes yet."""
 
     permission_classes = [IsAuthenticated]
 
@@ -651,13 +541,9 @@ class ChangeEmailRequestView(APIView):
 
         signer = TimestampSigner()
         token = signer.sign_object({"user_id": request.user.id, "new_email": new_email})
-        # Points at the React app, not this API — clicking an emailed link is
-        # a browser GET, and the confirmation should render as a page (the
-        # frontend reads ?token= and POSTs it to change-email/confirm/ itself).
+        # Points at the React app, which reads ?token= and POSTs it to change-email/confirm/.
         verify_url = f"{settings.FRONTEND_BASE_URL}/confirm-email?token={token}"
 
-        # EMAIL_BACKEND is the console backend in dev (see settings.py) — this
-        # really runs, it just prints to the runserver log instead of an inbox.
         send_mail(
             subject="Confirm your new TrailSync email",
             message=(
@@ -673,8 +559,7 @@ class ChangeEmailRequestView(APIView):
 
 
 class ChangeEmailConfirmView(APIView):
-    """POST /api/me/change-email/confirm/ - step 2: the token from that link
-    actually flips USERS.email, after re-checking the address is still free."""
+    """POST /api/me/change-email/confirm/ - apply the change, after re-checking the address is still free."""
 
     permission_classes = [IsAuthenticated]
 
@@ -704,12 +589,7 @@ class ChangeEmailConfirmView(APIView):
 
 
 class DashboardSummaryView(APIView):
-    """GET /api/dashboard/summary/ - the three student home-screen stat cards.
-
-    Every count is filtered by user=request.user first — the request never
-    chooses whose data it sees, so one student can't page through another's
-    counts by any parameter tampering.
-    """
+    """GET /api/dashboard/summary/ - the student home-screen counts, always for request.user."""
 
     permission_classes = [IsAuthenticated]
 
@@ -747,7 +627,7 @@ class RecentFormRequestsView(generics.ListAPIView):
     pagination_class = None
 
     def get_queryset(self):
-        # select_related avoids an N+1 for transaction_type.name on each row.
+        # select_related avoids an N+1 for transaction_type.name.
         return (
             FormRequest.objects.filter(user=self.request.user)
             .select_related("transaction_type")
@@ -756,35 +636,24 @@ class RecentFormRequestsView(generics.ListAPIView):
 
 
 class UpcomingReleaseDatesView(APIView):
-    """GET /api/dashboard/upcoming-release-dates/ - ISO dates (deduped) the
-    logged-in student has a request booked against, today or later. Powers
-    the dashboard calendar's "something's scheduled" dots — purely additive,
-    a student with none just gets an empty list.
-    """
+    """GET /api/dashboard/upcoming-release-dates/ - deduped ISO dates of the student's upcoming handovers."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         # Reads the schedule, which is what Mark Ready to Release writes.
-        # This used to read FormRequest.release_slot, so once the slot picker
-        # was removed every dot on the student's calendar would have
-        # disappeared.
         dates = FormRequest.objects.filter(
             user=request.user,
             release_schedule__release_date__gte=timezone.localdate(),
         ).values_list("release_schedule__release_date", flat=True)
 
-        # Deduping in Python rather than via .distinct(): FormRequest's
-        # default ordering (-created_at) gets pulled into the query when you
-        # chain .distinct() after .values_list(), which makes DISTINCT
-        # compare on created_at too and silently defeats it — every row has
-        # a different created_at, so nothing gets collapsed.
+        # Deduped in Python: .distinct() would also compare on the default ordering's created_at.
         unique_dates = sorted(set(dates))
         return Response({"dates": [d.isoformat() for d in unique_dates]})
 
 
 class TransactionTypeListView(generics.ListAPIView):
-    """GET /api/transaction-types/ - the Request a Form document dropdown."""
+    """GET /api/transaction-types/ - the requestable documents."""
 
     serializer_class = TransactionTypeSerializer
     permission_classes = [IsAuthenticated]
@@ -793,9 +662,7 @@ class TransactionTypeListView(generics.ListAPIView):
 
 
 class FormRequestPagination(PageNumberPagination):
-    """Reports the exact start/end index of the current page so the Track
-    Requests page can render "Showing X–Y of Z" without recomputing offsets
-    (and risking an off-by-one) on the client."""
+    """Reports the page's start/end index so the client never recomputes offsets."""
 
     page_size = 6
     page_size_query_param = "page_size"
@@ -818,18 +685,7 @@ class FormRequestPagination(PageNumberPagination):
 
 
 class FormRequestListCreateView(generics.ListCreateAPIView):
-    """GET /api/form-requests/ - the Track Requests list: the logged-in
-    student's own requests, newest first, filterable by ?status= and
-    ?search= (request code), paginated.
-
-    POST /api/form-requests/ - submit a new document request. request_status,
-    request_code, and the owning user are all set server-side (see
-    CreateFormRequestSerializer) — none of them are accepted from the
-    client, so a request can't be filed under someone else's account or
-    created in a status other than Submitted. create() is overridden because
-    the default ListCreateAPIView response would echo back the write-only
-    CreateFormRequestSerializer shape instead of FormRequestResultSerializer.
-    """
+    """GET /api/form-requests/ - the student's own requests, filterable and paginated. POST - submit a request; status, code and owner are set server-side."""
 
     permission_classes = [IsAuthenticated]
     pagination_class = FormRequestPagination
@@ -862,19 +718,7 @@ class FormRequestListCreateView(generics.ListCreateAPIView):
 
 
 def _releases_between(first_day, last_day):
-    """Requests whose handover falls on a date in [first_day, last_day].
-
-    The one rule every "when is this being released" view shares: the
-    ReleaseSchedule date that Mark Ready to Release writes, or - only for a
-    request that has no schedule date at all - the ReleaseSlot it was booked
-    into before slots were retired. That is the same precedence as
-    FormRequest.scheduled_release(), expressed as a query so it can be
-    counted without loading every row.
-
-    Before this existed the dashboard counted schedule dates only, so a
-    request booked under the old slot system was invisible there while
-    still showing its window to the student.
-    """
+    """Requests whose handover falls in [first_day, last_day]: the schedule date, or a legacy slot date when there is none."""
     return FormRequest.objects.filter(
         models.Q(release_schedule__release_date__range=(first_day, last_day))
         | models.Q(
@@ -889,30 +733,13 @@ def _effective_release_date(schedule_date, slot_date):
 
 
 def _release_window_text():
-    """"3:00 PM to 5:00 PM" - the one window Window 6 releases in.
-
-    Built here rather than with strftime's %-I, which is not portable (it
-    raises on Windows, where this project is developed).
-    """
+    """"3:00 PM to 5:00 PM", built without strftime's %-I, which raises on Windows."""
     fmt = lambda t: f"{t:%I:%M %p}".lstrip("0")  # noqa: E731
     return f"{fmt(RELEASE_TIME_START)} and {fmt(RELEASE_TIME_END)}"
 
 
 class RegistrarDashboardSummaryView(APIView):
-    """GET /api/registrar/dashboard/summary/ - the four Registrar Dashboard
-    stat cards.
-
-    There is no per-request "window" column anywhere in FormRequest — every
-    request in this system is already implicitly Window 6 (there's only one
-    window, per every page's own copy) — so these counts are NOT scoped by
-    staff_profile.assigned_window; there's no real per-request data to scope
-    by. If multi-window support is added later, this is the place a
-    `.filter(window=...)` would go in.
-
-    Two of the four counts lean on updated_at as a stand-in for a dedicated
-    timestamp that doesn't exist yet (no verified_at/released_at columns,
-    no REQUIREMENT_VERIFICATIONS table) — see the per-field comments below.
-    """
+    """GET /api/registrar/dashboard/summary/ - the four stat cards. Not scoped by window, since there is only Window 6."""
 
     permission_classes = [IsApprovedRegistrarStaff]
 
@@ -924,20 +751,13 @@ class RegistrarDashboardSummaryView(APIView):
             request_status=FormRequest.RequestStatus.SUBMITTED
         ).count()
 
-        # A real event count now, no longer a proxy: RequirementVerification
-        # records each decision with its own verified_at, so this counts
-        # approvals that actually happened today rather than requests that
-        # merely sit at Approved and were last written today (which double
-        # counted a request edited later the same day, and lost one approved
-        # yesterday but touched today).
+        # Counts verification events that actually happened today.
         verified_today_count = RequirementVerification.objects.filter(
             verification_status=RequirementVerification.VerificationStatus.VERIFIED,
             verified_at__date=today,
         ).count()
 
-        # "For release today" = scheduled for handover today. Counted off
-        # ReleaseSchedule.release_date now that Mark Ready to Release writes
-        # it directly; the old ReleaseSlot count would read 0 forever.
+        # Scheduled for handover today.
         for_release_today_count = _releases_between(today, today).count()
 
         completed_this_week_count = FormRequest.objects.filter(
@@ -956,8 +776,7 @@ class RegistrarDashboardSummaryView(APIView):
 
 
 class RegistrarRecentSubmissionsView(generics.ListAPIView):
-    """GET /api/registrar/dashboard/recent-submissions/ - latest 5 requests
-    across the (single) queue, for the Dashboard's "Recent Submissions" card."""
+    """GET /api/registrar/dashboard/recent-submissions/ - the latest 5 requests."""
 
     serializer_class = RegistrarRecentSubmissionSerializer
     permission_classes = [IsApprovedRegistrarStaff]
@@ -971,8 +790,7 @@ class RegistrarRecentSubmissionsView(generics.ListAPIView):
 
 
 class RegistrarTodaysPickupsView(generics.ListAPIView):
-    """GET /api/registrar/dashboard/todays-pickups/ - requests scheduled for
-    handover today, for the Dashboard's "Today's Pickups" card."""
+    """GET /api/registrar/dashboard/todays-pickups/ - requests scheduled for handover today."""
 
     serializer_class = RegistrarTodaysPickupRowSerializer
     permission_classes = [IsApprovedRegistrarStaff]
@@ -988,15 +806,7 @@ class RegistrarTodaysPickupsView(generics.ListAPIView):
 
 
 class RegistrarReleaseCalendarView(APIView):
-    """GET /api/registrar/release-calendar/?year=&month= - dates and counts only.
-
-    Deliberately thin: the month grid needs to know which days have releases
-    and how many, not who they are. Detail for one day comes from the day
-    endpoint below, only when a date is actually opened.
-
-    Read-only by design. Scheduling happens on the Request Review page and
-    nowhere else, so there is no write path here to keep in sync with it.
-    """
+    """GET /api/registrar/release-calendar/?year=&month= - dates and counts only. Read-only."""
 
     permission_classes = [IsApprovedRegistrarStaff]
 
@@ -1032,11 +842,7 @@ class RegistrarReleaseCalendarView(APIView):
 
 
 class RegistrarReleaseCalendarDayView(APIView):
-    """GET /api/registrar/release-calendar/day/?date=YYYY-MM-DD - who is due that day.
-
-    Name, request code and document per release, plus whether it has been
-    collected yet so a glance at a past day reads correctly. No actions.
-    """
+    """GET /api/registrar/release-calendar/day/?date=YYYY-MM-DD - who is due that day, and whether it was collected."""
 
     permission_classes = [IsApprovedRegistrarStaff]
 
@@ -1073,14 +879,7 @@ class RegistrarReleaseCalendarDayView(APIView):
 
 
 class RegistrarQueueListView(generics.ListAPIView):
-    """GET /api/registrar/queue/ - Processing Queue's left-hand list.
-
-    Filterable by ?status= (defaults to Submitted — the UI's "Pending"),
-    ?date_from=/?date_to= (against created_at), and ?search= (student name
-    or request code). Not scoped by assigned_window: there's no per-request
-    window column, same reality noted on the Dashboard endpoints — every
-    request is already implicitly Window 6.
-    """
+    """GET /api/registrar/queue/ - the Processing Queue, filterable by status, dates and search."""
 
     serializer_class = RegistrarQueueRowSerializer
     permission_classes = [IsApprovedRegistrarStaff]
@@ -1115,22 +914,13 @@ class RegistrarQueueListView(generics.ListAPIView):
 
 
 class ReleasedPagination(FormRequestPagination):
-    """A records page, not a work queue: more rows per page than the six the
-    Processing Queue shows, since nobody acts on these one at a time."""
+    """A records page rather than a work queue, so more rows per page."""
 
     page_size = 15
 
 
 def _released_queryset(params):
-    """Every released request matching the page's two filters, newest first.
-
-    Shared by the table and the export so "Export to Excel" can never hand
-    back a different set of rows than the one on screen - the whole point of
-    the button is that it exports what staff are looking at.
-
-    Dates filter on when the document was CLAIMED, not when it was
-    requested: this is a record of handovers.
-    """
+    """Released requests matching the page's filters, shared by the table and the export; dates filter on the claim date."""
     qs = (
         FormRequest.objects.filter(
             request_status=FormRequest.RequestStatus.RELEASED,
@@ -1165,11 +955,7 @@ def _released_queryset(params):
 
 
 class RegistrarReleasedListView(generics.ListAPIView):
-    """GET /api/registrar/released/ - the Released Documents table.
-
-    ?date_from=&date_to= (against the claim date) and ?search= (student name
-    or request code), paginated.
-    """
+    """GET /api/registrar/released/ - the Released Documents table."""
 
     serializer_class = RegistrarReleasedRowSerializer
     permission_classes = [IsApprovedRegistrarStaff]
@@ -1180,12 +966,7 @@ class RegistrarReleasedListView(generics.ListAPIView):
 
 
 class RegistrarReleasedExportView(APIView):
-    """GET /api/registrar/released/export/ - the same rows as an .xlsx file.
-
-    Returns the workbook itself rather than a URL to one: there is no
-    generated-files store to put it in, and the record is small enough that
-    building it per request costs less than managing stale copies of it.
-    """
+    """GET /api/registrar/released/export/ - the same rows as an .xlsx file."""
 
     permission_classes = [IsApprovedRegistrarStaff]
 
@@ -1199,18 +980,7 @@ class RegistrarReleasedExportView(APIView):
 
 
 class RegistrarQueueVerifyView(APIView):
-    """POST /api/registrar/queue/<id>/verify/ - the Front Desk check.
-
-    Pending Verification -> Verified. This is the first of the two signatures
-    the official form carries ("Verified - Name & Signature of Front Desk
-    Personnel"): the requirements and clearance are in order, and the request
-    is fit to go to the Registrar.
-
-    Deliberately assesses NO fee and stamps NO registrar approval. Those
-    belong to the second signature, and a Front Desk verification that also
-    priced the request would put one person's name on both lines of a
-    document whose whole purpose is to show they were separate decisions.
-    """
+    """POST /api/registrar/queue/<id>/verify/ - Front Desk check (Submitted -> Verified). No fee and no Registrar approval here."""
 
     permission_classes = [IsApprovedRegistrarStaff]
 
@@ -1234,25 +1004,12 @@ class RegistrarQueueVerifyView(APIView):
         form_request.request_status = FormRequest.RequestStatus.VERIFIED
         form_request.save(update_fields=["request_status", "updated_at"])
 
-        # No notification here on purpose: verification is an internal
-        # handoff between two desks, and there is nothing for the student to
-        # do about it. They hear from us when the Registrar approves and
-        # there is something to print and pay.
+        # No notification: verification is an internal handoff, and the student has nothing to do yet.
         return Response(RegistrarQueueRowSerializer(form_request).data)
 
 
 class RegistrarQueueApproveView(APIView):
-    """POST /api/registrar/queue/<id>/approve/ - the Registrar sign-off.
-
-    Verified -> Approved - Ready to Print. The second signature on the form
-    ("Approved - University Registrar"). This is where the fee is assessed
-    and stamped, because pricing is the Registrar's call, and where the
-    student first gets something to act on.
-
-    amount_due is written onto the row rather than computed at print time so
-    that reprinting a form always reproduces the document the student first
-    carried to the Cashier, even if the fee schedule changes afterwards.
-    """
+    """POST /api/registrar/queue/<id>/approve/ - Registrar sign-off (Verified -> Approved), where the fee is assessed and stamped."""
 
     permission_classes = [IsApprovedRegistrarStaff]
 
@@ -1297,16 +1054,7 @@ class RegistrarQueueApproveView(APIView):
 
 
 class RegistrarQueueRejectView(APIView):
-    """POST /api/registrar/queue/<id>/reject/ - turn a request back.
-
-    Allowed from EITHER pre-approval stage. Front Desk rejects what fails the
-    requirements check; the Registrar can still refuse something Front Desk
-    passed. Refusing from Verified would force the Registrar to approve a
-    request they have just decided against.
-
-    Not permitted once approved: by then the student may have paid, and
-    unwinding that is a refund conversation, not a status change.
-    """
+    """POST /api/registrar/queue/<id>/reject/ - allowed from either pre-approval stage, never after approval."""
 
     permission_classes = [IsApprovedRegistrarStaff]
 
@@ -1346,17 +1094,7 @@ class RegistrarQueueRejectView(APIView):
 
 
 def _student_document_target(request, pk):
-    """Resolve a FormRequest for a student-facing PDF, or raise Http404.
-
-    Shared by the receipt and the claim stub so both enforce one rule rather
-    than two copies that can drift apart.
-
-    The request's own student, or approved registrar staff. Anyone else gets
-    404 rather than 403 - a 403 on a specific id would confirm that request
-    exists and let a logged-in student enumerate the request table by walking
-    primary keys. Staff are included because they field "I lost my printout"
-    at the window and need to reprint.
-    """
+    """The FormRequest for a student-facing PDF: its own student or approved staff; anyone else gets 404, not 403."""
     form_request = get_object_or_404(
         FormRequest.objects.select_related(
             "user__user_profile",
@@ -1381,17 +1119,7 @@ def _pdf_response(pdf_bytes, filename):
 
 
 class FormRequestReceiptView(APIView):
-    """GET /api/form-requests/<pk>/receipt/ - the printable Cashier form.
-
-    Two independent gates, both enforced here rather than by hiding the
-    button. The UI not rendering a link is a convenience, never the control.
-
-    WHO: see _student_document_target.
-
-    WHEN: only while the request sits at Approved - Ready to Print. Before
-    that there is no amount due and no approving signatory; after it, payment
-    is already logged and a print-and-pay form has nothing left to do.
-    """
+    """GET /api/form-requests/<pk>/receipt/ - the printable Cashier form, only while Approved - Ready to Print."""
 
     permission_classes = [IsAuthenticated]
 
@@ -1417,14 +1145,7 @@ class FormRequestReceiptView(APIView):
 
 
 class FormRequestClaimStubView(APIView):
-    """GET /api/form-requests/<pk>/claim-stub/ - the student's claim stub.
-
-    Gated on digital_stub_active, which Approve & Log switches on the moment
-    a Cashier payment is recorded. That flag is the eligibility rule rather
-    than a status comparison, so if the stub is ever issued or revoked
-    outside the normal Processing transition, this endpoint follows it
-    automatically instead of needing its own list of stages kept in step.
-    """
+    """GET /api/form-requests/<pk>/claim-stub/ - the claim stub, gated on digital_stub_active."""
 
     permission_classes = [IsAuthenticated]
 
@@ -1449,26 +1170,11 @@ class FormRequestClaimStubView(APIView):
         )
 
 
-# ---------------------------------------------------------------------------
-# Registrar lifecycle transitions
-# ---------------------------------------------------------------------------
-#
-# One endpoint per transition rather than a writable request_status field.
-# Each knows the single stage it may be entered from and refuses anything
-# else, so the sequence cannot be skipped or replayed — Release can never
-# fire on a request that was never marked Ready, and a double-submitted form
-# or a stale browser tab gets a clear conflict instead of quietly moving the
-# request a second time.
+# Registrar lifecycle transitions: one endpoint per move, each refusing anything but its entry stage, so the sequence can't be skipped or replayed.
 
 
 def _notify_student(form_request, notification_type, title, message):
-    """Record an in-app notification for a lifecycle transition.
-
-    Writes a row and nothing more. The brief describes these as triggering
-    push via DEVICE_TOKENS; no such table and no push transport exist in this
-    project, so rather than imply a delivery that cannot happen, the payload
-    such a transport would send is persisted here for one to pick up later.
-    """
+    """Record an in-app notification for a lifecycle transition."""
     return Notification.objects.create(
         user=form_request.user,
         form_request=form_request,
@@ -1479,12 +1185,7 @@ def _notify_student(form_request, notification_type, title, message):
 
 
 def _wrong_state(form_request, expected_label):
-    """409 for a transition attempted from the wrong stage.
-
-    Conflict rather than 400: the payload is fine, the resource simply is not
-    in a state where the action means anything. request_status rides along so
-    a stale page can resync to the real stage instead of guessing.
-    """
+    """409 for a transition attempted from the wrong stage, with the real request_status so the page can resync."""
     return Response(
         {
             "detail": (
@@ -1499,13 +1200,7 @@ def _wrong_state(form_request, expected_label):
 
 
 def _blocked_by_clearance_response(form_request):
-    """Hard stop for a request whose clearance came back Not Cleared.
-
-    Applies to every transition into Processing or later. A student with an
-    outstanding clearance must not reach release no matter which endpoint is
-    called or what the UI happens to offer, so the check sits on each
-    transition rather than only on the screen that normally precedes it.
-    """
+    """Hard stop for a Not Cleared request on every transition into Processing or later."""
     return Response(
         {
             "detail": (
@@ -1532,13 +1227,7 @@ def _queue_queryset():
 
 
 class RegistrarQueueDetailView(APIView):
-    """GET /api/registrar/queue/<id>/ — one request, for the review page.
-
-    The review panel used to read whatever row the list already held in
-    memory. A dedicated page is reachable by URL — deep-linked, bookmarked,
-    reloaded after an action — so it has to be able to fetch a single request
-    on its own without first paging the queue to find it.
-    """
+    """GET /api/registrar/queue/<id>/ - one request, for the review page."""
 
     permission_classes = [IsApprovedRegistrarStaff]
 
@@ -1547,14 +1236,7 @@ class RegistrarQueueDetailView(APIView):
 
 
 class RegistrarApproveLogView(APIView):
-    """PATCH /api/form-requests/<id>/approve-log/ — log the Cashier payment.
-
-    Approved - Ready to Print -> Processing. The student pays in person, so
-    nothing observes that payment as it happens; this is staff attesting
-    after the fact to what was hand-written in the printed form's Cashier
-    box. or_number and payment_date are captured here and never read back off
-    the PDF, which stays a purely printed artefact.
-    """
+    """PATCH /api/form-requests/<id>/approve-log/ - log the Cashier payment (Approved -> Processing)."""
 
     permission_classes = [IsApprovedRegistrarStaff]
 
@@ -1573,11 +1255,7 @@ class RegistrarApproveLogView(APIView):
         form_request.payment_date = serializer.validated_data["payment_date"]
         form_request.request_status = FormRequest.RequestStatus.PROCESSING
 
-        # The digital claim stub goes live here, not at release. Once the
-        # student has paid they are entitled to proof of what they are owed
-        # and the right to come and collect it - which is exactly the window
-        # in which they need something to show at Window 6. Waiting until
-        # release would issue the stub after the only moment it is useful.
+        # The digital claim stub goes live at payment, the window in which the student needs it.
         form_request.claim_stub_issued_at = timezone.now()
         form_request.digital_stub_active = True
 
@@ -1605,13 +1283,7 @@ class RegistrarApproveLogView(APIView):
 
 
 class RegistrarMarkReadyView(APIView):
-    """PATCH /api/form-requests/<id>/mark-ready/ - Processing -> Ready for Pickup.
-
-    Staff choose the date. The time is always RELEASE_TIME_START, because
-    Window 6 hands documents over between 3:00 and 5:00 PM and nothing else
-    was ever on offer - asking for it (and for a capacity slot to hang it on)
-    made staff answer a question with one possible answer.
-    """
+    """PATCH /api/form-requests/<id>/mark-ready/ - Processing -> Ready for Pickup; staff choose only the date."""
 
     permission_classes = [IsApprovedRegistrarStaff]
 
@@ -1659,22 +1331,7 @@ class RegistrarMarkReadyView(APIView):
 
 
 class RegistrarReleaseView(APIView):
-    """PATCH /api/form-requests/<id>/release/ — Ready for Pickup -> Released.
-
-    Terminal. Records who physically collected the document, which is why
-    claimant_name is required rather than assumed to be the student: a proxy
-    collection is the entire reason that field is free text.
-
-    When the request names a RequestProxy, proxy_acknowledged must be true —
-    staff confirming they checked the notarised authorisation letter and both
-    IDs. Enforced here and not only by the checkbox on the page, because the
-    checkbox is a prompt and this is the record.
-
-    claimant_signature is deliberately left empty. Capturing a real signature
-    needs a canvas flow that is out of scope, and a typed name is an honest
-    account of who collected the document where a generated signature image
-    would not be.
-    """
+    """PATCH /api/form-requests/<id>/release/ - Ready for Pickup -> Released, recording who collected it."""
 
     permission_classes = [IsApprovedRegistrarStaff]
 
@@ -1730,14 +1387,7 @@ class RegistrarReleaseView(APIView):
         return Response(RegistrarQueueRowSerializer(form_request).data)
 
 
-# ---------------------------------------------------------------------------
-# Student notifications
-# ---------------------------------------------------------------------------
-#
-# The lifecycle transitions have been writing Notification rows since they
-# were built; these are what finally let a student read them. Every query is
-# scoped to request.user, so there is no way to address someone else's inbox:
-# another user's id simply 404s, which also avoids confirming it exists.
+# Student notifications: every query is scoped to request.user, so another inbox simply 404s.
 
 
 class NotificationPagination(FormRequestPagination):
@@ -1745,10 +1395,7 @@ class NotificationPagination(FormRequestPagination):
 
 
 class NotificationListView(generics.ListAPIView):
-    """GET /api/notifications/ - the signed-in user's inbox, newest first.
-
-    ?order=oldest flips it, for the full page's sort toggle.
-    """
+    """GET /api/notifications/ - the user's inbox, newest first (?order=oldest flips it)."""
 
     permission_classes = [IsAuthenticated]
     serializer_class = NotificationSerializer
@@ -1764,11 +1411,7 @@ class NotificationListView(generics.ListAPIView):
 
 
 class NotificationUnreadCountView(APIView):
-    """GET /api/notifications/unread-count/ - the number on the bell.
-
-    Its own tiny endpoint because every student page asks for it on load;
-    fetching a page of full notifications just to count them would be waste.
-    """
+    """GET /api/notifications/unread-count/ - the number on the bell."""
 
     permission_classes = [IsAuthenticated]
 
@@ -1803,14 +1446,7 @@ class NotificationMarkAllReadView(APIView):
         return Response({"marked": marked, "unread_count": 0})
 
 
-# ---------------------------------------------------------------------------
-# Staff fraud alert (duplicate_flag)
-# ---------------------------------------------------------------------------
-#
-# The home for the flag on the registrar side, now that Notifications is a
-# student-only page. What SETS the flag is still undecided (see the chat
-# note): nothing in the codebase writes it yet. These endpoints make any
-# flagged request impossible to miss once something does.
+# Staff fraud alert (duplicate_flag). Nothing sets the flag yet; these make a flagged request impossible to miss.
 
 
 class RegistrarFlaggedRequestsView(APIView):
@@ -1839,12 +1475,7 @@ class RegistrarFlaggedRequestsView(APIView):
 
 
 class RegistrarClearFlagView(APIView):
-    """POST /api/registrar/queue/<id>/clear-flag/ - staff reviewed it.
-
-    Clearing is deliberately a separate, explicit act rather than something
-    that happens as a side effect of opening the request: looking at a fraud
-    alert is not the same as having dealt with it.
-    """
+    """POST /api/registrar/queue/<id>/clear-flag/ - staff reviewed it; opening a request never clears the flag."""
 
     permission_classes = [IsApprovedRegistrarStaff]
 

@@ -1,18 +1,7 @@
-/**
- * Turn what the server says into something a first-time user can act on.
- *
- * The backend's own messages are mostly written for people already ("Please
- * select a purpose."), but a handful come straight from the framework - "This
- * field is required.", "Invalid pk "7" - object does not exist." - and those
- * read like errors in the app rather than instructions to the person. Every
- * student-facing screen passes server text through here instead of showing
- * it raw, so the wording is fixed in one place.
- */
+// Translates framework error text into plain words a first-time user can act on.
 
-// The request never reached the server (offline, dropped connection).
 export const NETWORK_ERROR = "Can't connect right now. Check your connection and try again.";
 
-// The server hit an error of its own (5xx).
 export const SERVER_ERROR = 'Something went wrong on our end. Please try again in a moment.';
 
 export const SESSION_ENDED = 'Your session expired. Please log in again.';
@@ -38,9 +27,9 @@ const RULES = [
   [/^Incorrect type\..*$/i, 'Please choose one of the options from the list.'],
   [/^".*" is not a valid choice\.?$/i, 'Please choose one of the options shown.'],
   [/^Date has wrong format.*$/i, 'Please enter a valid date.'],
-  // Both tabs use this: students log in with an email or a School ID, staff with an email.
+  // Wording covers both student (email or School ID) and staff logins.
   [/^Invalid credentials\.?$/i, "That login doesn't match our records. Please check what you typed and try again."],
-  // Django's password validators - shown on Create Account and Change Password.
+  // Django's password validators, shown wherever a password is chosen.
   [/^This password is too short\..*?(\d+) characters\.?$/i, (m) => `Please use at least ${m[1]} characters.`],
   [/^This password is too common\.?$/i, 'That password is too easy to guess. Please choose a different one.'],
   [/^This password is entirely numeric\.?$/i, 'Please use some letters too, not only numbers.'],
@@ -52,7 +41,7 @@ const RULES = [
   [/^Method ".*" not allowed\.?$/i, SERVER_ERROR],
 ];
 
-/** One message, translated if it matches a known framework phrasing. */
+// One message, translated if it matches a known framework phrasing.
 export function friendlyMessage(message) {
   if (message === null || message === undefined) return '';
   const text = String(message).trim();
@@ -63,15 +52,7 @@ export function friendlyMessage(message) {
   return text;
 }
 
-/**
- * A DRF error body -> { field: 'plain message' }.
- *
- * Arrays are joined, nested objects (the request form's form_data / proxy
- * sections) are flattened onto their own keys, and anything not tied to a
- * field lands on `general`. Field NAMES are never shown to the user - only
- * the messages are - so a key like "transaction_type" cannot leak onto the
- * screen.
- */
+// A DRF error body as { field: message }: nested sections are flattened and non-field errors go to `general`.
 export function friendlyFieldErrors(data) {
   const out = {};
   if (!data || typeof data !== 'object') return { general: SERVER_ERROR };
@@ -94,7 +75,7 @@ export function friendlyFieldErrors(data) {
   return out;
 }
 
-/** Everything in an error body, as one readable sentence or two. */
+// Everything in an error body, as one readable sentence or two.
 export function friendlySummary(data, fallback = SERVER_ERROR) {
   const messages = Object.values(friendlyFieldErrors(data)).filter(Boolean);
   return messages.length ? [...new Set(messages)].join(' ') : fallback;

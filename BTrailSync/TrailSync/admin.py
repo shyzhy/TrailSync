@@ -21,12 +21,7 @@ from TrailSync.models import (
 )
 
 
-# `admin.site.register(User)` alone (as this was before) uses a bare
-# ModelAdmin with a raw CharField widget for `password` — typing a new
-# user's password directly into /admin/ would have saved it in PLAINTEXT,
-# silently breaking their login (authenticate() expects a hashed value).
-# These two forms are Django's documented pattern for a custom user model:
-# they route through set_password() the same way create_user() does.
+# Django's forms for a custom user model, so passwords typed into /admin/ are hashed rather than saved in plain text.
 class TrailSyncUserCreationForm(UserCreationForm):
     class Meta(UserCreationForm.Meta):
         model = User
@@ -62,9 +57,7 @@ class UserAdmin(DjangoUserAdmin):
 
 @admin.register(StaffProfile)
 class StaffProfileAdmin(admin.ModelAdmin):
-    """list_editable on approval_status is the actual point of this class —
-    approving a pending staff account is now a dropdown change directly in
-    the list view, not a trip into the detail form."""
+    """Pending staff accounts are approved with a dropdown directly in the list view."""
 
     list_display = [
         "employee_id",
@@ -81,8 +74,7 @@ class StaffProfileAdmin(admin.ModelAdmin):
     search_fields = ["employee_id", "user__email", "user__first_name", "user__last_name"]
 
     def save_model(self, request, obj, form, change):
-        # Flipping the dropdown to Approved should leave a complete record,
-        # not just a status with approved_by/approved_at stuck at null forever.
+        # Approving in the list also records who approved and when.
         if (
             change
             and "approval_status" in form.changed_data

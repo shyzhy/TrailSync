@@ -1,35 +1,4 @@
-"""Server-side PDF generation for the student's claim stub.
-
-The official Request for Credential/s Form is NOT built here: it is
-overlaid onto the university's own PDF in official_form.py, which imports
-the font setup and small drawing helpers below. This module keeps the
-claim stub, which has no official template to overlay onto.
-
-Deliberately NOT WeasyPrint, despite it being the natural HTML/CSS-to-PDF
-pick and the one the brief suggested: WeasyPrint renders through native GTK
-libraries (libgobject, Pango, cairo) that pip cannot supply on Windows. It
-pip-installs cleanly and then fails at import with "cannot load library
-libgobject-2.0-0" unless a system-wide GTK runtime is present. It is not
-present on this project's dev machine, and requiring one would have to be
-reproduced on whatever host this eventually deploys to. ReportLab is pure
-Python with no native dependencies, so `pip install` really is all it takes
-on any platform.
-
-Layout is drawn directly onto the canvas rather than flowed through
-platypus. This document has a fixed, form-like structure that must always
-land on exactly one page — it gets printed, written on by hand at the
-Cashier, then torn along the stub line — so absolute positioning is the
-right tool here. There is no variable-length content needing to reflow, and
-the few fields that could overrun their column are truncated to fit rather
-than allowed to push the claim stub onto a second page.
-
-This is the one place in TrailSync that deliberately abandons the
-skeuomorphic / liquid-glass design language. Backdrop blur, soft shadows and
-translucent panels are screen-only affordances that either vanish or turn to
-mud on paper, so this reads as an official printed document instead: black
-text on white with ruled boxes, keeping institutional blue and muted gold
-only as accent bars and rules so it stays recognisably TrailSync.
-"""
+"""Server-side PDF for the student's claim stub, drawn with ReportLab (pure Python, unlike WeasyPrint, which needs GTK on Windows)."""
 
 from __future__ import annotations
 
@@ -51,10 +20,7 @@ ASSET_DIR = Path(__file__).resolve().parent / "assets"
 FONT_DIR = ASSET_DIR / "fonts"
 LOGO_PATH = ASSET_DIR / "trailsync-logo.png"
 
-# A4 rather than Letter. Philippine universities and government offices
-# standardise on A4, and this form is handled at three separate desks
-# (student, Cashier, Window 6), so it needs to match the paper already in
-# their trays. Chosen once here and never mixed.
+# A4, the paper Philippine offices stock.
 PAGE_W, PAGE_H = A4
 MARGIN = 42.0
 CONTENT_W = PAGE_W - 2 * MARGIN
@@ -72,17 +38,12 @@ EM_DASH = "—"
 MIDDOT = "·"
 SCISSORS = "✂"
 
-# Control block from the real USTP form this document stands in for
-# (FM-USTP-RGTR-09). Printed so a member of staff can see at a glance that
-# what the student handed them is the current revision of the official form
-# and not a lookalike.
+# The official form's control block, so staff can see it's the current revision.
 DOC_CODE = "FM-USTP-RGTR-09"
 DOC_REVISION = "00"
 DOC_EFFECTIVE = "10.01.21"
 
-# Window 6 releases only in this band. It is on the printed stub because it
-# is the single thing students most often get wrong, and the real form gives
-# it its own boxed notice.
+# The release window students most often get wrong, as boxed on the real form.
 RELEASING_TIME_NOTICE = "RELEASING TIME is from 3:00 to 5:00 in the afternoon."
 
 _FONTS_LOADED = False
@@ -90,19 +51,7 @@ _EMBEDDED_OK = False
 
 
 def _load_fonts():
-    """Register the bundled DejaVu faces, once per process.
-
-    ReportLab's built-in Type1 faces (Helvetica et al.) use WinAnsiEncoding,
-    which has no glyph for the Philippine peso sign — it would silently
-    print as a black box on the single number the student has to hand money
-    over for. DejaVu carries U+20B1 and is bundled into assets/fonts rather
-    than read out of the Windows font directory, because that path does not
-    exist on a Linux host and Arial/Calibri are not redistributable anyway.
-
-    If registration fails for any reason the document still renders, using
-    the built-in faces and spelling the currency "PHP" instead — a fallback
-    that degrades the typography but never prints an unreadable amount.
-    """
+    """Register the bundled DejaVu faces once per process, for the peso sign; falls back to built-in faces and "PHP"."""
     global _FONTS_LOADED, _EMBEDDED_OK
     if _FONTS_LOADED:
         return
@@ -139,12 +88,7 @@ def _fonts():
 
 
 def format_money(value):
-    """Render a peso amount, or None when there is nothing to render.
-
-    Returns None rather than a zero for a missing amount so callers can draw
-    a blank write-in rule instead — a document type with no published fee is
-    a real case, and printing 0.00 would tell the student they owe nothing.
-    """
+    """A peso amount, or None so callers draw a blank write-in rule instead of a misleading 0.00."""
     if value is None:
         return None
     _load_fonts()
@@ -153,8 +97,7 @@ def format_money(value):
 
 
 def _local(dt):
-    """Project a stored datetime into local time, tolerating naive values
-    (what comes back when a deployment runs with USE_TZ off)."""
+    """A stored datetime in local time, tolerating naive values."""
     if dt is None:
         return None
     try:
@@ -164,8 +107,7 @@ def _local(dt):
 
 
 def _fit(text, font, size, max_width):
-    """Truncate to fit a fixed column, since nothing here may reflow onto a
-    second page. The ellipsis signals the value was cut, not merely short."""
+    """Truncate with an ellipsis to fit a fixed column, since nothing here may reflow."""
     text = "" if text is None else str(text)
     if pdfmetrics.stringWidth(text, font, size) <= max_width:
         return text
@@ -176,8 +118,7 @@ def _fit(text, font, size, max_width):
 
 
 def _wrap(text, font, size, max_width):
-    """Greedy word wrap. The receipt had no multi-line prose so nothing
-    needed this; the claim stub's instruction line is a real paragraph."""
+    """Greedy word wrap."""
     words = (text or "").split()
     lines, current = [], ""
     for word in words:
@@ -201,38 +142,20 @@ def _student_name(user, profile):
 
 
 def _caps(c, x, y, text, font, size, color, spacing=0.8):
-    """Letterspaced small caps, used for every label on the form.
-
-    Drawn through a text object rather than canvas.drawString because
-    character spacing is only exposed on PDFTextObject in this ReportLab
-    version — the canvas has no setCharSpace. Tracking matters here: at 6.5pt
-    an unspaced uppercase label turns into a grey smear once it is printed
-    and photocopied, which these forms will be.
-    """
+    """Letterspaced small caps via a text object, the only place this ReportLab version exposes character spacing."""
     obj = c.beginText(x, y)
     obj.setFont(font, size)
     obj.setFillColor(color)
     obj.setCharSpace(spacing)
     obj.textOut(text.upper())
-    # Reset tracking back to zero BEFORE the object is emitted. Character
-    # spacing is a PDF text-state parameter, so the Tc operator this text
-    # object writes survives past its own ET and silently applies to every
-    # later string on the page - while the canvas goes on believing spacing
-    # is still 0. Left unreset it shifted each subsequent drawRightString by
-    # (spacing x character count), pushing right-aligned text and truncated
-    # column values out past the margin.
+    # Reset character spacing before emitting: it persists past ET and would shift every later right-aligned string.
     obj.setCharSpace(0)
     c.drawText(obj)
 
 
 
 def _doc_control_box(c, right_x, top_y, fonts):
-    """The form-control table the real document carries in its top corner.
-
-    Reproduced because this PDF is not merely a receipt - it stands in for
-    FM-USTP-RGTR-09 itself, and a registrar's office identifies its forms by
-    this block. Returns the y of its bottom edge.
-    """
+    """The form-control table from the real document's top corner. Returns the y of its bottom edge."""
     w, row1, row2 = 152.0, 12.0, 11.0
     h = row1 + row2 + 12
     x = right_x - w
@@ -292,21 +215,7 @@ CLAIM_STUB_INSTRUCTION = (
 
 
 def build_claim_stub_pdf(form_request) -> bytes:
-    """Render the student's claim stub as a standalone PDF.
-
-    Shares this module's whole setup with the receipt - page geometry, the
-    embedded DejaVu faces carrying the peso glyph, the colour constants and
-    the small-caps/label helpers - rather than standing up a second pipeline.
-    What differs is the shape: the receipt is a full-page form with a stub
-    attached, this is the stub on its own.
-
-    Laid out as a card in the upper third of an A4 page with a cut line under
-    it. A custom small page size would print unpredictably on the A4 paper
-    these offices stock, so the page stays A4 and the part worth keeping is
-    made obvious and separable instead.
-
-    Callers own authorisation and the digital_stub_active check.
-    """
+    """Render the claim stub as a card on an A4 page with a cut line. Callers own authorisation and the digital_stub_active check."""
     fonts = _fonts()
     user = form_request.user
     profile = getattr(user, "user_profile", None)
@@ -319,7 +228,7 @@ def build_claim_stub_pdf(form_request) -> bytes:
 
     y = PAGE_H - MARGIN
 
-    # ---------------------------------------------------------------- header
+    # Header
     c.setFillColor(BLUE)
     c.rect(LEFT, y - 3.5, CONTENT_W, 3.5, stroke=0, fill=1)
     y -= 3.5 + 16
@@ -352,15 +261,9 @@ def build_claim_stub_pdf(form_request) -> bytes:
     c.line(LEFT, y, RIGHT, y)
     y -= 24
 
-    # ------------------------------------------------------------- the stub
-    # Height derived from the wrapped instruction rather than fixed, so the
-    # card closes just under its own content. A fixed height left a band of
-    # empty space that reads as a form field someone forgot to fill in.
+    # The stub card's height follows its wrapped instruction, so no empty band looks like an unfilled field.
     instruction_lines = _wrap(CLAIM_STUB_INSTRUCTION, fonts["sans"], 8, CONTENT_W - 40)
-    # 255 = fixed content above the instruction: header label and tracking
-    # number (106), four field rows (100), the divider (20) and the boxed
-    # releasing-time notice (29). Getting this wrong does not reflow
-    # anything, it just prints the last line outside the card border.
+    # 255 = the fixed content above the instruction: label and code (106), four rows (100), divider (20) and notice (29).
     stub_h = 255.0 + len(instruction_lines) * 11 + 14
     stub_top = y
     c.setStrokeColor(BLACK)
@@ -411,14 +314,11 @@ def build_claim_stub_pdf(form_request) -> bytes:
         if release_time is not None:
             when += f" {MIDDOT} {release_time:%I:%M %p}"
     else:
-        # Never a blank field: an empty line reads as an error, where saying
-        # it is not scheduled yet tells the student what to do about it.
+        # Never a blank field: say it isn't scheduled yet.
         when = f"To be scheduled {EM_DASH} check back soon"
     right_y = _field(c, col2, right_y, col_w, "Date of Release", when, fonts)
 
-    # Assessed amount and O.R. number: on the real stub these are written in
-    # by the Cashier. Here they are already known by the time the stub is
-    # downloadable, so they print as recorded rather than as blank rules.
+    # Known by the time the stub is downloadable, so printed as recorded rather than as blank rules.
     amount_text = format_money(form_request.amount_due) or EM_DASH
     right_y = _field(c, col2, right_y, col_w, "Amount Assessed", amount_text, fonts)
     right_y = _field(
@@ -449,7 +349,7 @@ def build_claim_stub_pdf(form_request) -> bytes:
 
     y = stub_top - stub_h - 20
 
-    # ------------------------------------------------------------- cut line
+    # Cut line
     c.setStrokeColor(HAIRLINE)
     c.setLineWidth(0.8)
     c.setDash(3, 3)

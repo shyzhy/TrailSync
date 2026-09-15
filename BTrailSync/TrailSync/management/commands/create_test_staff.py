@@ -1,10 +1,4 @@
-"""One-off bootstrap for a working Registrar Staff test account.
-
-There is no admin-approval UI built yet, and staff accounts cannot log in
-until StaffProfile.approval_status = "Approved" (enforced in LoginView) — so
-without this command, the only way to get a testable staff login would be to
-hand-edit the database. This creates one account already fully approved.
-"""
+"""Creates one already-approved Registrar Staff account for testing."""
 
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
@@ -43,9 +37,7 @@ class Command(BaseCommand):
                 "The 'Registrar Staff' role isn't seeded in ROLES yet — nothing to assign this account to."
             )
 
-        # create_user() hashes the password via set_password() — same path
-        # RegisterSerializer uses for students, so this account authenticates
-        # exactly like a real one, not a shortcut that happens to "look" right.
+        # create_user() hashes the password the same way student registration does.
         user = User.objects.create_user(
             email=email,
             password=options["password"],
@@ -62,12 +54,7 @@ class Command(BaseCommand):
             availability_status="Available",
             approval_status=StaffProfile.ApprovalStatus.APPROVED,
             approved_at=timezone.now(),
-            # Left null rather than self-referencing the new account: no
-            # admin exists yet to actually attribute this approval to, and a
-            # staff member "approving themselves" would be a confusing thing
-            # to find in an audit trail later. null here honestly means
-            # "bootstrap-created, already approved" rather than claiming a
-            # real approval happened.
+            # Left null: no admin exists yet to attribute a bootstrap approval to.
             approved_by=None,
         )
 

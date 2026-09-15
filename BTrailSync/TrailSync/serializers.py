@@ -27,14 +27,7 @@ from .models import (
 
 
 def absolute_media_url(file_field):
-    """Absolute URL for a stored file, or None when there is no file.
-
-    Every media URL the API returns goes through here. A relative "/media/..."
-    is useless to the browser, because the frontend is a different origin and
-    resolves it against the Vite server - which returns the app shell with a
-    200 rather than the file. This is what the frontend is meant to use as-is,
-    so it never has to assemble a file path itself.
-    """
+    """Absolute URL for a stored file, or None; relative media paths would resolve against the frontend's origin."""
     if not file_field:
         return None
     try:
@@ -45,8 +38,7 @@ def absolute_media_url(file_field):
 
 
 def build_profile_payload(user):
-    """Same {student profile} / {staff profile} shape LoginView returns,
-    reused by /api/me/ so a page reload sees exactly what login saw."""
+    """The same profile shape LoginView returns, reused by /api/me/."""
     if hasattr(user, "user_profile"):
         p = user.user_profile
         return {
@@ -57,17 +49,13 @@ def build_profile_payload(user):
             "course": p.course,
             "year_level": p.year_level,
             "user_category": p.user_category,
-            # Absolute, and the only avatar URL the frontend should use. null
-            # means "no photo, show initials" - the one fallback everywhere.
+            # Absolute; null means "no photo, show initials".
             "profile_picture_url": absolute_media_url(p.profile_picture),
             "tour_completed_at": p.tour_completed_at.isoformat() if p.tour_completed_at else None,
             "academic_level": p.academic_level,
             "graduation_date": p.graduation_date.isoformat() if p.graduation_date else None,
             "birth_date": p.birth_date.isoformat() if p.birth_date else None,
-            # Computed from the fields above on every read - never a stored
-            # flag that could drift from them. academic_locked: once any
-            # request exists, the ID/course/category it was filed under can
-            # only be changed at Window 6, not from the wizard.
+            # Computed on every read. academic_locked: once a request exists, ID, course and category change only at Window 6.
             "onboarding": {
                 **{k: v for k, v in p.onboarding_state().items() if k != "steps_done"},
                 "academic_locked": user.form_requests.exists(),
@@ -84,8 +72,7 @@ def build_profile_payload(user):
 
 
 class NotificationSerializer(serializers.ModelSerializer):
-    """One row of a student's notification inbox. Read-only: the only change
-    a student can make is marking it read, which has its own endpoint."""
+    """One row of a student's notification inbox. Read-only."""
 
     request_code = serializers.SerializerMethodField()
 
@@ -127,16 +114,7 @@ class MeSerializer(serializers.Serializer):
 
 
 class UpdateProfileSerializer(serializers.Serializer):
-    """PATCH /api/me/ body. Only the four fields a student can legitimately
-    self-edit: everything else in USER_PROFILES (school ID, course, year
-    level, category) is an official record that should change through the
-    registrar, not a self-service form — see the Profile page's Account
-    card, which renders those read-only.
-
-    first_name/last_name live on User; middle_name lives on UserProfile;
-    contact_number lives on User (not UserProfile — that's where it was
-    actually modeled back when registration was built).
-    """
+    """PATCH /api/me/ body: only the fields a student may edit; official records stay read-only."""
 
     first_name = serializers.CharField(max_length=150)
     middle_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
@@ -162,8 +140,7 @@ class UpdateProfileSerializer(serializers.Serializer):
 
 
 class ChangePasswordSerializer(serializers.Serializer):
-    """POST /api/me/change-password/ body. Touches USERS.password only —
-    never USER_PROFILES."""
+    """POST /api/me/change-password/ body."""
 
     current_password = serializers.CharField(write_only=True)
     new_password = serializers.CharField(write_only=True)
@@ -195,9 +172,7 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 
 class ChangeEmailRequestSerializer(serializers.Serializer):
-    """POST /api/me/change-email/request/ body. Doesn't touch USERS.email
-    directly — see ChangeEmailConfirmSerializer, which does, once the link
-    sent here is actually clicked."""
+    """POST /api/me/change-email/request/ body; the email changes only when the emailed link is used."""
 
     new_email = serializers.EmailField()
 
@@ -212,34 +187,13 @@ class ChangeEmailRequestSerializer(serializers.Serializer):
 
 
 class ChangeEmailConfirmSerializer(serializers.Serializer):
-    """POST /api/me/change-email/confirm/ body — the link from the
-    verification email lands here with its token."""
+    """POST /api/me/change-email/confirm/ body."""
 
     token = serializers.CharField()
 
 
 class TrackedFormRequestSerializer(serializers.ModelSerializer):
-    """GET /api/form-requests/ row shape — everything the Track Requests
-    ticket card and its detail expansion need. purpose/number_of_copies/
-    semester/additional_notes/graduation_date all live inside
-    FormSubmission.form_data (see that model's docstring), so they're pulled
-    out here rather than being real columns.
-
-    Read-only, student-facing view. amount_due/payment_date are safe to
-    expose (students may see what they owe and when they paid), but
-    clearance_check_result, clearance_checked_by, duplicate_flag, and
-    or_number are deliberately absent — those are staff/system-set fields
-    per the ERD update and must never reach a student-facing response, let
-    alone be writable here. This serializer has no write path at all
-    (ModelSerializer is only ever constructed with an instance, never
-    `data=`, for this view's GET), so there's no separate step needed to
-    keep them non-editable.
-
-    verification_remarks stays null — no REQUIREMENT_VERIFICATIONS table
-    exists yet. release_schedule now merges the real ReleaseSchedule claim
-    record (claimed_at/claimant_name) with the ReleaseSlot window
-    (slot_date/start_time/end_time) when either exists.
-    """
+    """GET /api/form-requests/ row: what the Track Requests ticket needs. Read-only, and never exposes staff-only fields."""
 
     transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
     purpose = serializers.SerializerMethodField()
@@ -274,24 +228,14 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
             "proxy",
             "verification_remarks",
             "release_schedule",
-            # Safe for a student to read about their own request; everything
-            # else new on FormRequest (clearance_*, or_number,
-            # duplicate_flag) is intentionally NOT listed here.
+            # Safe for a student to read; clearance, or_number and duplicate_flag are intentionally absent.
             "amount_due",
             "payment_date",
-            # Whether the printable Cashier form can be generated yet. The
-            # API decides this, not the UI - the Download Receipt button and
-            # the receipt endpoint's own gate then agree by construction,
-            # instead of the frontend keeping a second copy of the status
-            # list that could drift out of sync with the backend's.
+            # Decided by the API so the download button and the endpoint's own gate always agree.
             "receipt_available",
-            # Whether the downloadable claim stub is live. Switched on when
-            # staff logs the Cashier payment, so from Processing onward the
-            # student has something to present at Window 6.
+            # Switched on when staff log the payment, so the student has something to show at Window 6.
             "digital_stub_active",
-            # Read-only here. The only write path for attachments is the
-            # student's own submission (see CreateFormRequestSerializer);
-            # this serializer has no write path at all.
+            # Read-only here; attachments are only written at submission.
             "uploaded_files",
         ]
         read_only_fields = fields
@@ -332,9 +276,7 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
         }
 
     def get_verification_remarks(self, obj):
-        # RequirementVerification is a history of events (a request can be
-        # rejected, revised, and re-verified) — the most recent one is "the"
-        # current verification, per the model's default ordering.
+        # The most recent verification event is the current one.
         latest = obj.verifications.first()
         return latest.remarks if latest else None
 
@@ -366,11 +308,7 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
                     "claimant_name": schedule.claimant_name,
                 }
             )
-        # The pickup date as staff actually set it. Without this, a release
-        # scheduled at a freeform time (no slot) never reached the student,
-        # whose ticket then said "Window 6 will confirm your date soon" about
-        # a date that had already been set. scheduled_release() is the one
-        # accessor that knows the precedence between the two sources.
+        # The pickup date as staff set it, via the one accessor that knows the precedence.
         when = obj.scheduled_release()
         if when is not None:
             data["release_date"] = when[0].isoformat()
@@ -379,14 +317,7 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
 
 
 class RegistrarRecentSubmissionSerializer(serializers.ModelSerializer):
-    """GET /api/registrar/dashboard/recent-submissions/ row shape.
-
-    student_first_name/student_last_name come from User, not UserProfile —
-    same convention as everywhere else in this codebase (names live on the
-    auth user, only middle_name lives on the profile). The frontend derives
-    the avatar initial from these itself, the same way it already does for
-    the sidebar footer, rather than duplicating that logic server-side.
-    """
+    """GET /api/registrar/dashboard/recent-submissions/ row shape."""
 
     transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
     student_first_name = serializers.CharField(source="user.first_name", read_only=True)
@@ -412,14 +343,7 @@ class RegistrarRecentSubmissionSerializer(serializers.ModelSerializer):
 
 
 class RegistrarTodaysPickupRowSerializer(serializers.ModelSerializer):
-    """GET /api/registrar/dashboard/todays-pickups/ row shape.
-
-    No dedicated release_status field exists (RELEASE_SCHEDULES, as actually
-    built, is a post-hoc claim record with no status of its own) — the
-    frontend derives Waiting/Claimed from request_status the same way
-    TicketCard already derives its progress-dot state from it, rather than
-    this serializer inventing a second status vocabulary.
-    """
+    """GET /api/registrar/dashboard/todays-pickups/ row shape; the frontend derives waiting/collected from request_status."""
 
     transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
     student_first_name = serializers.CharField(source="user.first_name", read_only=True)
@@ -439,22 +363,14 @@ class RegistrarTodaysPickupRowSerializer(serializers.ModelSerializer):
         ]
 
     def get_start_time(self, obj):
-        # Reads the schedule (via scheduled_release, which also covers
-        # requests still carrying an old slot) rather than ReleaseSlot: the
-        # slot picker is gone, so nothing new ever has one.
+        # Reads the schedule (which also covers legacy slots).
         when = obj.scheduled_release()
         start = when[1] if when else None
         return start.isoformat(timespec="minutes") if start else None
 
 
 class RegistrarReleasedRowSerializer(serializers.ModelSerializer):
-    """GET /api/registrar/released/ row shape - the Released Documents table.
-
-    Deliberately narrower than the .xlsx export (see exports.COLUMNS): the
-    screen answers "was this collected, by whom, and what was paid", while
-    the office's sheet also carries eligibility and turnaround columns that
-    are only read when the record is filed.
-    """
+    """GET /api/registrar/released/ row: narrower than the .xlsx export."""
 
     date_released = serializers.SerializerMethodField()
     student_name = serializers.SerializerMethodField()
@@ -497,29 +413,12 @@ class RegistrarReleasedRowSerializer(serializers.ModelSerializer):
         return schedule.claimant_name if schedule else None
 
     def get_claimed_by_proxy(self, obj):
-        """Whether an authorised proxy was on file for this request.
-
-        The claimant name alone cannot answer this: staff type whoever
-        actually collected the document, which may or may not match the
-        registered proxy. Shown so a record can be read without opening the
-        request.
-        """
+        """Whether an authorised proxy was on file; the typed claimant name can't answer this."""
         return getattr(obj, "proxy", None) is not None
 
 
 class RegistrarQueueRowSerializer(serializers.ModelSerializer):
-    """GET /api/registrar/queue/ row shape — doubles as the Request Details
-    panel's data too, since the frontend already has this row in memory the
-    moment a request is selected and a second detail fetch would just be a
-    round trip for data it's already holding.
-
-    requirements_status ("Complete"/"Incomplete") is a narrow, honest proxy:
-    the ERD has no per-document checklist (no SUBMISSION_ATTACHMENTS table),
-    so the only thing actually verifiable is whether the one real upload
-    this system has — board_exam_photo — is present when the purpose
-    requires it. Every other purpose has nothing to check against and reads
-    as Complete. See chat for the SUBMISSION_ATTACHMENTS question.
-    """
+    """GET /api/registrar/queue/ row, also used by the review page."""
 
     transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
     student_first_name = serializers.CharField(source="user.first_name", read_only=True)
@@ -570,12 +469,9 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
             "verification_remarks",
             "proxy",
             "student_full_name",
-            # Lifecycle state the review page renders and gates its actions
-            # on: what is owed, what was paid, who approved it, and how it
-            # was eventually claimed.
+            # Lifecycle state the review page renders and gates its actions on.
             "is_rush",
-            # Staff-facing fraud signal. This serializer only ever reaches
-            # registrar endpoints; the student serializer omits it.
+            # Staff-facing fraud signal; the student serializer omits it.
             "duplicate_flag",
             "amount_due",
             "or_number",
@@ -621,18 +517,7 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
         return self._form_data(obj).get("additional_notes") or ""
 
     def get_requirements_status(self, obj):
-        """Still the narrow, checkable rule: a Board Exam request needs its
-        2x2 photo.
-
-        Deliberately NOT widened to "has the student attached anything" now
-        that attachments exist. TransactionType.required_documents is free
-        text with no structured mapping to uploaded files, so there is no way
-        to tell whether the right documents arrived - only how many did. A
-        presence check would also retroactively mark every request filed
-        before this table existed as Incomplete, which is a verdict the
-        system cannot actually support. attachment_count carries the real
-        number so staff can judge for themselves.
-        """
+        """A Board Exam request needs its 2x2 photo; required_documents can't be checked against uploads."""
         submission = getattr(obj, "submission", None)
         if self._form_data(obj).get("purpose") == FormSubmission.Purpose.BOARD_EXAM:
             return "Complete" if (submission and submission.board_exam_photo) else "Incomplete"
@@ -643,11 +528,7 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
         return submission.attachments.count() if submission else 0
 
     def get_uploaded_files(self, obj):
-        """Every file the student uploaded with this request.
-
-        A real list now that SUBMISSION_ATTACHMENTS exists; until it did,
-        this could only ever return the single board_exam_photo column.
-        """
+        """Every file the student uploaded with this request."""
         return serialize_attachments(obj)
 
     def get_verification_remarks(self, obj):
@@ -665,8 +546,7 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
         }
 
     def get_student_full_name(self, obj):
-        """Pre-fills the Claimant Name field on the Release action, which is
-        the student themselves unless a proxy is collecting."""
+        """Pre-fills the claimant on the Release action: the student, unless a proxy is collecting."""
         p = self._profile(obj)
         parts = [obj.user.first_name or ""]
         if p is not None and p.middle_name:
@@ -678,10 +558,7 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
         return self._form_data(obj).get("number_of_pages")
 
     def get_submission_extras(self, obj):
-        """Conditional answers that only some document types or purposes ask
-        for. Returned as a flat label/value list so the review page can render
-        whatever is present without knowing what each document type requires.
-        """
+        """Conditional answers as a flat label/value list the review page can render as-is."""
         data = self._form_data(obj)
         pairs = (
             ("CAV Agency", data.get("cav_agency")),
@@ -696,18 +573,12 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
         return approver.user.get_full_name() if approver else None
 
     def get_verified_by_name(self, obj):
-        """Who signed the Front Desk line. Read from the verification event
-        rather than the request row, which only records the Registrar."""
+        """Who signed the Front Desk line, from the verification event."""
         latest = obj.verifications.filter(verification_status="Verified").first()
         return latest.verified_by.user.get_full_name() if (latest and latest.verified_by) else None
 
     def get_release_schedule(self, obj):
-        """The booked window merged with the claim record, if either exists.
-
-        Staff confirm the date/time here before notifying the student that a
-        document is ready, so an unscheduled request has to be visibly
-        unscheduled rather than silently absent.
-        """
+        """The booking merged with the claim record; an unscheduled request is visibly unscheduled."""
         slot = obj.release_slot
         schedule = getattr(obj, "release_schedule", None)
         if slot is None and schedule is None:
@@ -728,10 +599,7 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
                     "release_status": schedule.release_status,
                     "claimed_at": schedule.claimed_at.isoformat() if schedule.claimed_at else None,
                     "claimant_name": schedule.claimant_name,
-                    # What Mark Ready to Release actually stored. The review
-                    # page pre-fills its date/time/slot inputs from these so
-                    # staff adjust an existing booking rather than retyping
-                    # one that is already on file.
+                    # What Mark Ready stored, so the review page pre-fills rather than overwriting.
                     "release_date": schedule.release_date.isoformat() if schedule.release_date else None,
                     "release_time_start": (
                         schedule.release_time_start.isoformat(timespec="minutes")
@@ -745,38 +613,20 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
 
 
 class ApproveLogSerializer(serializers.Serializer):
-    """Payload for logging a Cashier payment (Approved -> Processing).
-
-    Both fields are required and neither is inferred from the printed PDF:
-    the form's Cashier box is filled in by hand on paper, and this is the
-    separate digital capture of what was written there.
-    """
+    """Payload for logging a Cashier payment (Approved -> Processing)."""
 
     or_number = serializers.CharField(max_length=50, allow_blank=False, trim_whitespace=True)
     payment_date = serializers.DateField()
 
 
 class MarkReadySerializer(serializers.Serializer):
-    """Payload for Mark Ready to Release: one date, nothing else.
-
-    This used to accept a release_slot and a freeform time as well, with the
-    slot overriding both. Window 6 releases documents from 3:00 to 5:00 PM
-    and has no other windows to choose between, so the picker asked staff to
-    decide something that was never theirs to decide. The time now comes
-    from models.RELEASE_TIME_START, and ReleaseSlot is no longer written by
-    this path at all.
-    """
+    """Payload for Mark Ready to Release: only a date, since the window is always 3:00 to 5:00 PM."""
 
     release_date = serializers.DateField()
 
 
 class ReleaseRequestSerializer(serializers.Serializer):
-    """Payload for the terminal Release action.
-
-    proxy_acknowledged is only meaningful when the request has a
-    RequestProxy; the view enforces that, since whether it is required
-    depends on the instance rather than the payload.
-    """
+    """Payload for the terminal Release action; the view decides whether proxy_acknowledged is required."""
 
     claimant_name = serializers.CharField(max_length=150, allow_blank=False, trim_whitespace=True)
     proxy_acknowledged = serializers.BooleanField(required=False, default=False)
@@ -787,9 +637,7 @@ class VerifyRequestSerializer(serializers.Serializer):
 
 
 class RejectRequestSerializer(serializers.Serializer):
-    # Reject explicitly requires remarks — the button is disabled client-side
-    # until this is filled in, but the API enforces it too rather than
-    # trusting the frontend.
+    # Required by the API too, not just by the disabled button.
     remarks = serializers.CharField(allow_blank=False, error_messages={"blank": "Review remarks are required to reject a request."})
 
 
@@ -820,8 +668,7 @@ class TransactionTypeSerializer(serializers.ModelSerializer):
 
 
 class FormRequestResultSerializer(serializers.ModelSerializer):
-    """The response shape after a successful submission — just enough for
-    the confirmation screen ("Your request W6-0XX has been submitted!")."""
+    """The response after a successful submission, for the confirmation screen."""
 
     transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
 
@@ -831,10 +678,7 @@ class FormRequestResultSerializer(serializers.ModelSerializer):
 
 
 def _generate_request_code():
-    """W6-0XX, unique. Collisions are only realistically possible under
-    concurrent submissions at the same instant, which a single registrar
-    window won't see in practice — the retry loop exists as a safety net,
-    not because this is expected to fire."""
+    """W6-0XX, unique; the retry loop is a safety net for simultaneous submissions."""
     for _ in range(5):
         candidate = f"W6-{FormRequest.objects.count() + 1:03d}"
         if not FormRequest.objects.filter(request_code=candidate).exists():
@@ -843,9 +687,7 @@ def _generate_request_code():
 
 
 def _parse_json_object(raw, field_name):
-    """form_data and proxy always arrive as a JSON-encoded string — the
-    request is always multipart (a file may be attached), and multipart
-    fields are strings by construction, never nested objects."""
+    """form_data and proxy arrive as JSON strings, because the request is always multipart."""
     if raw in (None, ""):
         return None
     try:
@@ -864,13 +706,7 @@ def _parse_iso_date(value):
         return None
 
 
-# Bounds on the student-uploaded requirements list. Not in the brief, but an
-# unbounded multi-file endpoint is a denial-of-service hole: without them one
-# request could fill the disk. Sized for what the form actually asks for -
-# a handful of scans - rather than as a hard policy.
-# Sub-selections that live inside a single document type on the real form
-# rather than being types of their own. They are submission detail, so they
-# are stored in FormSubmission.form_data rather than earning columns.
+# Sub-selections inside a single document type, stored in form_data rather than as types of their own.
 CAV_AGENCIES = ["DFA", "CHED", "DEP-ED", "PNP", "POEA", "BFP", "BJMP", "Others"]
 
 CERTIFICATION_SUBTYPES = [
@@ -890,13 +726,12 @@ CERTIFICATION_SUBTYPES = [
     "Others",
 ]
 
+# Bounds on student uploads, so one request can't fill the disk.
 MAX_ATTACHMENTS = 5
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 BOARD_EXAM_PHOTO_BYTES = 5 * 1024 * 1024
 
-# Label -> the bytes a real file of that kind starts with. The file's own
-# name and Content-Type come from the uploader and prove nothing; its first
-# bytes do.
+# Label -> the bytes a real file of that kind starts with; names and Content-Type prove nothing.
 FILE_SIGNATURES = {
     "JPG": (b"\xff\xd8\xff",),
     "PNG": (b"\x89PNG\r\n\x1a\n",),
@@ -912,11 +747,7 @@ def _human_list(items):
 
 
 def check_upload(upload, allowed, max_bytes, label):
-    """Raise a plain-language ValidationError for a wrong type or oversize file.
-
-    Both messages say what IS accepted - the types and the actual limit - so
-    the fix is obvious without guessing.
-    """
+    """Raise a plain-language ValidationError naming the accepted types or the actual size limit."""
     limit_mb = max_bytes // (1024 * 1024)
     if upload.size > max_bytes:
         size_mb = upload.size / (1024 * 1024)
@@ -932,17 +763,7 @@ def check_upload(upload, allowed, max_bytes, label):
 
 
 def serialize_attachments(form_request):
-    """The uploaded-requirements list for one request, staff and student alike.
-
-    One function because both sides must see the same files - a student
-    querying "did my upload arrive?" and staff asking "what did they send?"
-    are the same question, and two implementations would eventually answer it
-    differently.
-
-    board_exam_photo is folded in here for display even though it lives in
-    its own column, because to anyone reading the list it is simply another
-    file the student uploaded. kind distinguishes them for callers that care.
-    """
+    """The uploaded files for one request, the same list for staff and student, with board_exam_photo folded in."""
     rows = []
 
     submission = getattr(form_request, "submission", None)
@@ -981,17 +802,7 @@ def serialize_attachments(form_request):
 
 
 class CreateFormRequestSerializer(serializers.Serializer):
-    """POST /api/form-requests/ body (always multipart/form-data, since a
-    file may be attached even though most submissions carry none).
-
-    user is deliberately not a field here — it always comes from
-    request.user in the view/create(), never the payload, so a request can
-    only ever be filed under the account making it.
-
-    form_data/proxy are opaque JSON blobs by design (see FormSubmission's
-    docstring) — validate() below is where their actual required fields are
-    enforced, since a flat serializer field can't reach inside them.
-    """
+    """POST /api/form-requests/ body (multipart). The user always comes from request.user; validate() enforces the JSON fields."""
 
     transaction_type = serializers.PrimaryKeyRelatedField(
         queryset=TransactionType.objects.all(),
@@ -1007,15 +818,11 @@ class CreateFormRequestSerializer(serializers.Serializer):
         return value
 
     def validate_board_exam_photo(self, value):
-        # Checked here and not only by the file picker's accept="": the
-        # endpoint can be called without the form.
+        # Checked here too, since the endpoint can be called without the form.
         check_upload(value, BOARD_EXAM_PHOTO_TYPES, BOARD_EXAM_PHOTO_BYTES, "The 2x2 photo")
         return value
 
-    # Attachments are NOT declared as a serializer field. They arrive as a
-    # repeated multipart key, which only request.FILES.getlist can read - a
-    # declared FileField would silently keep just the last one. Pulled and
-    # checked in validate() instead.
+    # Attachments arrive as a repeated multipart key that only request.FILES.getlist can read, so they are checked in validate().
 
     def _attachments(self):
         request = self.context.get("request")
@@ -1038,10 +845,7 @@ class CreateFormRequestSerializer(serializers.Serializer):
         user = self.context["request"].user
         profile = getattr(user, "user_profile", None)
 
-        # The official form is printed from the profile (name, ID number,
-        # course, birth date). Enforced here and not only by the frontend
-        # sending people to onboarding, because this endpoint can be called
-        # without the frontend.
+        # The official form is printed from the profile, so an incomplete profile can't file a request.
         if profile is None or not profile.onboarding_state()["complete"]:
             raise serializers.ValidationError(
                 {"detail": "Please finish setting up your profile before requesting a document."}
@@ -1066,10 +870,7 @@ class CreateFormRequestSerializer(serializers.Serializer):
         if not (form_data.get("semester") or "").strip():
             errors.setdefault("form_data", {})["semester"] = "Please select a semester / academic year."
 
-        # Pages only matter for documents priced by the page, and asking for
-        # them elsewhere would be a question with no consequence. Enforced
-        # here because the fee depends on it: a per-page document with no page
-        # count would silently price as a single page.
+        # Per-page documents need a page count, or the fee would silently price as one page.
         transaction_type = attrs["transaction_type"]
         if transaction_type.pricing_unit == "per_page":
             try:
@@ -1081,8 +882,7 @@ class CreateFormRequestSerializer(serializers.Serializer):
                     f"{transaction_type.name} is charged per page. Enter the number of pages."
                 )
 
-        # The one purpose on the form carrying its own fee and its own two
-        # fields.
+        # The one purpose with its own fee and its own two fields.
         if purpose == FormSubmission.Purpose.COMPLETION_OF_INC:
             if not (form_data.get("semester_taken") or "").strip():
                 errors.setdefault("form_data", {})["semester_taken"] = (
@@ -1114,7 +914,7 @@ class CreateFormRequestSerializer(serializers.Serializer):
                     "One or more selected certification types are not recognised."
                 )
 
-        # Alumni-only question; current students never see or answer it.
+        # Alumni only.
         graduation_date = None
         if is_alumni:
             raw_grad_date = (form_data.get("graduation_date") or "").strip()
@@ -1122,8 +922,7 @@ class CreateFormRequestSerializer(serializers.Serializer):
             if graduation_date is None:
                 errors.setdefault("form_data", {})["graduation_date"] = "Please enter your graduation date."
 
-        # System-enforced, not a dismissible warning: Board Exam requests
-        # cannot proceed without the photo actually attached.
+        # System-enforced, not a dismissible warning.
         if purpose == FormSubmission.Purpose.BOARD_EXAM and not attrs.get("board_exam_photo"):
             errors.setdefault("form_data", {})[
                 "board_exam_photo"
@@ -1164,8 +963,7 @@ class CreateFormRequestSerializer(serializers.Serializer):
         form_data = validated_data["form_data"]
         graduation_date = validated_data["_graduation_date"]
 
-        # Pre-2018 grads may need records pulled from the archive — derived
-        # from the date they actually gave us, not a separate direct question.
+        # Pre-2018 graduates may need records pulled from the archive.
         requires_archive = bool(graduation_date and graduation_date < date(2018, 1, 1))
 
         form_request = FormRequest.objects.create(
@@ -1180,9 +978,7 @@ class CreateFormRequestSerializer(serializers.Serializer):
             board_exam_photo=validated_data.get("board_exam_photo"),
         )
 
-        # Written only here, at submission time, by the student filing the
-        # request. There is deliberately no staff-facing write path: staff
-        # review what was uploaded, they do not upload on a student's behalf.
+        # Written only here, by the student at submission; staff never upload on a student's behalf.
         for uploaded in self._attachments():
             SubmissionAttachment.objects.create(
                 form_submission=submission,
@@ -1204,20 +1000,9 @@ class CreateFormRequestSerializer(serializers.Serializer):
 
 
 class RegisterSerializer(serializers.Serializer):
-    """Student / alumni self-registration: email and password only.
+    """Student/alumni self-registration: email and password only; the profile comes from onboarding."""
 
-    Everything else - name, school ID, course, birth date - is collected by
-    the onboarding wizard after the address is confirmed (see
-    OnboardingNameSerializer and friends). Spreading it out means signing up
-    takes seconds, and nobody types their whole profile into an account they
-    might never be able to activate.
-
-    Staff never come through here: their accounts are provisioned by an admin
-    and gated on StaffProfile.approval_status.
-    """
-
-    # Any well-formed address. There is deliberately no @ustp.edu.ph rule:
-    # alumni in particular may no longer have access to a school mailbox.
+    # Any well-formed address: alumni may no longer have a school mailbox.
     email = serializers.EmailField(
         error_messages={"invalid": "Please enter a valid email address, like juan@gmail.com."}
     )
@@ -1236,9 +1021,7 @@ class RegisterSerializer(serializers.Serializer):
         if attrs["password"] != attrs["confirm_password"]:
             raise serializers.ValidationError({"confirm_password": "Passwords don't match."})
 
-        # Run Django's configured AUTH_PASSWORD_VALIDATORS against an unsaved
-        # User, so the similarity check can compare with the email. Django
-        # raises its own ValidationError, which DRF does not translate.
+        # Run Django's password validators against an unsaved User, so the similarity check can compare with the email.
         try:
             validate_password(attrs["password"], User(email=attrs.get("email", "")))
         except DjangoValidationError as exc:
@@ -1247,8 +1030,7 @@ class RegisterSerializer(serializers.Serializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        # Student until onboarding says otherwise: step 2 sets the category,
-        # and the role follows it (see OnboardingAcademicSerializer).
+        # Student until onboarding step 2 sets the category.
         try:
             role = Role.objects.get(role_name=Role.RoleName.STUDENT)
         except Role.DoesNotExist:
@@ -1264,8 +1046,7 @@ class RegisterSerializer(serializers.Serializer):
             # Cannot log in until the confirmation link is used.
             email_verified=False,
         )
-        # An empty profile now, so onboarding only ever updates a row that
-        # exists - there is no "create or update" branch to get wrong later.
+        # An empty profile now, so onboarding only ever updates an existing row.
         UserProfile.objects.create(user=user)
         return user
 
@@ -1299,17 +1080,10 @@ class ResendActivationSerializer(serializers.Serializer):
     )
 
 
-# ---------------------------------------------------------------------------
-# Onboarding
-# ---------------------------------------------------------------------------
-#
-# One small serializer per wizard step, each saved as the student presses
-# Continue - so closing the browser halfway loses nothing, and the next
-# login resumes at the first step still missing data.
+# Onboarding: one serializer per wizard step, saved as the student presses Continue.
 
 ACADEMIC_LEVELS_BY_CATEGORY = {
-    # The printed form's own checkbox: a current student is Undergraduate or
-    # Graduate; an alumnus may also have finished at the high school level.
+    # A current student is Undergraduate or Graduate; an alumnus may also have finished at high school level.
     "Student": {"Undergraduate", "Graduate"},
     "Alumni": {"High School", "Undergraduate", "Graduate"},
 }
@@ -1356,9 +1130,7 @@ class OnboardingAcademicSerializer(serializers.Serializer):
         value = value.strip()
         user = self.context["user"]
         if UserProfile.objects.exclude(user=user).filter(school_id_number__iexact=value).exists():
-            # Someone else has claimed this ID. Pointing at Window 6 rather
-            # than a vague "taken" because the likeliest story is a mistyped
-            # ID - or, worse, a real one used by someone else.
+            # Point at Window 6: the likeliest story is a mistyped ID, or a real one used by someone else.
             raise serializers.ValidationError(
                 "This School ID number is already linked to another account. "
                 "Check it for typos, or ask at Window 6 if it's yours."
@@ -1400,8 +1172,7 @@ class OnboardingAcademicSerializer(serializers.Serializer):
                 "year_level", "graduation_date", "updated_at",
             ]
         )
-        # The role is what the rest of the app routes on, so it follows the
-        # category the student just chose.
+        # The rest of the app routes on role, so it follows the chosen category.
         role = Role.objects.filter(role_name=data["user_category"]).first()
         if role and user.role_id != role.id:
             user.role = role

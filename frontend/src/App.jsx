@@ -1,34 +1,27 @@
-import ErrorBoundary from './components/ErrorBoundary.jsx';
-import LandingPage from './components/LandingPage.jsx';
-import StudentLoginPage, { RegistrarLoginPage } from './components/LoginPage.jsx';
-import ReleaseCalendarPage from './components/ReleaseCalendarPage.jsx';
-import CreateAccountPage from './components/CreateAccountPage.jsx';
-import ActivatePage from './components/ActivatePage.jsx';
-import ForgotPasswordPage from './components/ForgotPasswordPage.jsx';
-import ResetPasswordPage from './components/ResetPasswordPage.jsx';
-import OnboardingPage from './components/OnboardingPage.jsx';
-import StudentDashboard from './components/StudentDashboard.jsx';
-import RequestFormPage from './components/RequestFormPage.jsx';
-import TrackRequestsPage from './components/TrackRequestsPage.jsx';
-import ProfilePage from './components/ProfilePage.jsx';
-import NotificationsPage from './components/NotificationsPage.jsx';
-import ConfirmEmailPage from './components/ConfirmEmailPage.jsx';
-import CredentialGuidePage from './components/CredentialGuidePage.jsx';
-import RegistrarDashboardPage from './components/RegistrarDashboardPage.jsx';
-import ProcessingQueuePage from './components/ProcessingQueuePage.jsx';
-import ReleasedDocumentsPage from './components/ReleasedDocumentsPage.jsx';
-import RequestReviewPage from './components/RequestReviewPage.jsx';
+import ErrorBoundary from './components/layout/ErrorBoundary.jsx';
+import ActivatePage from './pages/auth/ActivatePage.jsx';
+import ConfirmEmailPage from './pages/auth/ConfirmEmailPage.jsx';
+import CreateAccountPage from './pages/auth/CreateAccountPage.jsx';
+import ForgotPasswordPage from './pages/auth/ForgotPasswordPage.jsx';
+import RegistrarLoginPage from './pages/auth/RegistrarLoginPage.jsx';
+import ResetPasswordPage from './pages/auth/ResetPasswordPage.jsx';
+import StudentLoginPage from './pages/auth/StudentLoginPage.jsx';
+import LandingPage from './pages/LandingPage.jsx';
+import ProcessingQueuePage from './pages/registrar/ProcessingQueuePage.jsx';
+import RegistrarDashboardPage from './pages/registrar/RegistrarDashboardPage.jsx';
+import ReleaseCalendarPage from './pages/registrar/ReleaseCalendarPage.jsx';
+import ReleasedDocumentsPage from './pages/registrar/ReleasedDocumentsPage.jsx';
+import RequestReviewPage from './pages/registrar/RequestReviewPage.jsx';
+import CredentialGuidePage from './pages/student/CredentialGuidePage.jsx';
+import NotificationsPage from './pages/student/NotificationsPage.jsx';
+import OnboardingPage from './pages/student/OnboardingPage.jsx';
+import ProfilePage from './pages/student/ProfilePage.jsx';
+import RequestFormPage from './pages/student/request-form/RequestFormPage.jsx';
+import StudentDashboard from './pages/student/StudentDashboard.jsx';
+import TrackRequestsPage from './pages/student/TrackRequestsPage.jsx';
 
-/**
- * Every screen fades and lifts in on arrival.
- *
- * Navigation here is a real page load (no client router yet), so there is no
- * exit animation to pair this with - the browser simply replaces the
- * document. This softens the arrival, which is the half we can control.
- */
+// Every screen fades in on arrival and sits inside its own error boundary.
 function Page({ children }) {
-  // Every route sits inside its own boundary, so a crash on one page shows
-  // the friendly fallback instead of a blank screen.
   return (
     <ErrorBoundary>
       <div className="ts-page-enter">{children}</div>
@@ -36,18 +29,15 @@ function Page({ children }) {
   );
 }
 
-// Minimal path switch so all screens are reachable without pulling in a
-// router. Replace with react-router when routing lands.
+// Minimal path switch; replace with react-router when routing lands.
 export default function App() {
   const { pathname } = window.location;
-  // Exact matches for the two logins: /login is a prefix of nothing else,
-  // but /registrar/login has to be caught before the /registrar/* pages.
+  // Exact match for /login; /registrar/login must be caught before the /registrar/* pages.
   if (pathname === '/login' || pathname === '/login/') return <Page><StudentLoginPage /></Page>;
   if (pathname.startsWith('/registrar/login')) return <Page><RegistrarLoginPage /></Page>;
   if (pathname.startsWith('/create-account')) return <Page><CreateAccountPage /></Page>;
   if (pathname.startsWith('/activate')) return <Page><ActivatePage /></Page>;
-  // One pair of pages for students and staff; ?from= only picks the look
-  // and which login "Back to login" returns to.
+  // One pair of pages for both audiences; ?from= only picks the look and the back-to-login target.
   if (pathname.startsWith('/forgot-password')) return <Page><ForgotPasswordPage /></Page>;
   if (pathname.startsWith('/reset-password')) return <Page><ResetPasswordPage /></Page>;
   if (pathname.startsWith('/onboarding')) return <Page><OnboardingPage /></Page>;
@@ -58,21 +48,18 @@ export default function App() {
   if (pathname.startsWith('/confirm-email')) return <Page><ConfirmEmailPage /></Page>;
   if (pathname.startsWith('/credential-guide')) return <Page><CredentialGuidePage /></Page>;
   if (pathname.startsWith('/registrar/dashboard')) return <Page><RegistrarDashboardPage /></Page>;
-  // /registrar/queue/<id> is matched before the bare queue path, otherwise
-  // startsWith would swallow every review URL into the list page.
+  // Matched before the bare queue path, which would otherwise swallow every review URL.
   const review = pathname.match(/^\/registrar\/queue\/(\d+)/);
   if (review) return <Page><RequestReviewPage requestId={review[1]} /></Page>;
   if (pathname.startsWith('/registrar/queue')) return <Page><ProcessingQueuePage /></Page>;
   if (pathname.startsWith('/registrar/calendar')) return <Page><ReleaseCalendarPage /></Page>;
   if (pathname.startsWith('/registrar/released')) return <Page><ReleasedDocumentsPage /></Page>;
-  // Release Slots is gone; its nearest successor is the view-only calendar,
-  // so an old bookmark lands there rather than on the landing page.
+  // Old Release Slots bookmarks go to its successor, the view-only calendar.
   if (pathname.startsWith('/registrar/release-slots')) {
     window.location.replace('/registrar/calendar');
     return null;
   }
   if (pathname.startsWith('/portal')) return <Page><StudentDashboard /></Page>;
-  // The landing page is both "/" and the answer to any unknown address:
-  // a mistyped link lands somewhere that explains the app, not on a form.
+  // Unknown addresses land on the landing page, which explains the app.
   return <Page><LandingPage /></Page>;
 }

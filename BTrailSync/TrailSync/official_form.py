@@ -1,39 +1,4 @@
-"""The official Request for Credential/s Form, FM-USTP-RGTR-09.
-
-This does NOT reconstruct the form. It takes the university's own PDF as the
-literal base page and merges a transparent overlay carrying only the dynamic
-values onto it, so every static part - the header, the document control block,
-the printed labels, the checkbox grid, the pre-printed University Registrar
-signature - is pixel-identical to the real document because it IS the real
-document.
-
-The earlier version drew the whole thing from scratch with ReportLab. It
-looked right, but "looks right" is the wrong bar for a form carrying a
-document control number: box sizes, fonts and spacing inevitably drift from
-the original, and a registrar comparing it against their own file would be
-able to tell. The claim stub is still drawn from scratch (see receipts.py) -
-it is a handful of lines in a box with no control number tying it to an
-official template.
-
-WHY OVERLAY (Option A) RATHER THAN AN ACROFORM (Option B)
-The template ships with no AcroForm fields - `PdfReader.get_fields()` returns
-nothing. Converting it would mean a manual pass in a PDF editor producing a
-binary nobody can review, reproduce, or diff in version control. The overlay
-keeps every coordinate in this file, where a reviewer can read them.
-
-COORDINATES
-Every position below was measured from the template itself rather than
-guessed: the blanks on the form are runs of underscore characters and drawn
-checkbox squares, both of which carry exact coordinates in the PDF. They were
-read out with pdfplumber (a one-off analysis, not a runtime dependency) and
-are recorded here in ReportLab's coordinate space, measured up from the
-bottom of the page.
-
-Because they are tied to this exact file, TEMPLATE_SHA256 is checked before
-rendering. Swapping in a new revision of the form without re-measuring would
-otherwise print every value silently into the wrong place, which on an
-official document is worse than failing outright.
-"""
+"""The official FM-USTP-RGTR-09 form: a transparent overlay of the dynamic values merged onto the university's own PDF, with coordinates measured from that exact file."""
 
 from __future__ import annotations
 
@@ -60,10 +25,7 @@ PAGE_H = 864.00
 INK = colors.HexColor("#101418")
 TICK = "✓"
 
-# --------------------------------------------------------------------------
-# Text blanks: (x, y) of where each underscore run starts, plus the width
-# available before the next printed element.
-# --------------------------------------------------------------------------
+# Text blanks: (x, y) where each underscore run starts, and the width before the next printed element.
 TEXT_FIELDS = {
     "printed_name": (175.1, 727.0, 170.0),
     "course": (391.0, 727.0, 54.0),
@@ -80,7 +42,7 @@ TEXT_FIELDS = {
     "purpose_other": (130.0, 287.2, 149.0),
     "cav_other": (289.0, 397.1, 49.0),
     "certification_other": (492.0, 373.7, 74.0),
-    # Signature / cashier band
+    # Signature and cashier band
     "verified_by": (74.0, 237.3, 126.0),
     "amount": (75.0, 169.8, 49.0),
     # Claim stub
@@ -91,14 +53,12 @@ TEXT_FIELDS = {
     "stub_assessed_by": (399.6, 43.9, 54.0),
 }
 
-# --------------------------------------------------------------------------
 # Checkbox squares and check-blanks, by the label printed beside them.
-# --------------------------------------------------------------------------
 CLASSIFICATION_BOXES = {"Student": (153.0, 708.9), "Alumnus": (342.0, 708.9)}
 PRIOR_REQUEST_BOXES = {"YES": (268.2, 543.9), "NO": (316.0, 543.9)}
 CLEARED_BOXES = {"Yes": (76.6, 511.5), "No": (77.5, 499.7)}
 
-# Part 2 - the "____" before each document name.
+# Part 2: the "____" before each document name.
 DOCUMENT_BLANKS = {
     "Certification": (359.0, 469.0),
     "Diploma Replacement": (35.0, 455.7),
@@ -141,7 +101,7 @@ CERTIFICATION_BOXES = {
     "Authorization Letter": (359.0, 374.2),
 }
 
-# Part 3 - the "____" before each purpose.
+# Part 3: the "____" before each purpose.
 PURPOSE_BLANKS = {
     "For Evaluation": (40.0, 334.7),
     "For Employment": (179.0, 334.7),
@@ -155,8 +115,7 @@ PURPOSE_BLANKS = {
     "Others": (40.0, 287.2),
 }
 
-# Our transaction type names map 1:1 onto the form's document list, except
-# Rush Fee, which is an add-on line rather than a document in its own right.
+# Rush Fee is an add-on line on the form, not a document of its own.
 _DOCUMENT_ALIASES = {"Rush Fee": None}
 
 
@@ -188,12 +147,7 @@ _CONNECTORS = {"of", "in", "and", "the", "for"}
 
 
 def _abbreviate(text):
-    """Course code from a degree title: "BS Information Technology" -> "BSIT".
-
-    Words already in caps are kept whole (BS, AB), connectives are dropped,
-    and everything else contributes its initial - which reproduces how these
-    are written on the paper form.
-    """
+    """Course code from a degree title: "BS Information Technology" -> "BSIT"."""
     parts = []
     for word in str(text).split():
         cleaned = word.strip(".,()")
@@ -212,14 +166,12 @@ def _text(c, key, value, fonts, size=8.0, font_key="sans", abbreviate=False):
     x, y, width = TEXT_FIELDS[key]
     font = fonts[font_key]
     text = str(value)
-    # Prefer an honest abbreviation over a truncation where the form expects
-    # a code rather than a full title.
+    # Prefer an honest abbreviation over a truncation where the form expects a code.
     if abbreviate and pdfmetrics.stringWidth(text, font, size) > width:
         short = _abbreviate(text)
         if short and pdfmetrics.stringWidth(short, font, size) <= width:
             text = short
-    # Otherwise step the size down a little before truncating: these are short
-    # fields and a slightly smaller value beats an ellipsised one.
+    # Otherwise step the size down a little before truncating.
     while size > 5.5 and pdfmetrics.stringWidth(text, font, size) > width:
         size -= 0.25
     c.setFillColor(INK)
@@ -237,10 +189,7 @@ def _tick(c, pos, fonts, size=9.0):
 
 
 def build_official_form_pdf(form_request) -> bytes:
-    """Render one FormRequest onto the real FM-USTP-RGTR-09 page.
-
-    Callers own authorisation and the receipt_available() check.
-    """
+    """Render one FormRequest onto the real FM-USTP-RGTR-09 page. Callers own authorisation and the receipt_available() check."""
     template_bytes = _verify_template()
     fonts = _fonts()
 
@@ -252,7 +201,7 @@ def build_official_form_pdf(form_request) -> bytes:
     buffer = io.BytesIO()
     c = pdfcanvas.Canvas(buffer, pagesize=(PAGE_W, PAGE_H))
 
-    # ---------------------------------------------------------------- header
+    # Header
     _text(c, "printed_name", _student_name(user, profile), fonts, size=9.0)
     _text(c, "course", profile.course if profile else None, fonts, abbreviate=True)
     _text(
@@ -265,25 +214,19 @@ def build_official_form_pdf(form_request) -> bytes:
         fonts,
     )
 
-    # Student vs Alumnus. academic_level (Undergrad/Graduate/High School) is a
-    # separate axis the form folds into the same two boxes; only the top-level
-    # distinction is ticked, since that is all the boxes actually encode.
+    # Only Student vs Alumnus is ticked; academic level isn't encoded by the boxes.
     if profile is not None:
         box = CLASSIFICATION_BOXES.get("Alumnus" if profile.user_category == "Alumni" else "Student")
         _tick(c, box, fonts)
 
-    # ---------------------------------------------------------------- part 1
+    # Part 1
     _text(c, "contact_number", user.contact_number, fonts)
     _text(c, "graduation_date", data.get("graduation_date"), fonts)
-    # The form asks graduates for a graduation date and everyone else for
-    # their last semester of attendance; the wizard collects the latter as
-    # "semester" for every student.
+    # The form asks graduates for a graduation date and everyone else for their last semester.
     if not data.get("graduation_date"):
         _text(c, "last_semester_attended", data.get("semester"), fonts)
 
-    # "Already requested this credential before?" - answered from the
-    # student's own history rather than asked again, and deliberately NOT
-    # wired to duplicate_flag, which is a separate fraud signal.
+    # Answered from the student's own history, deliberately not from duplicate_flag.
     prior = (
         type(form_request)
         .objects.filter(user=user, transaction_type=form_request.transaction_type)
@@ -296,16 +239,14 @@ def build_official_form_pdf(form_request) -> bytes:
         _text(c, "prior_document", form_request.transaction_type.name, fonts, size=7.0)
         _text(c, "prior_date_requested", f"{_local(prior.created_at):%m/%d/%Y}", fonts, size=7.0)
 
-    # Clearance, when Front Desk has recorded one. Left blank otherwise - the
-    # form treats this as the student's own declaration, and the system should
-    # not answer it on their behalf.
+    # Left blank unless Front Desk recorded a clearance: the form treats it as the student's own declaration.
     clearance = form_request.clearance_check_result
     if clearance == "Cleared":
         _tick(c, CLEARED_BOXES["Yes"], fonts)
     elif clearance == "Not Cleared":
         _tick(c, CLEARED_BOXES["No"], fonts)
 
-    # ---------------------------------------------------------------- part 2
+    # Part 2
     document_name = form_request.transaction_type.name
     blank = DOCUMENT_BLANKS.get(_DOCUMENT_ALIASES.get(document_name, document_name))
     _tick(c, blank, fonts)
@@ -321,7 +262,7 @@ def build_official_form_pdf(form_request) -> bytes:
     for subtype in data.get("certification_subtypes") or []:
         _tick(c, CERTIFICATION_BOXES.get(subtype), fonts)
 
-    # ---------------------------------------------------------------- part 3
+    # Part 3
     purpose = data.get("purpose")
     _tick(c, PURPOSE_BLANKS.get(purpose), fonts)
     if purpose == "Others":
@@ -330,22 +271,15 @@ def build_official_form_pdf(form_request) -> bytes:
         _text(c, "inc_semester_taken", data.get("semester_taken"), fonts, size=7.0)
         _text(c, "inc_subject_code", data.get("subject_code"), fonts)
 
-    # -------------------------------------------------- verified / assessed
-    # The Front Desk line takes the name from the verification event. The
-    # "Approved" block is NOT written to: the University Registrar's name is
-    # pre-printed on the form as the signing authority, and overprinting a
-    # staff member's name there would contradict the document.
+    # Verified line from the verification event; the Registrar's name is pre-printed, so the Approved block is never written to.
     verification = form_request.verifications.filter(verification_status="Verified").first()
     if verification is not None and verification.verified_by is not None:
         _text(c, "verified_by", verification.verified_by.user.get_full_name(), fonts, size=8.5)
 
-    # Amount is filled because the Registrar assessed it and the student needs
-    # to know what to pay. O.R. No., Payment Date, the Cashier signature and
-    # Date of Release stay blank - those are written by hand at the Cashier and
-    # at Window 6, and are captured digitally afterwards by Approve & Log.
+    # The assessed amount is filled in; the Cashier and release fields are handwritten.
     _text(c, "amount", format_money(form_request.amount_due), fonts, size=8.5)
 
-    # ------------------------------------------------------------ claim stub
+    # Claim stub
     _text(c, "stub_name", _student_name(user, profile), fonts)
     _text(c, "stub_course", profile.course if profile else None, fonts, size=7.0, abbreviate=True)
     _text(c, "stub_date_requested", f"{_local(form_request.created_at):%m/%d/%Y}", fonts)
@@ -356,11 +290,7 @@ def build_official_form_pdf(form_request) -> bytes:
         approver.user.get_full_name() if approver else None, fonts, size=6.5,
     )
 
-    # ---------------------------------------------------- system attribution
-    # The paper form has no field for a tracking number, so it goes in the
-    # bottom margin: small, out of the way, and the one thing every desk needs
-    # to look this request up. Nothing else on the page is drawn below the
-    # claim stub's last rule.
+    # The tracking number goes in the bottom margin, since the paper form has no field for it.
     footer_bits = [f"TrailSync {form_request.request_code}"]
     if form_request.amount_due is not None:
         total = format_money(form_request.amount_due)
@@ -377,8 +307,7 @@ def build_official_form_pdf(form_request) -> bytes:
         )
     footer_bits.append(f"Generated {_local(timezone.now()):%b %d, %Y %I:%M %p}")
 
-    # Baseline at 14pt: the claim stub's box border bottoms out at 26.3, and
-    # at 22 the ascenders were running into it.
+    # Baseline at 14pt so the ascenders clear the claim stub's bottom border.
     c.setFillColor(colors.HexColor("#5B6474"))
     c.setFont(fonts["sans"], 5.8)
     c.drawString(27.0, 14.0, _fit(f"  {MIDDOT}  ".join(footer_bits), fonts["sans"], 5.8, PAGE_W - 54))
@@ -386,7 +315,7 @@ def build_official_form_pdf(form_request) -> bytes:
     c.showPage()
     c.save()
 
-    # ------------------------------------------------------------ merge
+    # Merge
     overlay = PdfReader(io.BytesIO(buffer.getvalue())).pages[0]
     base = PdfReader(io.BytesIO(template_bytes))
     page = base.pages[0]

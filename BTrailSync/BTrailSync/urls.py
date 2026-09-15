@@ -1,19 +1,4 @@
-"""
-URL configuration for BTrailSync project.
-
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/6.0/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
-"""
+"""Root URL configuration for the BTrailSync project."""
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
@@ -64,8 +49,7 @@ urlpatterns = [
     path('api/me/avatar/', MeAvatarView.as_view(), name='me-avatar'),
     path('api/me/tour/', MeTourView.as_view(), name='me-tour'),
     path('api/me/onboarding/', MeOnboardingView.as_view(), name='me-onboarding'),
-    # Student notifications. unread-count and mark-all-read are literal paths
-    # registered before <int:pk>/ so they are never read as an id.
+    # Literal notification paths are registered before <int:pk>/ so they are never read as an id.
     path('api/notifications/', NotificationListView.as_view(), name='notifications'),
     path('api/notifications/unread-count/', NotificationUnreadCountView.as_view(), name='notifications-unread-count'),
     path('api/notifications/mark-all-read/', NotificationMarkAllReadView.as_view(), name='notifications-mark-all-read'),
@@ -80,8 +64,7 @@ urlpatterns = [
     path('api/form-requests/', FormRequestListCreateView.as_view(), name='form-requests'),
     path('api/form-requests/<int:pk>/receipt/', FormRequestReceiptView.as_view(), name='form-request-receipt'),
     path('api/form-requests/<int:pk>/claim-stub/', FormRequestClaimStubView.as_view(), name='form-request-claim-stub'),
-    # Lifecycle transitions - one endpoint per move, each validating the
-    # stage it is entered from (see the views for why not a writable field).
+    # Lifecycle transitions: one endpoint per move, each checking the stage it is entered from.
     path('api/form-requests/<int:pk>/approve-log/', RegistrarApproveLogView.as_view(), name='form-request-approve-log'),
     path('api/form-requests/<int:pk>/mark-ready/', RegistrarMarkReadyView.as_view(), name='form-request-mark-ready'),
     path('api/form-requests/<int:pk>/release/', RegistrarReleaseView.as_view(), name='form-request-release'),
@@ -89,12 +72,10 @@ urlpatterns = [
     path('api/registrar/dashboard/recent-submissions/', RegistrarRecentSubmissionsView.as_view(), name='registrar-recent-submissions'),
     path('api/registrar/dashboard/flagged/', RegistrarFlaggedRequestsView.as_view(), name='registrar-flagged'),
     path('api/registrar/dashboard/todays-pickups/', RegistrarTodaysPickupsView.as_view(), name='registrar-todays-pickups'),
-    # View-only: dates + counts for a month, then one day's list on demand.
+    # View-only: counts for a month, then one day's list on demand.
     path('api/registrar/release-calendar/day/', RegistrarReleaseCalendarDayView.as_view(), name='registrar-release-calendar-day'),
     path('api/registrar/release-calendar/', RegistrarReleaseCalendarView.as_view(), name='registrar-release-calendar'),
-    # Processing Queue
-    # Registered before the list route's own prefix so "export" is never
-    # read as a filter value.
+    # Registered before the list route so "export" is never read as a filter value.
     path('api/registrar/released/export/', RegistrarReleasedExportView.as_view(), name='registrar-released-export'),
     path('api/registrar/released/', RegistrarReleasedListView.as_view(), name='registrar-released'),
     path('api/registrar/queue/', RegistrarQueueListView.as_view(), name='registrar-queue'),
@@ -103,11 +84,8 @@ urlpatterns = [
     path('api/registrar/queue/<int:pk>/clear-flag/', RegistrarClearFlagView.as_view(), name='registrar-clear-flag'),
     path('api/registrar/queue/<int:pk>/approve/', RegistrarQueueApproveView.as_view(), name='registrar-queue-approve'),
     path('api/registrar/queue/<int:pk>/reject/', RegistrarQueueRejectView.as_view(), name='registrar-queue-reject'),
-    # Release Slots — literal paths (calendar/, assignable-requests/, create/)
-    # registered before the <int:pk> pattern so they aren't swallowed by it.
 ]
 
 if settings.DEBUG:
-    # Dev-only: serves uploaded files (e.g. the Board Exam photo) straight
-    # off disk. A real deployment needs a proper file store in front of this.
+    # Dev-only: serves uploaded files straight off disk.
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

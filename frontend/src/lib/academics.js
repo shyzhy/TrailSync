@@ -1,11 +1,4 @@
-/**
- * Choice lists for a student's academic profile.
- *
- * Shared by onboarding and anywhere else that asks, so the options can't
- * differ between screens. COURSES is still the placeholder list the original
- * sign-up form shipped with and needs replacing with USTP–CDO's real
- * programme offerings.
- */
+// Choice lists for a student's academic profile. COURSES is still a placeholder awaiting USTP–CDO's real programmes.
 
 export const COURSES = [
   'BS Information Technology',
@@ -31,11 +24,7 @@ export const USER_CATEGORIES = [
   { value: 'Alumni', label: 'Alumni', hint: 'I’ve graduated or left USTP' },
 ];
 
-/**
- * Mirrors the printed form's checkbox and the server's rule: a current
- * student is Undergraduate or Graduate; an alumnus may also have finished at
- * the high school level.
- */
+// Mirrors the printed form and the server: only alumni can have finished at high school level.
 export const ACADEMIC_LEVELS = {
   Student: ['Undergraduate', 'Graduate'],
   Alumni: ['High School', 'Undergraduate', 'Graduate'],

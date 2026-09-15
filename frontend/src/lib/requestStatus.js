@@ -1,16 +1,4 @@
-/**
- * The request lifecycle, shared by every screen that renders or filters one.
- *
- * Six screens used to each keep their own copy of this vocabulary, and they
- * had already drifted: the student dashboard collapsed two stages into
- * "Processing", the ticket card walked a four-step line, and the queue filter
- * called the first stage "Pending". Adding the real Processing stage would
- * have meant finding all six. They read from here instead.
- *
- * Values mirror FormRequest.RequestStatus on the backend exactly — they cross
- * the wire and travel in query strings, so they are the short stored strings,
- * never the display labels.
- */
+// The request lifecycle shared by every screen; values are the backend's stored strings, never display labels.
 
 export const STATUS = {
   SUBMITTED: 'Submitted',
@@ -22,11 +10,7 @@ export const STATUS = {
   REJECTED: 'Rejected',
 };
 
-/**
- * The happy path, in order. Rejected is deliberately absent: it is an exit,
- * not a position on the line, so anything rendering progress treats it
- * separately rather than trying to place it.
- */
+// The happy path in order. Rejected is an exit, not a position on the line.
 export const LIFECYCLE = [
   STATUS.SUBMITTED,
   STATUS.VERIFIED,
@@ -36,12 +20,7 @@ export const LIFECYCLE = [
   STATUS.RELEASED,
 ];
 
-/**
- * Staff-facing labels. Each one says what is true of the request right now,
- * in the words a person at Window 6 would use - "Pending Verification" and
- * "Verified" described the paperwork's state without saying whose turn it
- * is, which is the only thing a queue is read for.
- */
+// Staff-facing labels, phrased as whose turn it is.
 export const STATUS_LABEL = {
   [STATUS.SUBMITTED]: 'Waiting for Review',
   [STATUS.VERIFIED]: 'Waiting for Approval',
@@ -52,8 +31,7 @@ export const STATUS_LABEL = {
   [STATUS.REJECTED]: 'Not Approved',
 };
 
-/** What the staff member should do next at each stage, for the queue's
- *  filter descriptions and the review page's heading. */
+// What staff should do next at each stage.
 export const STAFF_NEXT_STEP = {
   [STATUS.SUBMITTED]: 'Check the requirements, then send it to the Registrar.',
   [STATUS.VERIFIED]: 'The Registrar approves it and the fee is worked out.',
@@ -64,15 +42,10 @@ export const STAFF_NEXT_STEP = {
   [STATUS.REJECTED]: 'Nothing left to do. The student was told why.',
 };
 
-/**
- * Student-facing labels. Shorter, and written from the student's side of the
- * counter: "Approved - Ready to Print" is an instruction to them, where
- * "Processing" is something happening without them.
- */
+// Student-facing labels, written from the student's side of the counter.
 export const STUDENT_STATUS_LABEL = {
   [STATUS.SUBMITTED]: 'Submitted',
-  // Front Desk has cleared the requirements and it is with the Registrar.
-  // "Verified" would read to a student as "finished"; it is not.
+  // "Verified" would read to a student as finished; it is only with the Registrar.
   [STATUS.VERIFIED]: 'Under Review',
   [STATUS.APPROVED]: 'Ready to Print',
   [STATUS.PROCESSING]: 'Processing',
@@ -82,7 +55,7 @@ export const STUDENT_STATUS_LABEL = {
   [STATUS.REJECTED]: 'Not approved',
 };
 
-/** Compact labels for the progress line, where space is tight. */
+// Compact labels for the progress line, where space is tight.
 export const STEP_LABEL = {
   [STATUS.SUBMITTED]: 'Submitted',
   [STATUS.VERIFIED]: 'Verified',
@@ -102,7 +75,7 @@ export const STATUS_PILL_CLASS = {
   [STATUS.REJECTED]: 'ts-pill-danger',
 };
 
-/** Queue filter options, plus the catch-all the list endpoint understands. */
+// Queue filter options, plus the catch-all the list endpoint understands.
 export const STATUS_FILTER_OPTIONS = [
   ...LIFECYCLE.map((value) => ({ value, label: STATUS_LABEL[value] })),
   { value: STATUS.REJECTED, label: STATUS_LABEL[STATUS.REJECTED] },

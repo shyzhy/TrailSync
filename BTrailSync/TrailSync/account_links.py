@@ -1,14 +1,4 @@
-"""Emailed account links: confirming an address, and resetting a password.
-
-One mechanism for both. Nothing about a link is stored in the database: each
-token is an HMAC signed with SECRET_KEY over a few account fields plus a
-timestamp - Django's password-reset token scheme - with its own salt per
-purpose, so an activation token can never reset a password or the reverse.
-
-What goes into each signature is what makes the link single-use:
-  activation - the verified flag, so the link dies once it has been used
-  reset      - the password hash, so the link dies once the password changes
-"""
+"""Emailed account links (confirm an address, reset a password): signed, expiring tokens with nothing stored in the database."""
 import logging
 import threading
 from datetime import timedelta
@@ -34,13 +24,7 @@ class TimedLinkTokenGenerator(PasswordResetTokenGenerator):
     timeout_text = "1 hour"
 
     def verify(self, user, token):
-        """'ok', 'expired' or 'invalid'.
-
-        Django's own check_token answers False for both a forged token and a
-        genuine-but-old one. Those need different pages, so the checks run
-        here in order: signature first, then age. A tampered token can
-        therefore never be reported as merely expired.
-        """
+        """'ok', 'expired' or 'invalid': the signature is checked before age, so a forged token is never reported as merely expired."""
         if not (user and token):
             return "invalid"
         try:
@@ -61,8 +45,7 @@ class TimedLinkTokenGenerator(PasswordResetTokenGenerator):
 
 
 class EmailActivationTokenGenerator(TimedLinkTokenGenerator):
-    # Unchanged from when this lived in activation.py: changing the salt
-    # would break every confirmation link already sitting in an inbox.
+    # Unchanged from activation.py: a new salt would break every confirmation link already in an inbox.
     key_salt = "TrailSync.activation.EmailActivationTokenGenerator"
     # Long enough that "I'll do it tonight" still works.
     timeout = timedelta(hours=24)
@@ -79,9 +62,7 @@ class PasswordResetLinkTokenGenerator(TimedLinkTokenGenerator):
     timeout_text = "1 hour"
 
     def _make_hash_value(self, user, timestamp):
-        # The stored password hash changes the moment the reset succeeds, so
-        # the same link can never be used twice. The email is included so a
-        # link sent before an address change stops working.
+        # The password hash makes the link single-use; the email kills links sent before an address change.
         login = "" if user.last_login is None else user.last_login.replace(microsecond=0, tzinfo=None)
         return f"{user.pk}{user.password}{login}{user.email}{timestamp}"
 
@@ -104,15 +85,12 @@ def _uid(user):
 
 
 def activation_link(user):
-    # Points at the React app, not the API: the page POSTs the token. A plain
-    # GET that acted on arrival would also be triggered by the link scanners
-    # many mail providers run over incoming messages.
+    # Points at the React app, which POSTs the token: mail scanners open every link with a GET.
     return f"{settings.FRONTEND_BASE_URL}/activate?uid={_uid(user)}&token={activation_token.make_token(user)}"
 
 
 def password_reset_link(user):
-    # Which login the reset page should send them back to is decided here
-    # from the account itself, never from anything the requester sent.
+    # Which login to return to is decided from the account, never from anything the requester sent.
     is_staff = bool(user.role_id and user.role.role_name == Role.RoleName.REGISTRAR)
     return (
         f"{settings.FRONTEND_BASE_URL}/reset-password?uid={_uid(user)}"
@@ -130,7 +108,7 @@ def _build(template, subject, user, link, expires):
     message = EmailMultiAlternatives(
         subject=subject,
         body=render_to_string(f"emails/{template}.txt", context),
-        from_email=None,  # DEFAULT_FROM_EMAIL
+        from_email=None,
         to=[user.email],
     )
     message.attach_alternative(render_to_string(f"emails/{template}.html", context), "text/html")
@@ -138,16 +116,7 @@ def _build(template, subject, user, link, expires):
 
 
 def _send_in_background(build):
-    """Build and send an email without making the HTTP response wait for it.
-
-    For the "we'll email you if that account exists" endpoints this is a
-    security property, not just speed: if the response took longer when an
-    account exists - an SMTP round trip, or even just rendering the templates
-    and signing the token - the timing alone would tell anyone which
-    addresses are registered, exactly what the identical wording is there to
-    hide. So everything that only happens for a real account happens here,
-    after the response has gone.
-    """
+    """Build and send an email after the response, so timing never reveals whether an account exists."""
 
     def run():
         message = None

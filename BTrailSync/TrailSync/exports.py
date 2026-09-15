@@ -1,15 +1,4 @@
-"""The Released Documents master sheet, as a real .xlsx file.
-
-Built server-side with openpyxl rather than assembled from the table in the
-browser: the office's sheet has columns the screen doesn't show (eligibility
-result, whether the student graduated from 2018 onwards, turnaround time), so
-a client-side CSV of the visible table would quietly be a different document
-from the one the Registrar files.
-
-The column set mirrors the master sheet described in the feature docs. Where
-this system has no column of its own for something, the value is derived here
-and the derivation is commented - nothing in this file invents data.
-"""
+"""The Released Documents master sheet as .xlsx, built server-side because it has columns the screen doesn't show."""
 from datetime import date, datetime
 
 from django.http import HttpResponse
@@ -18,7 +7,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-# (header, width). Order is the order of the office's sheet.
+# (header, width), in the order of the office's sheet.
 COLUMNS = [
     ("No.", 6),
     ("Name", 26),
@@ -47,26 +36,14 @@ def _form_data(form_request):
 
 
 def _graduated_2018_onwards(form_request, form_data):
-    """Yes / No / Not a graduate.
-
-    requires_archive_retrieval is set at submission for a graduation date
-    before 2018, so it answers this question exactly - but only for someone
-    who gave a graduation date at all. A currently enrolled student has the
-    flag False for the opposite reason (they have not graduated), and
-    reporting that as "Yes" would be a plain untruth in the office's record.
-    """
+    """Yes / No / Not a graduate; the archive flag only answers this for someone who gave a graduation date."""
     if not form_data.get("graduation_date"):
         return "Not a graduate"
     return "No" if form_request.requires_archive_retrieval else "Yes"
 
 
 def _processing_time(form_request, claimed_at):
-    """Calendar days from submission to collection, e.g. "3 days".
-
-    FormRequest.processing_time_hours exists in the schema but nothing in
-    the system ever writes it, so reading it would print an empty column
-    forever. This is measured from the two timestamps that are always real.
-    """
+    """Calendar days from submission to collection, measured from the two timestamps that are always set."""
     if claimed_at is None:
         return "—"
     days = (timezone.localtime(claimed_at).date() - timezone.localtime(form_request.created_at).date()).days

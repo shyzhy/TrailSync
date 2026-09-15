@@ -1,14 +1,6 @@
-// Token/session storage, shared by every page that needs to know who's
-// logged in. Centralized so the storage keys and the localStorage-vs-
-// sessionStorage ("remember me") rule live in exactly one place.
-import { API_BASE_URL } from '../components/trailsyncUI.jsx';
+import { API_BASE_URL } from './config.js';
 
-/**
- * Where each audience logs in. Two pages rather than one with a role toggle:
- * a single "Log in" button under a Student/Staff switch left it unclear who
- * the button would log you in as. Every page that bounces an expired session
- * sends it to the login for ITS side of the app.
- */
+// Separate login pages, because one form with a Student/Staff toggle left it unclear who you'd log in as.
 export const STUDENT_LOGIN_PATH = '/login';
 export const STAFF_LOGIN_PATH = '/registrar/login';
 
@@ -27,13 +19,13 @@ function readFirst(key) {
   }
 }
 
-/** Whichever storage currently holds the session, so updates keep "remember me" intact. */
+// Whichever storage currently holds the session, so updates keep "remember me" intact.
 function sessionStore() {
   for (const store of [window.localStorage, window.sessionStorage]) {
     try {
       if (store.getItem(ACCESS_KEY)) return store;
     } catch {
-      // unavailable storage: try the other one
+      // Unavailable storage: try the other one.
     }
   }
   return null;
@@ -53,12 +45,7 @@ export function getStoredUser() {
   }
 }
 
-/**
- * Persist a login response. "remember" picks which storage survives closing
- * the tab; the other storage is cleared first so a token from an earlier
- * login with the opposite "remember me" choice can never linger and get
- * read by mistake.
- */
+// Persist a login response, clearing the other storage so a token from an opposite remember-me choice can't linger.
 export function saveSession({ access, refresh, user }, remember) {
   const target = remember ? window.localStorage : window.sessionStorage;
   const other = remember ? window.sessionStorage : window.localStorage;
@@ -68,23 +55,13 @@ export function saveSession({ access, refresh, user }, remember) {
   target.setItem(USER_KEY, JSON.stringify(user));
 }
 
-/**
- * Replace the cached user with a fresh copy from the server, in whichever
- * storage currently holds the session.
- *
- * Needed because not every page asks /api/me/ on load - the Credential Guide
- * renders its sidebar straight from this cache - so a change made on the
- * Profile page (a new photo, an edited name) would otherwise stay invisible
- * there until the next login. Writing to the storage that already holds the
- * access token keeps the "remember me" choice made at login intact.
- */
+// Refresh the cached user in whichever storage holds the session, so pages that read the cache see profile edits.
 export function updateStoredUser(user) {
   if (!user) return;
   try {
     sessionStore()?.setItem(USER_KEY, JSON.stringify(user));
   } catch {
-    // Storage can be unavailable in a locked-down context; the page's own
-    // state still reflects the change, it just won't outlive a reload.
+    // Storage may be unavailable; the page's own state still shows the change until a reload.
   }
 }
 
@@ -95,10 +72,7 @@ export function clearSession() {
   });
 }
 
-// ---------------------------------------------------------------------------
-// One-time messages carried across a redirect ("your session expired",
-// "your password was changed"), read once by the login page.
-// ---------------------------------------------------------------------------
+// One-time messages carried across a redirect, read once by the login page.
 
 export function setFlash(kind) {
   try {
@@ -118,36 +92,21 @@ export function takeFlash() {
   }
 }
 
-/** The login page for the part of the app the person is currently in. */
+// The login page for the part of the app the person is currently in.
 export function loginPathForHere() {
   return window.location.pathname.startsWith('/registrar') ? STAFF_LOGIN_PATH : STUDENT_LOGIN_PATH;
 }
 
-/**
- * The session is over: clear it and send the person to log in again, with a
- * message saying why rather than a silently broken page. The one place in
- * the app that does this.
- */
+// End the session and send the person to their login with a reason; the only place that does this.
 export function expireSession() {
   clearSession();
   setFlash('session_expired');
   window.location.replace(loginPathForHere());
 }
 
-// ---------------------------------------------------------------------------
-// Token refresh
-// ---------------------------------------------------------------------------
-
 let refreshing = null;
 
-/**
- * Trade the refresh token for a new access token, once, however many
- * requests find their token expired at the same moment - they all wait on
- * the same attempt instead of each rotating the refresh token in turn.
- *
- * Until this existed nothing ever used the refresh token, so every session
- * ended 30 minutes after login no matter what "Keep me logged in" said.
- */
+// Get a new access token once, however many requests find theirs expired at the same moment.
 function refreshAccessToken() {
   if (refreshing) return refreshing;
   const refresh = readFirst(REFRESH_KEY);
@@ -186,16 +145,7 @@ function send(path, options) {
   });
 }
 
-/**
- * fetch() with the bearer token attached - and the ONE place a 401 is handled.
- *
- * A 401 first tries a silent token refresh and repeats the request once. If
- * that can't rescue it, the session is expired centrally (see
- * expireSession) and the returned promise never settles: the page is being
- * replaced by the login screen, and resolving would only let the calling
- * component flash an error state on its way out. No page should check for
- * 401 itself.
- */
+// fetch() with the bearer token, and the one place a 401 is handled: refresh and retry once, else expire the session (the returned promise then never settles).
 export async function authFetch(path, options = {}) {
   const res = await send(path, options);
   if (res.status !== 401) return res;
