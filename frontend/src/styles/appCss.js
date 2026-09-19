@@ -156,6 +156,12 @@ export const APP_CSS = `
     color: #4A5262;
     border: 1px solid rgba(91,100,116,0.32);
   }
+  /* Cancelled: an outline only, so it never reads as a stage the request is waiting at. */
+  .ts-pill-cancelled {
+    background: transparent;
+    color: #5B6474;
+    border: 1px dashed rgba(91,100,116,0.55);
+  }
   /* Recessed surface for a read-only figure inside a card, such as the amount owed. */
   .ts-well {
     border-radius: 12px;
@@ -813,6 +819,17 @@ export const APP_CSS = `
     flex-shrink: 0;
   }
 
+  /* Cancelled by the student: greyed out and ended, deliberately unlike a progress line that has stalled. */
+  .ts-ticket-cancelled .ts-ticket-stub { background: linear-gradient(180deg, #A3AAB5 0%, #858D9B 60%, #6B7381 100%); }
+  .ts-ticket-cancelled .ts-ticket-stub-label { color: rgba(255,255,255,0.75); }
+  .ts-ticket-cancelled-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    border: 2px solid rgba(91,100,116,0.55);
+    flex-shrink: 0;
+  }
+
   .ts-ticket-detail { border-top: 1px solid #E3DFD2; padding: 1.1rem 1.5rem 1.25rem; }
   /* Stacks on phones so the download button keeps a full-width tap target. */
   .ts-ticket-actions {
@@ -863,7 +880,8 @@ export const APP_CSS = `
   .ts-modal-overlay {
     position: fixed;
     inset: 0;
-    z-index: 40;
+    /* Above the help button (50) as well as the bottom nav, as the phone rule already was. */
+    z-index: 60;
     background: rgba(23,41,74,0.45);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);

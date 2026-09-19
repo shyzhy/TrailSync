@@ -235,6 +235,8 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
     verification_remarks = serializers.SerializerMethodField()
     release_schedule = serializers.SerializerMethodField()
     receipt_available = serializers.SerializerMethodField()
+    can_cancel = serializers.SerializerMethodField()
+    can_change_proxy = serializers.SerializerMethodField()
     uploaded_files = serializers.SerializerMethodField()
 
     class Meta:
@@ -243,6 +245,7 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
             "id",
             "request_code",
             "request_status",
+            "cancelled_at",
             "transaction_type",
             "pricing_unit",
             "created_at",
@@ -261,8 +264,10 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
             # Safe for a student to read; clearance, or_number and duplicate_flag are intentionally absent.
             "amount_due",
             "payment_date",
-            # Decided by the API so the download button and the endpoint's own gate always agree.
+            # Decided by the API so each button and its endpoint's own gate always agree.
             "receipt_available",
+            "can_cancel",
+            "can_change_proxy",
             # Switched on when staff log the payment, so the student has something to show at Window 6.
             "digital_stub_active",
             # Read-only here; attachments are only written at submission.
@@ -309,6 +314,12 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
 
     def get_receipt_available(self, obj):
         return obj.receipt_available()
+
+    def get_can_cancel(self, obj):
+        return obj.can_cancel()
+
+    def get_can_change_proxy(self, obj):
+        return obj.can_change_proxy()
 
     def get_uploaded_files(self, obj):
         return serialize_attachments(obj)
@@ -387,6 +398,8 @@ class RegistrarTodaysPickupRowSerializer(serializers.ModelSerializer):
             "student_first_name",
             "student_last_name",
             "start_time",
+            # A proxy added or changed at Ready for Pickup, so the desk expects someone other than the student.
+            "proxy_changed_at",
         ]
 
     def get_start_time(self, obj):
@@ -471,6 +484,8 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
         source="transaction_type.fee_amount", max_digits=8, decimal_places=2, read_only=True
     )
     fee_add_ons = serializers.SerializerMethodField()
+    # Echoed back by the Release action, which refuses if the proxy has changed since the page was loaded.
+    proxy_version = serializers.SerializerMethodField()
     submission_extras = serializers.SerializerMethodField()
     approved_by_name = serializers.SerializerMethodField()
     verified_by_name = serializers.SerializerMethodField()
@@ -517,6 +532,9 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
             "verified_by_name",
             "registrar_approved_at",
             "release_schedule",
+            "cancelled_at",
+            "proxy_changed_at",
+            "proxy_version",
         ]
 
     def _profile(self, obj):
@@ -543,6 +561,9 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
 
     def get_fee_add_ons(self, obj):
         return f"{obj.fee_add_ons():.2f}"
+
+    def get_proxy_version(self, obj):
+        return proxy_version(obj)
 
     def _form_data(self, obj):
         submission = getattr(obj, "submission", None)
@@ -674,6 +695,37 @@ class ReleaseRequestSerializer(serializers.Serializer):
 
     claimant_name = serializers.CharField(max_length=150, allow_blank=False, trim_whitespace=True)
     proxy_acknowledged = serializers.BooleanField(required=False, default=False)
+    # The proxy_version the page showed; omitted, the check is skipped.
+    proxy_version = serializers.CharField(required=False, allow_blank=True)
+
+
+def proxy_version(form_request):
+    """Changes whenever the proxy does, so an out-of-date Release screen can be caught; only the late path edits a proxy."""
+    if getattr(form_request, "proxy", None) is None:
+        return "none"
+    changed = form_request.proxy_changed_at
+    return changed.isoformat() if changed else "as-submitted"
+
+
+class ProxyAssignmentSerializer(serializers.Serializer):
+    """PUT /api/form-requests/<id>/proxy/ body: the same three answers the request form asks for."""
+
+    proxy_full_name = serializers.CharField(
+        max_length=150, error_messages={"blank": "Proxy full name is required.", "required": "Proxy full name is required."}
+    )
+    relationship = serializers.ChoiceField(
+        choices=RequestProxy.Relationship.choices,
+        error_messages={"invalid_choice": "Please select a relationship.", "required": "Please select a relationship."},
+    )
+    contact_number = serializers.CharField(
+        max_length=20, error_messages={"blank": "Contact number is required.", "required": "Contact number is required."}
+    )
+
+    def validate_proxy_full_name(self, value):
+        return value.strip()
+
+    def validate_contact_number(self, value):
+        return value.strip()
 
 
 class VerifyRequestSerializer(serializers.Serializer):

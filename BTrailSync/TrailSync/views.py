@@ -5,7 +5,7 @@ from django.conf import settings
 from django.contrib.auth import authenticate
 from django.core.mail import send_mail
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
-from django.db import models
+from django.db import models, transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -28,6 +28,7 @@ from .models import (
     FormRequest,
     Notification,
     ReleaseSchedule,
+    RequestProxy,
     RequirementVerification,
     Role,
     StaffProfile,
@@ -66,6 +67,7 @@ from .serializers import (
     PasswordResetConfirmSerializer,
     PasswordResetLinkSerializer,
     PasswordResetRequestSerializer,
+    ProxyAssignmentSerializer,
     RegistrarQueueRowSerializer,
     RegistrarRecentSubmissionSerializer,
     RegistrarReleasedRowSerializer,
@@ -77,6 +79,7 @@ from .serializers import (
     UpdateProfileSerializer,
     VerifyRequestSerializer,
     build_profile_payload,
+    proxy_version,
 )
 
 
@@ -651,6 +654,7 @@ class DashboardSummaryView(APIView):
         active_requests_count = base.filter(
             request_status__in=[
                 FormRequest.RequestStatus.SUBMITTED,
+                FormRequest.RequestStatus.VERIFIED,
                 FormRequest.RequestStatus.APPROVED,
                 FormRequest.RequestStatus.PROCESSING,
             ]
@@ -923,6 +927,7 @@ class RegistrarReleaseCalendarDayView(APIView):
                     "transaction_type": fr.transaction_type.name,
                     "request_status": fr.request_status,
                     "release_time_start": start.isoformat(timespec="minutes") if start else None,
+                    "proxy_changed_at": fr.proxy_changed_at.isoformat() if fr.proxy_changed_at else None,
                 }
             )
         rows.sort(key=lambda r: (r["release_time_start"] or "", r["request_code"]))
@@ -1035,7 +1040,9 @@ class RegistrarQueueVerifyView(APIView):
 
     permission_classes = [IsApprovedRegistrarStaff]
 
+    @transaction.atomic
     def post(self, request, pk):
+        _lock_request(pk)
         form_request = get_object_or_404(FormRequest, pk=pk)
 
         if form_request.request_status != FormRequest.RequestStatus.SUBMITTED:
@@ -1064,7 +1071,9 @@ class RegistrarQueueApproveView(APIView):
 
     permission_classes = [IsApprovedRegistrarStaff]
 
+    @transaction.atomic
     def post(self, request, pk):
+        _lock_request(pk)
         form_request = get_object_or_404(
             FormRequest.objects.select_related("transaction_type", "submission"), pk=pk
         )
@@ -1117,7 +1126,9 @@ class RegistrarQueueRejectView(APIView):
 
     permission_classes = [IsApprovedRegistrarStaff]
 
+    @transaction.atomic
     def post(self, request, pk):
+        _lock_request(pk)
         form_request = get_object_or_404(FormRequest, pk=pk)
 
         if form_request.request_status not in (
@@ -1229,7 +1240,105 @@ class FormRequestClaimStubView(APIView):
         )
 
 
+def _own_request(request, pk):
+    """The student's own request for an action on it; anyone else's is a 404, as if it didn't exist."""
+    return get_object_or_404(
+        FormRequest.objects.select_related("transaction_type", "submission", "release_slot", "proxy", "release_schedule"),
+        pk=pk,
+        user=request.user,
+    )
+
+
+class FormRequestCancelView(APIView):
+    """POST /api/form-requests/<id>/cancel/ - the student ends their own request, only before payment is logged.
+
+    The status is re-checked under a row lock at the moment of the request, not trusted from the page: the Registrar may
+    have logged the payment since the Cancel button was drawn.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        _lock_request(pk)
+        form_request = _own_request(request, pk)
+
+        if not form_request.can_cancel():
+            if form_request.request_status == FormRequest.RequestStatus.CANCELLED:
+                detail = "This request is already cancelled."
+            elif form_request.request_status in (FormRequest.RequestStatus.REJECTED, FormRequest.RequestStatus.RELEASED):
+                detail = "This request is already closed, so there is nothing to cancel."
+            else:
+                detail = (
+                    "This request can no longer be cancelled: your payment has been logged. "
+                    "If you need to stop it, please talk to Window 6."
+                )
+            return Response(
+                {"detail": detail, "request_status": form_request.request_status}, status=status.HTTP_409_CONFLICT
+            )
+
+        form_request.request_status = FormRequest.RequestStatus.CANCELLED
+        form_request.cancelled_at = timezone.now()
+        form_request.save(update_fields=["request_status", "cancelled_at", "updated_at"])
+
+        _notify_student(
+            form_request,
+            Notification.NotificationType.CANCELLED,
+            "Request cancelled",
+            (
+                f"You cancelled {form_request.request_code} ({form_request.transaction_type.name}). "
+                "Nothing more will happen with it. If you still need the document, send a new request."
+            ),
+        )
+        return Response(TrackedFormRequestSerializer(form_request).data)
+
+
+class FormRequestProxyView(APIView):
+    """PUT /api/form-requests/<id>/proxy/ - add or change who collects the document, only at Ready for Pickup.
+
+    The status is checked under the row lock, like cancelling. proxy_changed_at is what tells Window 6 about the late
+    change: the queue, calendar and review page flag it, and Release refuses a screen showing the old proxy.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def put(self, request, pk):
+        _lock_request(pk)
+        form_request = _own_request(request, pk)
+
+        if not form_request.can_change_proxy():
+            if form_request.request_status == FormRequest.RequestStatus.RELEASED:
+                detail = "This document has already been collected, so the proxy can't be changed."
+            elif form_request.request_status in (FormRequest.RequestStatus.CANCELLED, FormRequest.RequestStatus.REJECTED):
+                detail = "This request is closed, so there is no one to collect it."
+            else:
+                detail = "You can name someone to collect this once it's ready for pickup."
+            return Response(
+                {"detail": detail, "request_status": form_request.request_status}, status=status.HTTP_409_CONFLICT
+            )
+
+        serializer = ProxyAssignmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        RequestProxy.objects.update_or_create(form_request=form_request, defaults=serializer.validated_data)
+
+        form_request.proxy_changed_at = timezone.now()
+        form_request.save(update_fields=["proxy_changed_at", "updated_at"])
+
+        form_request = _own_request(request, pk)
+        return Response(TrackedFormRequestSerializer(form_request).data)
+
+
 # Registrar lifecycle transitions: one endpoint per move, each refusing anything but its entry stage, so the sequence can't be skipped or replayed.
+
+
+def _lock_request(pk):
+    """Row-lock one request for the current transaction; the caller then reads it fresh. Callers must be atomic.
+
+    Every action that moves a request out of a stage the student can also act on takes this lock, so a cancel and an
+    Approve & Log (or a proxy change and a release) can't both succeed on the same starting state.
+    """
+    list(FormRequest.objects.select_for_update().filter(pk=pk).values_list("pk", flat=True))
 
 
 def _notify_student(form_request, notification_type, title, message):
@@ -1299,7 +1408,10 @@ class RegistrarApproveLogView(APIView):
 
     permission_classes = [IsApprovedRegistrarStaff]
 
+    @transaction.atomic
     def patch(self, request, pk):
+        # Locked so this can't cross with the student cancelling at the same moment.
+        _lock_request(pk)
         form_request = get_object_or_404(_queue_queryset(), pk=pk)
 
         if form_request.request_status != FormRequest.RequestStatus.APPROVED:
@@ -1394,7 +1506,10 @@ class RegistrarReleaseView(APIView):
 
     permission_classes = [IsApprovedRegistrarStaff]
 
+    @transaction.atomic
     def patch(self, request, pk):
+        # Locked so a proxy change from the student lands either before this release or not at all.
+        _lock_request(pk)
         form_request = get_object_or_404(_queue_queryset(), pk=pk)
 
         if form_request.request_status != FormRequest.RequestStatus.READY:
@@ -1404,6 +1519,22 @@ class RegistrarReleaseView(APIView):
 
         serializer = ReleaseRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        # The screen must be showing the current proxy: releasing to the person the student has just replaced is the risk.
+        seen = serializer.validated_data.get("proxy_version")
+        if seen and seen != proxy_version(form_request):
+            proxy = getattr(form_request, "proxy", None)
+            return Response(
+                {
+                    "detail": (
+                        "The student changed who will collect this document while this page was open. "
+                        "The page has been refreshed: check the new details before releasing."
+                    ),
+                    "proxy_full_name": proxy.proxy_full_name if proxy else None,
+                    "request_status": form_request.request_status,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
         proxy = getattr(form_request, "proxy", None)
         if proxy is not None and not serializer.validated_data["proxy_acknowledged"]:

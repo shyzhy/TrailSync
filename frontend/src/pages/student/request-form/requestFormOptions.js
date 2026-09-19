@@ -57,7 +57,6 @@ export const CERTIFICATION_SUBTYPES = [
   { value: 'Subjects w/ grades', hint: 'Your subjects, together with your grades' },
   { value: 'Others', hint: 'Something not listed — describe it in Additional notes' },
 ];
-export const RELATIONSHIP_OPTIONS = ['Parent', 'Sibling', 'Spouse', 'Friend', 'Other'];
 
 // Matched by name, since the catalogue can hold documents beyond this set; unknown ones get the generic icon.
 export function iconForTransactionType(name) {

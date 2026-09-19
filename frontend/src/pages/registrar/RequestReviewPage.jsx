@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RegistrarMobileHeader, RegistrarSidebar } from '../../components/layout/RegistrarSidebar.jsx';
 import {
   BusyLabel,
@@ -154,6 +154,8 @@ export default function RequestReviewPage({ requestId }) {
   const [releaseDate, setReleaseDate] = useState('');
   const [claimantName, setClaimantName] = useState('');
   const [proxyAcknowledged, setProxyAcknowledged] = useState(false);
+  // The proxy this page last showed; if the student changes it, the name typed and the papers ticked were for someone else.
+  const seenProxyVersion = useRef(null);
   // Which action is waiting on a yes: 'verify' | 'reject' | 'approve' | 'approve-log' | 'mark-ready' | 'release'.
   const [confirming, setConfirming] = useState(null);
 
@@ -181,7 +183,14 @@ export default function RequestReviewPage({ requestId }) {
       setMe(meData);
       setRequest(reqData);
       // With a proxy on file the claimant starts blank, so staff must type who is actually collecting.
-      setClaimantName((prev) => prev || (reqData.proxy ? '' : reqData.student_full_name || ''));
+      if (seenProxyVersion.current !== null && seenProxyVersion.current !== reqData.proxy_version) {
+        setClaimantName(reqData.proxy ? '' : reqData.student_full_name || '');
+        setProxyAcknowledged(false);
+        setConfirming(null);
+      } else {
+        setClaimantName((prev) => prev || (reqData.proxy ? '' : reqData.student_full_name || ''));
+      }
+      seenProxyVersion.current = reqData.proxy_version;
 
       // Pre-fill the pickup date from any existing arrangement rather than silently overwriting it.
       const booked = reqData.release_schedule || null;
@@ -895,9 +904,19 @@ export default function RequestReviewPage({ requestId }) {
                       </div>
                     )}
 
+                    {/* Always the proxy on file now: a student can change it at Ready for Pickup, and Release refuses an out-of-date screen. */}
                     {proxy && (
                       <div className="ts-banner ts-banner-pending mb-4 px-3.5 py-3 text-sm">
-                        <p className="font-semibold">Someone else is collecting this</p>
+                        <p className="font-semibold">&#9888; Representative claim expected</p>
+                        <p className="mt-1 leading-relaxed">
+                          <strong>{proxy.proxy_full_name}</strong> ({proxy.relationship}) &middot; {proxy.contact_number}
+                        </p>
+                        {request.proxy_changed_at && (
+                          <p className="mt-1 font-semibold">
+                            Changed by the student on {formatDateTime(request.proxy_changed_at)}. This replaces anyone
+                            named before.
+                          </p>
+                        )}
                         <p className="mt-1 leading-relaxed">
                           Check the notarized authorization letter and both IDs before handing it over.
                         </p>
@@ -957,11 +976,17 @@ export default function RequestReviewPage({ requestId }) {
                             body: {
                               claimant_name: claimantName.trim(),
                               proxy_acknowledged: proxyAcknowledged,
+                              proxy_version: request.proxy_version,
                             },
                             successMessage: 'Recorded. This request is finished.',
                           })
                         }
                       >
+                        {proxy && (
+                          <p className="ts-ink font-semibold">
+                            &#9888; Representative claim expected: {proxy.proxy_full_name} ({proxy.relationship})
+                          </p>
+                        )}
                         <p>
                           This finishes {request.request_code} and records{' '}
                           <strong className="ts-ink">{claimantName.trim()}</strong> as the person who collected it.
@@ -1009,6 +1034,19 @@ export default function RequestReviewPage({ requestId }) {
                 {currentStatus === STATUS.REJECTED && (
                   <ActionCard title="Not approved" description="This request was turned down, and the student was told why.">
                     <Field label="Reason given">{request.verification_remarks}</Field>
+                    <a href={QUEUE_PATH} className="ts-btn-glass mt-6 flex w-full items-center justify-center py-3 text-sm font-medium">
+                      Back to all requests
+                    </a>
+                  </ActionCard>
+                )}
+
+                {/* Cancelled: the student ended it before paying; nothing for staff to do. */}
+                {currentStatus === STATUS.CANCELLED && (
+                  <ActionCard
+                    title="Cancelled by the student"
+                    description="The student cancelled this request before any payment was logged. There is nothing left to do."
+                  >
+                    <Field label="Cancelled on">{formatDateTime(request.cancelled_at)}</Field>
                     <a href={QUEUE_PATH} className="ts-btn-glass mt-6 flex w-full items-center justify-center py-3 text-sm font-medium">
                       Back to all requests
                     </a>

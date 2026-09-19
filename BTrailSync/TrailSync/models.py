@@ -277,7 +277,10 @@ class FormRequest(models.Model):
     """A student/alumni's request for one document, tracked through to release."""
 
     class RequestStatus(models.TextChoices):
-        """The request lifecycle in order. Verified and Approved stay separate because the form carries two signatures; "blocked" is a separate axis (blocked_by_clearance)."""
+        """The request lifecycle in order. Verified and Approved stay separate because the form carries two signatures; "blocked" is a separate axis (blocked_by_clearance).
+
+        Rejected and Cancelled are exits rather than stages: Rejected is the Registrar's, Cancelled the student's own.
+        """
 
         SUBMITTED = "Submitted", "Pending Verification"
         VERIFIED = "Verified", "Verified"
@@ -286,6 +289,7 @@ class FormRequest(models.Model):
         READY = "Ready", "Ready for Pickup"
         RELEASED = "Released", "Released"
         REJECTED = "Rejected", "Rejected"
+        CANCELLED = "Cancelled", "Cancelled"
 
     class ClearanceCheckResult(models.TextChoices):
         NO_CHECK_NEEDED = "Active - No Check Needed", "Active - No Check Needed"
@@ -365,6 +369,11 @@ class FormRequest(models.Model):
     # Staff-facing fraud signal, never shown to the student.
     duplicate_flag = models.BooleanField(default=False)
 
+    # Set when the student cancels, which they can do only before payment is logged (see CANCELLABLE_STATUSES).
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    # Set when the student adds or changes their proxy at Ready for Pickup, so Window 6 notices a late change.
+    proxy_changed_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -421,9 +430,22 @@ class FormRequest(models.Model):
         """True only at Approved - Ready to Print; the print-and-pay form stops once payment is logged."""
         return self.request_status == self.RequestStatus.APPROVED
 
+    def can_cancel(self):
+        """Only before payment is logged: after that, undoing it is a refund conversation with staff, not a button."""
+        return self.request_status in CANCELLABLE_STATUSES
+
+    def can_change_proxy(self):
+        """Only once the document is ready: earlier is too soon to matter, and after release it has been collected."""
+        return self.request_status == self.RequestStatus.READY
+
     def blocked_by_clearance(self):
         """True if a Not Cleared result must block any move to Processing or later."""
         return self.clearance_check_result == self.ClearanceCheckResult.NOT_CLEARED
+
+
+CANCELLABLE_STATUSES = frozenset(
+    {FormRequest.RequestStatus.SUBMITTED, FormRequest.RequestStatus.VERIFIED, FormRequest.RequestStatus.APPROVED}
+)
 
 
 class FormSubmission(models.Model):
@@ -627,6 +649,7 @@ class Notification(models.Model):
         READY = "Ready", "Ready for Pickup"
         RELEASED = "Released", "Released"
         REJECTED = "Rejected", "Rejected"
+        CANCELLED = "Cancelled", "Cancelled"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

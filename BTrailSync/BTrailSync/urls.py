@@ -30,7 +30,9 @@ from TrailSync.views import (
     ChangePasswordView,
     DashboardSummaryView,
     FormRequestListCreateView,
+    FormRequestCancelView,
     FormRequestClaimStubView,
+    FormRequestProxyView,
     FormRequestReceiptView,
     MeAvatarView,
     MeView,
@@ -85,6 +87,8 @@ urlpatterns = [
     path('api/form-requests/', FormRequestListCreateView.as_view(), name='form-requests'),
     path('api/form-requests/<int:pk>/receipt/', FormRequestReceiptView.as_view(), name='form-request-receipt'),
     path('api/form-requests/<int:pk>/claim-stub/', FormRequestClaimStubView.as_view(), name='form-request-claim-stub'),
+    path('api/form-requests/<int:pk>/cancel/', FormRequestCancelView.as_view(), name='form-request-cancel'),
+    path('api/form-requests/<int:pk>/proxy/', FormRequestProxyView.as_view(), name='form-request-proxy'),
     # Lifecycle transitions: one endpoint per move, each checking the stage it is entered from.
     path('api/form-requests/<int:pk>/approve-log/', RegistrarApproveLogView.as_view(), name='form-request-approve-log'),
     path('api/form-requests/<int:pk>/mark-ready/', RegistrarMarkReadyView.as_view(), name='form-request-mark-ready'),

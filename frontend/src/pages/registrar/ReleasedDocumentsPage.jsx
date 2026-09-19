@@ -15,6 +15,7 @@ import { APP_CSS } from '../../styles/appCss.js';
 import { FONT_SANS, FONT_SERIF } from '../../styles/fonts.js';
 import { errorFromResponse, toApiError } from '../../lib/api.js';
 import { authFetch, clearSession, getAccessToken, getStoredUser, STAFF_LOGIN_PATH } from '../../lib/auth.js';
+import { useLatestOnly } from '../../lib/latestOnly.js';
 
 const LOGIN_PATH = STAFF_LOGIN_PATH;
 
@@ -92,7 +93,9 @@ export default function ReleasedDocumentsPage() {
     return params;
   }, [dateFrom, dateTo, search]);
 
+  const startLoad = useLatestOnly();
   const load = useCallback(async () => {
+    const isCurrent = startLoad();
     setStatus('loading');
     setLoadError(null);
     try {
@@ -108,6 +111,7 @@ export default function ReleasedDocumentsPage() {
       if (failed) throw await errorFromResponse(failed);
 
       const [meData, listData] = await Promise.all([meRes.json(), listRes.json()]);
+      if (!isCurrent()) return;
       setMe(meData);
       setRows(listData.results || []);
       setPageInfo({
@@ -119,10 +123,11 @@ export default function ReleasedDocumentsPage() {
       });
       setStatus('ready');
     } catch (error) {
+      if (!isCurrent()) return;
       setLoadError(toApiError(error));
       setStatus('error');
     }
-  }, [filterParams, page]);
+  }, [filterParams, page, startLoad]);
 
   useEffect(() => {
     if (!getAccessToken()) {

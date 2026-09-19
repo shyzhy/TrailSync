@@ -8,9 +8,10 @@ export const STATUS = {
   READY: 'Ready',
   RELEASED: 'Released',
   REJECTED: 'Rejected',
+  CANCELLED: 'Cancelled',
 };
 
-// The happy path in order. Rejected is an exit, not a position on the line.
+// The happy path in order. Rejected and Cancelled are exits, not positions on the line.
 export const LIFECYCLE = [
   STATUS.SUBMITTED,
   STATUS.VERIFIED,
@@ -29,6 +30,7 @@ export const STATUS_LABEL = {
   [STATUS.READY]: 'Ready for Pickup',
   [STATUS.RELEASED]: 'Released',
   [STATUS.REJECTED]: 'Not Approved',
+  [STATUS.CANCELLED]: 'Cancelled by Student',
 };
 
 // What staff should do next at each stage.
@@ -40,6 +42,7 @@ export const STAFF_NEXT_STEP = {
   [STATUS.READY]: 'The student collects it at Window 6.',
   [STATUS.RELEASED]: 'Nothing left to do. This one is finished.',
   [STATUS.REJECTED]: 'Nothing left to do. The student was told why.',
+  [STATUS.CANCELLED]: 'Nothing left to do. The student cancelled it before paying.',
 };
 
 // Student-facing labels, written from the student's side of the counter.
@@ -53,6 +56,7 @@ export const STUDENT_STATUS_LABEL = {
   [STATUS.RELEASED]: 'Released',
   // Softer than "Rejected", and true: the student can fix it and try again.
   [STATUS.REJECTED]: 'Not approved',
+  [STATUS.CANCELLED]: 'Cancelled',
 };
 
 // Compact labels for the progress line, where space is tight.
@@ -73,12 +77,14 @@ export const STATUS_PILL_CLASS = {
   [STATUS.READY]: 'ts-pill-ready',
   [STATUS.RELEASED]: 'ts-pill-released',
   [STATUS.REJECTED]: 'ts-pill-danger',
+  [STATUS.CANCELLED]: 'ts-pill-cancelled',
 };
 
 // Queue filter options, plus the catch-all the list endpoint understands.
 export const STATUS_FILTER_OPTIONS = [
   ...LIFECYCLE.map((value) => ({ value, label: STATUS_LABEL[value] })),
   { value: STATUS.REJECTED, label: STATUS_LABEL[STATUS.REJECTED] },
+  { value: STATUS.CANCELLED, label: STATUS_LABEL[STATUS.CANCELLED] },
   { value: 'all', label: 'All statuses' },
 ];
 

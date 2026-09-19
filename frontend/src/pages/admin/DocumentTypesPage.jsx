@@ -17,9 +17,14 @@ const COLUMNS = ['Document', 'Fee', 'Pricing unit', 'Processing time', 'Availabl
 const UNIT_LABEL = { flat: 'Flat', per_page: 'Per page' };
 const PESO = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
 
+function feeText(amount, unit) {
+  if (amount == null || amount === '') return 'no set fee';
+  return `${PESO.format(Number(amount))} ${unit === 'per_page' ? 'a page' : 'a copy'}`;
+}
+
 function feeLine(doc) {
-  if (doc.fee_amount == null) return 'No set fee';
-  return `${PESO.format(Number(doc.fee_amount))} ${doc.pricing_unit === 'per_page' ? 'a page' : 'a copy'}`;
+  const text = feeText(doc.fee_amount, doc.pricing_unit);
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 // Inline editor for one document's fee, unit and processing time: quick to change when Window 6 announces a new fee.
@@ -29,14 +34,29 @@ function EditFields({ doc, layout, onSaved, onCancel }) {
   const [time, setTime] = useState(doc.processing_time ?? '');
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  // A fee change is confirmed first: amount_due is fixed at approval, so this only ever reaches new assessments.
+  const [confirming, setConfirming] = useState(false);
   // Both layouts are in the page at once (one hidden), so ids carry the layout to stay unique.
   const ids = (name) => `${layout}-${name}-${doc.id}`;
+  const trimmed = String(fee).trim();
+  const newFee = trimmed === '' ? null : Number(trimmed);
+  const oldFee = doc.fee_amount == null ? null : Number(doc.fee_amount);
+  const feeChanged = newFee !== oldFee || unit !== doc.pricing_unit;
+  // Any edit after asking goes back to the form, so what's confirmed is always what's on screen.
+  const edited = (setter) => (e) => {
+    setter(e.target.value);
+    setConfirming(false);
+  };
 
   const save = async (e) => {
-    e.preventDefault();
-    const trimmed = String(fee).trim();
+    e?.preventDefault();
     if (trimmed && !(Number(trimmed) >= 0)) {
       setErrors({ fee_amount: 'Enter the fee as an amount, like 125.00.' });
+      return;
+    }
+    if (feeChanged && !confirming) {
+      setErrors({});
+      setConfirming(true);
       return;
     }
     setSaving(true);
@@ -52,6 +72,7 @@ function EditFields({ doc, layout, onSaved, onCancel }) {
       onSaved(await res.json());
     } catch (error) {
       setErrors(formErrors(error, ['fee_amount', 'pricing_unit', 'processing_time']));
+      setConfirming(false);
     } finally {
       setSaving(false);
     }
@@ -63,8 +84,9 @@ function EditFields({ doc, layout, onSaved, onCancel }) {
     <form onSubmit={save} noValidate className="space-y-4" aria-label={`Edit ${doc.name}`}>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div>
+          {/* Says which number this is: a flat fee and a per-page fee look the same in the box but mean very different amounts. */}
           <label htmlFor={ids('fee')} className="ts-ink mb-1.5 block text-sm font-medium">
-            Fee (₱)
+            {unit === 'per_page' ? 'Fee Per Page (₱)' : 'Flat Fee (₱)'}
           </label>
           <input
             id={ids('fee')}
@@ -73,7 +95,7 @@ function EditFields({ doc, layout, onSaved, onCancel }) {
             min="0"
             step="0.01"
             value={fee}
-            onChange={(e) => setFee(e.target.value)}
+            onChange={edited(setFee)}
             placeholder="No set fee"
             {...invalid('fee_amount', ids('fee'))}
             className={`ts-input w-full px-3.5 py-2.5 text-sm ${errors.fee_amount ? 'ts-input-error' : ''}`}
@@ -87,7 +109,7 @@ function EditFields({ doc, layout, onSaved, onCancel }) {
           <select
             id={ids('unit')}
             value={unit}
-            onChange={(e) => setUnit(e.target.value)}
+            onChange={edited(setUnit)}
             {...invalid('pricing_unit', ids('unit'))}
             className={`ts-input ts-select w-full px-3.5 py-2.5 text-sm ${errors.pricing_unit ? 'ts-input-error' : ''}`}
           >
@@ -104,7 +126,7 @@ function EditFields({ doc, layout, onSaved, onCancel }) {
             id={ids('time')}
             type="text"
             value={time}
-            onChange={(e) => setTime(e.target.value)}
+            onChange={edited(setTime)}
             placeholder="e.g. 3–5 working days"
             {...invalid('processing_time', ids('time'))}
             className={`ts-input w-full px-3.5 py-2.5 text-sm ${errors.processing_time ? 'ts-input-error' : ''}`}
@@ -125,21 +147,48 @@ function EditFields({ doc, layout, onSaved, onCancel }) {
         </div>
       )}
 
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <button type="button" onClick={onCancel} disabled={saving} className="ts-btn-glass px-5 py-2.5 text-sm font-medium">
-          Cancel
-        </button>
-        <button
-          type="submit"
-          disabled={saving}
-          aria-busy={saving}
-          className="ts-btn-primary flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium"
-        >
-          <BusyLabel busy={saving} busyLabel="Saving…">
-            Save changes
-          </BusyLabel>
-        </button>
-      </div>
+      {confirming ? (
+        <div role="group" aria-label="Confirm the fee change" className="ts-info-note block px-4 py-4 text-sm">
+          <p className="ts-ink text-base font-semibold">
+            Update the fee for {doc.name} from {feeText(doc.fee_amount, doc.pricing_unit)} to {feeText(newFee, unit)}?
+          </p>
+          <p className="mt-1.5 leading-relaxed">
+            This applies to new requests only &mdash; requests already assessed keep their original amount.
+          </p>
+          <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={() => setConfirming(false)} disabled={saving} className="ts-btn-glass px-5 py-2.5 text-sm font-medium">
+              Go back
+            </button>
+            <button
+              type="button"
+              onClick={() => save()}
+              disabled={saving}
+              aria-busy={saving}
+              className="ts-btn-primary flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium"
+            >
+              <BusyLabel busy={saving} busyLabel="Saving…">
+                Yes, update the fee
+              </BusyLabel>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button type="button" onClick={onCancel} disabled={saving} className="ts-btn-glass px-5 py-2.5 text-sm font-medium">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            aria-busy={saving}
+            className="ts-btn-primary flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium"
+          >
+            <BusyLabel busy={saving} busyLabel="Saving…">
+              Save changes
+            </BusyLabel>
+          </button>
+        </div>
+      )}
     </form>
   );
 }

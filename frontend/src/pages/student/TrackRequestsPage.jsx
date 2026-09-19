@@ -18,6 +18,7 @@ import {
   getStoredUser,
   STUDENT_LOGIN_PATH,
 } from '../../lib/auth.js';
+import { useLatestOnly } from '../../lib/latestOnly.js';
 import { LIFECYCLE, STATUS, studentStatusLabel } from '../../lib/requestStatus.js';
 
 const LOGIN_PATH = STUDENT_LOGIN_PATH;
@@ -27,6 +28,7 @@ const FILTER_TABS = [
   { value: 'All', label: 'All' },
   ...LIFECYCLE.map((value) => ({ value, label: studentStatusLabel(value) })),
   { value: STATUS.REJECTED, label: studentStatusLabel(STATUS.REJECTED) },
+  { value: STATUS.CANCELLED, label: studentStatusLabel(STATUS.CANCELLED) },
 ];
 
 export default function TrackRequestsPage() {
@@ -55,7 +57,9 @@ export default function TrackRequestsPage() {
     setPage(1);
   }, [activeFilter, search]);
 
+  const startLoad = useLatestOnly();
   const load = useCallback(async () => {
+    const isCurrent = startLoad();
     setStatus('loading');
     setLoadError(null);
     try {
@@ -69,6 +73,7 @@ export default function TrackRequestsPage() {
       if (failed) throw await errorFromResponse(failed);
 
       const [meData, listData] = await Promise.all([meRes.json(), listRes.json()]);
+      if (!isCurrent()) return;
       setMe(meData);
       setResults(listData.results || []);
       // Arrived via a link to one request: open it.
@@ -84,10 +89,11 @@ export default function TrackRequestsPage() {
       });
       setStatus('ready');
     } catch (error) {
+      if (!isCurrent()) return;
       setLoadError(toApiError(error));
       setStatus('error');
     }
-  }, [activeFilter, search, page, initialSearch]);
+  }, [activeFilter, search, page, initialSearch, startLoad]);
 
   const clearFilters = () => {
     setActiveFilter('All');
@@ -203,6 +209,9 @@ export default function TrackRequestsPage() {
                 request={r}
                 expanded={expandedId === r.id}
                 onToggle={() => setExpandedId((cur) => (cur === r.id ? null : r.id))}
+                onChanged={(updated) =>
+                  updated ? setResults((list) => list.map((x) => (x.id === updated.id ? updated : x))) : load()
+                }
               />
             ))}
         </div>

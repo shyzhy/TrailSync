@@ -17,6 +17,7 @@ import {
   getStoredUser,
   STUDENT_LOGIN_PATH,
 } from '../../lib/auth.js';
+import { useLatestOnly } from '../../lib/latestOnly.js';
 import { markNotificationRead, notificationHref, timeAgo } from '../../lib/notifications.js';
 
 const LOGIN_PATH = STUDENT_LOGIN_PATH;
@@ -31,7 +32,9 @@ function NotificationsBody() {
   const [pageInfo, setPageInfo] = useState({ count: 0, start: 0, end: 0, next: null, previous: null });
   const [loadError, setLoadError] = useState(null);
 
+  const startLoad = useLatestOnly();
   const load = useCallback(async () => {
+    const isCurrent = startLoad();
     setStatus('loading');
     setLoadError(null);
     try {
@@ -40,14 +43,16 @@ function NotificationsBody() {
       const res = await authFetch(`/api/notifications/?${params}`);
       if (!res.ok) throw await errorFromResponse(res);
       const data = await res.json();
+      if (!isCurrent()) return;
       setItems(data.results || []);
       setPageInfo({ count: data.count, start: data.start, end: data.end, next: data.next, previous: data.previous });
       setStatus('ready');
     } catch (error) {
+      if (!isCurrent()) return;
       setLoadError(toApiError(error));
       setStatus('error');
     }
-  }, [page, order]);
+  }, [page, order, startLoad]);
 
   useEffect(() => {
     load();

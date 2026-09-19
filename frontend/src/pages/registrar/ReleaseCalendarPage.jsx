@@ -258,7 +258,12 @@ export default function ReleaseCalendarPage() {
                               {formatClock(r.release_time_start) ? ` · from ${formatClock(r.release_time_start)}` : ''}
                             </p>
                           </div>
-                          {state && <span className={`ts-pill ${state.className} shrink-0`}>{state.label}</span>}
+                          <div className="flex shrink-0 flex-col items-end gap-1.5">
+                            {state && <span className={`ts-pill ${state.className}`}>{state.label}</span>}
+                            {r.proxy_changed_at && r.request_status === 'Ready' && (
+                              <span className="ts-pill ts-pill-processing">&#9888; Proxy changed</span>
+                            )}
+                          </div>
                         </li>
                       );
                     })}

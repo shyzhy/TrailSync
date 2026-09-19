@@ -12,6 +12,7 @@ import {
 import { FONT_SERIF } from '../../styles/fonts.js';
 import { errorFromResponse, toApiError } from '../../lib/api.js';
 import { ADMIN_LOGIN_PATH, authFetch, clearSession, getAccessToken, getStoredUser } from '../../lib/auth.js';
+import { useLatestOnly } from '../../lib/latestOnly.js';
 import AccountDetailsDialog from './AccountDetailsDialog.jsx';
 import AddRegistrarDialog from './AddRegistrarDialog.jsx';
 import StatusChangeDialog from './StatusChangeDialog.jsx';
@@ -80,7 +81,9 @@ export default function ManageAccountsPage() {
     setPage(1);
   }, [tab, search]);
 
+  const startLoad = useLatestOnly();
   const load = useCallback(async () => {
+    const isCurrent = startLoad();
     setStatus('loading');
     setLoadError(null);
     try {
@@ -90,6 +93,7 @@ export default function ManageAccountsPage() {
       const failed = [meRes, listRes].find((r) => !r.ok);
       if (failed) throw await errorFromResponse(failed);
       const [meData, listData] = await Promise.all([meRes.json(), listRes.json()]);
+      if (!isCurrent()) return;
       setMe(meData);
       setRows(listData.results || []);
       setPageInfo({
@@ -101,10 +105,11 @@ export default function ManageAccountsPage() {
       });
       setStatus('ready');
     } catch (error) {
+      if (!isCurrent()) return;
       setLoadError(toApiError(error));
       setStatus('error');
     }
-  }, [tab, search, page]);
+  }, [tab, search, page, startLoad]);
 
   useEffect(() => {
     if (!getAccessToken()) {

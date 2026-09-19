@@ -417,7 +417,12 @@ export default function RegistrarDashboardPage() {
                             {formatClock(r.start_time) ? ` · from ${formatClock(r.start_time)}` : ''}
                           </p>
                         </div>
-                        <span className={`ts-pill ${pill.className} shrink-0`}>{pill.label}</span>
+                        <div className="flex shrink-0 flex-col items-end gap-1.5">
+                          <span className={`ts-pill ${pill.className}`}>{pill.label}</span>
+                          {r.proxy_changed_at && r.request_status === 'Ready' && (
+                            <span className="ts-pill ts-pill-processing">&#9888; Proxy changed</span>
+                          )}
+                        </div>
                       </li>
                     );
                   })}

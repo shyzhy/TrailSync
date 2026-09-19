@@ -14,6 +14,7 @@ import { FONT_SANS, FONT_SERIF } from '../../styles/fonts.js';
 import { academicStatusLine } from '../../lib/academics.js';
 import { errorFromResponse, toApiError } from '../../lib/api.js';
 import { authFetch, clearSession, getAccessToken, getStoredUser, STAFF_LOGIN_PATH } from '../../lib/auth.js';
+import { useLatestOnly } from '../../lib/latestOnly.js';
 import {
   STAFF_NEXT_STEP,
   STATUS,
@@ -51,7 +52,9 @@ export default function ProcessingQueuePage() {
     setPage(1);
   }, [statusFilter, dateFrom, dateTo, search]);
 
+  const startLoad = useLatestOnly();
   const load = useCallback(async () => {
+    const isCurrent = startLoad();
     setStatus('loading');
     setLoadError(null);
     try {
@@ -71,6 +74,7 @@ export default function ProcessingQueuePage() {
       if (failed) throw await errorFromResponse(failed);
 
       const [meData, queueData] = await Promise.all([meRes.json(), queueRes.json()]);
+      if (!isCurrent()) return;
       setMe(meData);
       setResults(queueData.results || []);
       setPageInfo({
@@ -82,10 +86,11 @@ export default function ProcessingQueuePage() {
       });
       setStatus('ready');
     } catch (error) {
+      if (!isCurrent()) return;
       setLoadError(toApiError(error));
       setStatus('error');
     }
-  }, [statusFilter, dateFrom, dateTo, search, page]);
+  }, [statusFilter, dateFrom, dateTo, search, page, startLoad]);
 
   useEffect(() => {
     if (!getAccessToken()) {
@@ -264,6 +269,10 @@ export default function ProcessingQueuePage() {
                   )}
                   {r.is_rush && <span className="ts-pill ts-pill-processing">Rush</span>}
                   {r.duplicate_flag && <span className="ts-pill ts-pill-danger">Possible duplicate</span>}
+                  {/* The student named a new collector at Ready for Pickup: easy to miss without opening the request. */}
+                  {r.proxy_changed_at && r.request_status === 'Ready' && (
+                    <span className="ts-pill ts-pill-processing">&#9888; Proxy changed</span>
+                  )}
                 </span>
 
                 <span className="sm:col-span-1">

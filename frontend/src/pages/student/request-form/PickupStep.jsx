@@ -1,16 +1,14 @@
-import { ChevronIcon, FieldError, HelpTip, WarningIcon } from '../../../components/ui/index.js';
+import { HelpTip } from '../../../components/ui/index.js';
+import { ProxyFields, ProxyPolicyNotice } from '../../../components/student/ProxyFields.jsx';
 import { FONT_SERIF } from '../../../styles/fonts.js';
-import { RELATIONSHIP_OPTIONS } from './requestFormOptions.js';
-import { MissingHint, RequiredMark, SubmitProblems, Switch } from './RequestFormParts.jsx';
+import { MissingHint, SubmitProblems, Switch } from './RequestFormParts.jsx';
 
 // Step 3: whether someone else will collect the document.
 export default function PickupStep({ form }) {
   const {
-    errorClass,
     errorFor,
     generalError,
     goToStep,
-    invalidProps,
     problemsFor,
     proxyContactNumber,
     proxyEnabled,
@@ -55,84 +53,20 @@ export default function PickupStep({ form }) {
           {/* Stacked, the requirements come first: reading what to bring after typing is reading it too late. */}
           <div className="ts-card order-2 p-6 lg:order-1">
             <h2 className="ts-ink text-sm font-semibold">About the person picking it up</h2>
-            <div className="mt-4 space-y-4">
-              <div>
-                <label htmlFor="proxyFullName" className="ts-ink mb-1.5 block text-sm font-medium">
-                  Their full name
-                  <RequiredMark />
-                </label>
-                <input
-                  id="proxyFullName"
-                  type="text"
-                  value={proxyFullName}
-                  onChange={(e) => setProxyFullName(e.target.value)}
-                  {...invalidProps('proxy_full_name', 'proxyFullName')}
-                  className={`ts-input w-full px-3.5 py-2.5 text-sm ${errorClass('proxy_full_name')}`}
-                />
-                <FieldError id="proxyFullName">{errorFor('proxy_full_name')}</FieldError>
-              </div>
-              <div>
-                <label htmlFor="proxyRelationship" className="ts-ink mb-1.5 block text-sm font-medium">
-                  How are they related to you?
-                  <RequiredMark />
-                </label>
-                <div className="relative">
-                  <select
-                    id="proxyRelationship"
-                    value={proxyRelationship}
-                    onChange={(e) => setProxyRelationship(e.target.value)}
-                    {...invalidProps('relationship', 'proxyRelationship')}
-                    className={`ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm ${errorClass('relationship')}`}
-                  >
-                    <option value="">Choose one</option>
-                    {RELATIONSHIP_OPTIONS.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="ts-soft pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
-                    <ChevronIcon />
-                  </span>
-                </div>
-                <FieldError id="proxyRelationship">{errorFor('relationship')}</FieldError>
-              </div>
-              <div>
-                <label htmlFor="proxyContactNumber" className="ts-ink mb-1.5 block text-sm font-medium">
-                  Their mobile number
-                  <RequiredMark />
-                </label>
-                <input
-                  id="proxyContactNumber"
-                  type="tel"
-                  inputMode="tel"
-                  placeholder="09XX XXX XXXX"
-                  value={proxyContactNumber}
-                  onChange={(e) => setProxyContactNumber(e.target.value)}
-                  {...invalidProps('contact_number', 'proxyContactNumber')}
-                  className={`ts-input w-full px-3.5 py-2.5 text-sm ${errorClass('contact_number')}`}
-                />
-                <FieldError id="proxyContactNumber">{errorFor('contact_number')}</FieldError>
-              </div>
+            <div className="mt-4">
+              <ProxyFields
+                fullName={proxyFullName}
+                setFullName={setProxyFullName}
+                relationship={proxyRelationship}
+                setRelationship={setProxyRelationship}
+                contactNumber={proxyContactNumber}
+                setContactNumber={setProxyContactNumber}
+                errorFor={errorFor}
+              />
             </div>
           </div>
 
-          {/* Word for word what FM-USTP-RGTR-09 (Reminder B) requires: a notarized letter and both people's IDs. */}
-          <div className="ts-warning-card order-1 p-6 lg:order-2">
-            <div className="flex items-center gap-2">
-              <WarningIcon />
-              <h2 className="text-sm font-semibold">They must bring all three</h2>
-            </div>
-            <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-relaxed">
-              <li>
-                An authorization letter from you, <strong>notarized</strong> by a lawyer (a signed letter
-                alone won&rsquo;t be accepted)
-              </li>
-              <li>A photocopy of <strong>your</strong> valid ID</li>
-              <li>A photocopy of <strong>their own</strong> valid ID</li>
-            </ol>
-            <p className="mt-3 text-sm leading-relaxed">Without all three, Window 6 can&rsquo;t release your document to them.</p>
-          </div>
+          <ProxyPolicyNotice className="order-1 lg:order-2" />
         </div>
       )}
 
