@@ -35,11 +35,16 @@ def _form_data(form_request):
     return (submission.form_data if submission else None) or {}
 
 
-def _graduated_2018_onwards(form_request, form_data):
-    """Yes / No / Not a graduate; the archive flag only answers this for someone who gave a graduation date."""
-    if not form_data.get("graduation_date"):
+def _graduated_2018_onwards(form_data):
+    """Yes / No / Not a graduate, from the date itself: the archive flag is false for a high school alumnus of any year."""
+    raw = form_data.get("graduation_date")
+    try:
+        graduated = date.fromisoformat(raw) if raw else None
+    except (TypeError, ValueError):
+        graduated = None
+    if graduated is None:
         return "Not a graduate"
-    return "No" if form_request.requires_archive_retrieval else "Yes"
+    return "Yes" if graduated >= date(2018, 1, 1) else "No"
 
 
 def _processing_time(form_request, claimed_at):
@@ -81,7 +86,7 @@ def released_rows(form_requests):
                 index,
                 fr.user.get_full_name() or fr.user.email,
                 (profile.course if profile else None) or "—",
-                _graduated_2018_onwards(fr, form_data),
+                _graduated_2018_onwards(form_data),
                 fr.transaction_type.name,
                 form_data.get("number_of_copies") or 1,
                 _purpose(form_data),

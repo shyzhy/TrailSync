@@ -21,7 +21,6 @@ export default function ReviewStep({ form }) {
     needsCavAgency,
     needsCertificationSubtypes,
     numberOfCopies,
-    numberOfPages,
     problemsFor,
     proxyContactNumber,
     proxyEnabled,
@@ -31,6 +30,7 @@ export default function ReviewStep({ form }) {
     purposeOther,
     selectedType,
     semester,
+    semesterCheck,
     semesterTaken,
     setConfirmAccurate,
     step4Valid,
@@ -82,15 +82,11 @@ export default function ReviewStep({ form }) {
             </button>
           </div>
 
+          {/* Nothing to edit: the page count, and so the fee, is the Registrar's to fill in. */}
           {isPerPage && (
-            <div className="ts-review-row flex items-start justify-between gap-4">
-              <div>
-                <p className="ts-review-label">Number of pages</p>
-                <p className="ts-review-value">{numberOfPages}</p>
-              </div>
-              <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
-                Edit
-              </button>
+            <div className="ts-review-row">
+              <p className="ts-review-label">Number of pages</p>
+              <p className="ts-review-value font-normal">Counted by the Registrar when they approve your request</p>
             </div>
           )}
 
@@ -134,8 +130,8 @@ export default function ReviewStep({ form }) {
 
           <div className="ts-review-row flex items-start justify-between gap-4">
             <div>
-              <p className="ts-review-label">Latest semester</p>
-              <p className="ts-review-value">{semester}</p>
+              <p className="ts-review-label">Last semester attended</p>
+              <p className="ts-review-value">{semesterCheck.value || semester}</p>
             </div>
             <button type="button" onClick={() => goToStep(2)} className="ts-link shrink-0 text-sm font-medium">
               Edit

@@ -3,16 +3,17 @@ import { NAV_ITEMS } from './StudentSidebar.jsx';
 import { Avatar, LogoutIcon, MenuIcon } from '../ui/index.js';
 import { useBackButton } from '../../lib/backButton.js';
 
-// Tabs for four items plus More; a sixth tab would make labels too small to read at 360px.
-const BOTTOM_NAV_KEYS = ['home', 'request', 'track', 'notifications'];
-const MORE_KEYS = ['guide', 'ask'];
+// Tabs for four items plus More; a sixth tab would make labels too small to read at 360px. Notifications is reached
+// from the bell in the header, not a tab.
+const BOTTOM_NAV_KEYS = ['home', 'request', 'track', 'guide'];
+const MORE_KEYS = ['ask'];
 
 // Short enough to fit a tab; the page keeps its full name.
 const TAB_LABEL = {
   home: 'Home',
   request: 'Request',
   track: 'Track',
-  notifications: 'Notifications',
+  guide: 'Guide',
 };
 
 function MoreSheet({ active, me, onLogout, onClose }) {
@@ -71,7 +72,7 @@ function MoreSheet({ active, me, onLogout, onClose }) {
 }
 
 // The phone's main navigation, fixed to the bottom where a thumb reaches it.
-export function BottomNav({ active, me, unreadCount, onLogout }) {
+export function BottomNav({ active, me, onLogout }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const tabs = BOTTOM_NAV_KEYS.map((key) => NAV_ITEMS.find((i) => i.key === key)).filter(Boolean);
   const moreIsActive = MORE_KEYS.includes(active) || active === 'profile';
@@ -92,11 +93,6 @@ export function BottomNav({ active, me, unreadCount, onLogout }) {
           >
             <Icon />
             <span>{TAB_LABEL[key]}</span>
-            {key === 'notifications' && unreadCount > 0 && (
-              <span className="ts-bottom-nav-count" aria-label={`${unreadCount} unread`}>
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
-            )}
           </a>
         ))}
         <button

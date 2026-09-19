@@ -11,6 +11,7 @@ import {
 } from '../../components/ui/index.js';
 import { AvatarPicker, AvatarStatus, useAvatarUpload } from '../../components/student/AvatarUploader.jsx';
 import { FONT_SERIF } from '../../styles/fonts.js';
+import { academicStatusLine, checkSemester, isAlumnus, SEMESTER_EXAMPLE } from '../../lib/academics.js';
 import { errorFromResponse, formErrors, toApiError } from '../../lib/api.js';
 import {
   authFetch,
@@ -53,6 +54,11 @@ function ConfirmPanel({ title, children, confirmLabel, busyLabel, busy, onConfir
   );
 }
 
+function formatGraduation(iso) {
+  if (!iso) return null;
+  return new Date(`${iso}T00:00:00`).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
 function ReadOnlyField({ label, value }) {
   return (
     <div>
@@ -71,6 +77,7 @@ export default function ProfilePage() {
   const [middleName, setMiddleName] = useState('');
   const [lastName, setLastName] = useState('');
   const [contactNumber, setContactNumber] = useState('');
+  const [lastSemester, setLastSemester] = useState('');
   const [profileErrors, setProfileErrors] = useState({});
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileSuccess, setProfileSuccess] = useState(false);
@@ -109,6 +116,7 @@ export default function ProfilePage() {
       setLastName(data.last_name || '');
       setContactNumber(data.contact_number || '');
       setMiddleName(data.profile?.middle_name || '');
+      setLastSemester(data.profile?.last_semester_attended || '');
       setStatus('ready');
     } catch (error) {
       setLoadError(toApiError(error));
@@ -131,7 +139,6 @@ export default function ProfilePage() {
   };
 
   const profile = me?.profile;
-  const isStudent = profile?.user_category === 'Student';
 
   const clearProfileError = (key) => setProfileErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
 
@@ -143,6 +150,11 @@ export default function ProfilePage() {
   const handleProfileSubmit = (e) => {
     e.preventDefault();
     setProfileSuccess(false);
+    const semester = checkSemester(lastSemester);
+    if (semester.error) {
+      setProfileErrors({ last_semester_attended: semester.error });
+      return;
+    }
     if (nameChanged && firstName.trim() && lastName.trim()) {
       setConfirmingName(true);
       return;
@@ -163,16 +175,18 @@ export default function ProfilePage() {
           middle_name: middleName.trim(),
           last_name: lastName.trim(),
           contact_number: contactNumber.trim(),
+          last_semester_attended: checkSemester(lastSemester).value,
         }),
       });
       if (!res.ok) throw await errorFromResponse(res);
       const data = await res.json();
       setMe(data);
       updateStoredUser(data);
+      setLastSemester(data.profile?.last_semester_attended || '');
       setProfileSuccess(true);
       setToast({ message: 'Your changes are saved.' });
     } catch (error) {
-      setProfileErrors(formErrors(error, ['first_name', 'last_name', 'contact_number']));
+      setProfileErrors(formErrors(error, ['first_name', 'last_name', 'contact_number', 'last_semester_attended']));
     } finally {
       setProfileSaving(false);
       setConfirmingName(false);
@@ -264,7 +278,7 @@ export default function ProfilePage() {
         <h1 className="ts-ink text-3xl font-semibold tracking-tight" style={FONT_SERIF}>
           Profile
         </h1>
-        <p className="ts-soft mt-1.5 text-base">Your account details. You can change your photo, name, contact number, email and password here.</p>
+        <p className="ts-soft mt-1.5 text-base">Your account details. You can change your photo, name, contact number, last semester, email and password here.</p>
 
         {status === 'error' && (
           <ErrorState className="mt-6" error={loadError} title="We couldn&rsquo;t load your profile" onRetry={load} />
@@ -329,15 +343,17 @@ export default function ProfilePage() {
             <div className="ts-card mt-6 p-6 sm:p-8">
               <h2 className="ts-ink text-base font-semibold">Account</h2>
               <p className="ts-soft mt-1 text-sm">
-                These come from your university records, so you can&rsquo;t change them here. If your course or year
-                level is wrong, ask at Window 6.
+                These come from your university records, so you can&rsquo;t change them here. If your course or
+                academic status is wrong, ask at Window 6.
               </p>
 
               <div className="mt-5 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
                 <ReadOnlyField label="School ID number" value={profile?.school_id_number} />
                 <ReadOnlyField label="Course" value={profile?.course} />
-                <ReadOnlyField label="Student or alumnus" value={profile?.user_category} />
-                {isStudent && <ReadOnlyField label="Year level" value={profile?.year_level} />}
+                <ReadOnlyField label="Academic status" value={academicStatusLine(profile?.academic_status)} />
+                {isAlumnus(profile?.academic_status) && (
+                  <ReadOnlyField label="Graduated" value={formatGraduation(profile?.graduation_date)} />
+                )}
               </div>
 
               <div className="ts-hairline my-5 h-px" />
@@ -429,7 +445,7 @@ export default function ProfilePage() {
 
             {/* Name and contact number */}
             <form onSubmit={handleProfileSubmit} className="ts-card mt-6 p-6 sm:p-8">
-              <h2 className="ts-ink text-base font-semibold">Your name and contact number</h2>
+              <h2 className="ts-ink text-base font-semibold">Your name, contact number and last semester</h2>
 
               <div className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2">
                 <div>
@@ -508,6 +524,39 @@ export default function ProfilePage() {
                     }`}
                   />
                   <FieldError id="contactNumber">{profileErrors.contact_number}</FieldError>
+                </div>
+
+                {/* Editable, unlike the records above: it moves on every term a student stays enrolled. */}
+                <div className="sm:col-span-2">
+                  <label htmlFor="lastSemester" className="ts-ink mb-1.5 block text-sm font-medium">
+                    Last Semester You Attended (e.g. &lsquo;{SEMESTER_EXAMPLE}&rsquo;)
+                  </label>
+                  <input
+                    id="lastSemester"
+                    type="text"
+                    value={lastSemester}
+                    onChange={(e) => {
+                      setLastSemester(e.target.value);
+                      clearProfileError('last_semester_attended');
+                    }}
+                    onBlur={() => {
+                      const { value } = checkSemester(lastSemester);
+                      if (value) setLastSemester(value);
+                    }}
+                    placeholder={SEMESTER_EXAMPLE}
+                    aria-invalid={Boolean(profileErrors.last_semester_attended)}
+                    aria-describedby={profileErrors.last_semester_attended ? 'lastSemester-error' : 'lastSemester-hint'}
+                    className={`ts-input w-full px-3.5 py-2.5 text-sm ${
+                      profileErrors.last_semester_attended ? 'ts-input-error' : ''
+                    }`}
+                  />
+                  {profileErrors.last_semester_attended ? (
+                    <FieldError id="lastSemester">{profileErrors.last_semester_attended}</FieldError>
+                  ) : (
+                    <p id="lastSemester-hint" className="ts-soft mt-1.5 text-xs">
+                      This helps Window 6 locate your records. Your next request starts with it filled in.
+                    </p>
+                  )}
                 </div>
               </div>
 

@@ -11,6 +11,7 @@ import {
 } from '../../components/ui/index.js';
 import { APP_CSS } from '../../styles/appCss.js';
 import { FONT_SANS, FONT_SERIF } from '../../styles/fonts.js';
+import { academicStatusLine } from '../../lib/academics.js';
 import { errorFromResponse, toApiError } from '../../lib/api.js';
 import { authFetch, clearSession, getAccessToken, getStoredUser, STAFF_LOGIN_PATH } from '../../lib/auth.js';
 import {
@@ -244,10 +245,10 @@ export default function ProcessingQueuePage() {
                   <p className="ts-ink truncate text-base font-medium">
                     {r.student_first_name} {r.student_last_name}
                   </p>
-                  {/* Wraps rather than truncating, which cut the year level off mid-word. */}
+                  {/* Wraps rather than truncating, which cut the academic status off mid-word. */}
                   <p className="ts-soft mt-0.5 text-sm">
                     {r.student_school_id_number} · {r.student_course}
-                    {r.student_year_level ? ` · ${r.student_year_level}` : ''}
+                    {r.student_academic_status?.length ? ` · ${academicStatusLine(r.student_academic_status)}` : ''}
                   </p>
                 </div>
 

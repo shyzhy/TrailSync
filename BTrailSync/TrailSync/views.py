@@ -51,6 +51,7 @@ from .serializers import (
     ONBOARDING_STEPS,
     ActivateAccountSerializer,
     ApproveLogSerializer,
+    ApproveRequestSerializer,
     ChangeEmailConfirmSerializer,
     ChangeEmailRequestSerializer,
     ChangePasswordSerializer,
@@ -421,8 +422,15 @@ class AccountSetupConfirmView(APIView):
         return Response({"detail": "Your account is ready.", "login": login_audience(user)})
 
 
-# What a filed request was made under; year level, academic level and graduation date stay editable.
-LOCKED_ACADEMIC_FIELDS = ("school_id_number", "course", "user_category")
+# What a filed request was made under; the last semester attended and graduation date stay editable.
+LOCKED_ACADEMIC_FIELDS = ("school_id_number", "course", "academic_status")
+
+
+def _comparable(field, value):
+    """A locked field's value as compared for changes: case-blind text, or the set of ticked statuses."""
+    if field == "academic_status":
+        return frozenset(value or ())
+    return str(value or "").strip().lower()
 
 
 class MeOnboardingView(APIView):
@@ -455,14 +463,14 @@ class MeOnboardingView(APIView):
                 field
                 for field in LOCKED_ACADEMIC_FIELDS
                 if getattr(profile, field)
-                and str(serializer.validated_data.get(field) or "").strip().lower()
-                != str(getattr(profile, field)).strip().lower()
+                and _comparable(field, serializer.validated_data.get(field))
+                != _comparable(field, getattr(profile, field))
             ]
             if changed:
                 return Response(
                     {
                         "detail": (
-                            "Your School ID number, course and category are already on file with "
+                            "Your School ID number, course and academic status are already on file with "
                             "a request. To change them, please ask at Window 6."
                         ),
                         "locked_fields": changed,
@@ -1066,16 +1074,24 @@ class RegistrarQueueApproveView(APIView):
         if form_request.blocked_by_clearance():
             return _blocked_by_clearance_response(form_request)
 
+        serializer = ApproveRequestSerializer(
+            data=request.data, context={"transaction_type": form_request.transaction_type}
+        )
+        serializer.is_valid(raise_exception=True)
+
         staff_profile = getattr(request.user, "staff_profile", None)
         form_request.request_status = FormRequest.RequestStatus.APPROVED
         form_request.registrar_approved_by = staff_profile
         form_request.registrar_approved_at = timezone.now()
+        # The page count is known only now, when the Registrar has pulled the record, so the fee is assessed here too.
+        form_request.page_count = serializer.validated_data["page_count"]
         form_request.amount_due = form_request.compute_amount_due()
         form_request.save(
             update_fields=[
                 "request_status",
                 "registrar_approved_by",
                 "registrar_approved_at",
+                "page_count",
                 "amount_due",
                 "updated_at",
             ]

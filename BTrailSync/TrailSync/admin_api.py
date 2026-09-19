@@ -1,6 +1,7 @@
 """The Admin portal's API: system-wide counts, a light activity feed, and account management."""
 import logging
 from datetime import datetime, time
+from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Count, Q
@@ -11,8 +12,9 @@ from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .academics import ordered_statuses
 from .account_links import send_account_setup_email
-from .models import FormRequest, Role, StaffProfile, User
+from .models import FormRequest, Role, StaffProfile, TransactionType, User
 from .views import FormRequestPagination
 
 logger = logging.getLogger(__name__)
@@ -149,9 +151,8 @@ class AdminAccountDetailView(APIView):
             data["student"] = {
                 "school_id_number": profile.school_id_number,
                 "course": profile.course,
-                "user_category": profile.user_category,
-                "academic_level": profile.academic_level,
-                "year_level": profile.year_level,
+                "academic_status": ordered_statuses(profile.academic_status),
+                "last_semester_attended": profile.last_semester_attended,
                 "graduation_date": profile.graduation_date,
                 "request_count": user.form_requests.count(),
                 "last_request_at": latest,
@@ -361,3 +362,71 @@ class AdminActivityView(APIView):
             )
         items.sort(key=lambda item: item["at"], reverse=True)
         return Response({"results": items[:8]})
+
+
+# Document types: what an admin updates when Window 6 announces a new fee, turnaround or a paused document.
+
+def _document_types():
+    # Requests the Registrar hasn't approved yet: the only ones a fee change will still reach.
+    awaiting = Q(form_requests__request_status__in=[FormRequest.RequestStatus.SUBMITTED, FormRequest.RequestStatus.VERIFIED])
+    return TransactionType.objects.annotate(awaiting_assessment=Count("form_requests", filter=awaiting)).order_by("name")
+
+
+class AdminDocumentTypeSerializer(serializers.ModelSerializer):
+    """One row of Manage Document Types. A null fee means "no published fee", which the Registrar assesses as none."""
+
+    fee_amount = serializers.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        min_value=Decimal("0"),
+        allow_null=True,
+        required=False,
+        error_messages={
+            "invalid": "Enter the fee as an amount, like 125.00.",
+            "min_value": "The fee can't be negative.",
+            "max_digits": "That fee is too large; check the amount.",
+            "max_whole_digits": "That fee is too large; check the amount.",
+            "max_decimal_places": "Use at most two decimal places (centavos).",
+        },
+    )
+    awaiting_assessment = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = TransactionType
+        fields = ["id", "name", "fee_amount", "pricing_unit", "processing_time", "is_available", "updated_at", "awaiting_assessment"]
+        read_only_fields = ["id", "name", "updated_at", "awaiting_assessment"]
+        extra_kwargs = {"pricing_unit": {"error_messages": {"invalid_choice": "Choose Flat or Per page."}}}
+
+    def validate_processing_time(self, value):
+        return (value or "").strip() or None
+
+
+class AdminDocumentTypeListView(generics.ListAPIView):
+    """GET /api/admin/document-types/ - every document with its fee, and how many requests still await assessment."""
+
+    permission_classes = [IsAdminAccount]
+    serializer_class = AdminDocumentTypeSerializer
+
+    def get_queryset(self):
+        return _document_types()
+
+
+class AdminDocumentTypeDetailView(APIView):
+    """PATCH /api/admin/document-types/<id>/ - fee, pricing unit, processing time or availability.
+
+    Applies from the next assessment: amount_due is stored on each request when the Registrar approves it and is never
+    recomputed, so requests already approved keep the fee they were given.
+    """
+
+    permission_classes = [IsAdminAccount]
+
+    def patch(self, request, pk):
+        document = get_object_or_404(_document_types(), pk=pk)
+        before = {field: getattr(document, field) for field in ("fee_amount", "pricing_unit", "processing_time", "is_available")}
+        serializer = AdminDocumentTypeSerializer(document, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        changes = {field: (old, getattr(document, field)) for field, old in before.items() if old != getattr(document, field)}
+        if changes:
+            logger.info("Admin %s updated document type %r: %s", request.user.email, document.name, changes)
+        return Response(AdminDocumentTypeSerializer(get_object_or_404(_document_types(), pk=pk)).data)

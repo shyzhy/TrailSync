@@ -71,6 +71,11 @@ export const ADMIN_CSS = `
     border-color: rgba(123,85,160,0.7);
     box-shadow: inset 0 2px 4px rgba(31,41,55,0.12), 0 0 0 3px rgba(155,109,201,0.42);
   }
+  .ts-admin .ts-switch-input:checked + .ts-switch-track {
+    background: linear-gradient(180deg, #7B55A0, #56367A);
+  }
+  .ts-admin .ts-switch-input:focus-visible + .ts-switch-track { box-shadow: 0 0 0 3px rgba(155,109,201,0.55); }
+  .ts-admin .ts-switch-input:disabled { cursor: progress; }
   .ts-admin .ts-date-badge {
     color: #4A2C5F;
     background: linear-gradient(180deg, rgba(201,167,235,0.34) 0%, rgba(155,109,201,0.14) 100%);

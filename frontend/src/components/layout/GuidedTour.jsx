@@ -20,6 +20,12 @@ const TOUR_STEPS = [
     body: 'See how far along each request is, and download your forms when they are ready.',
   },
   {
+    // The only way into notifications, so the tour points it out.
+    targets: ['[data-tour="bell"]'],
+    title: 'Updates come to the bell',
+    body: 'A red number here means news about a request. Tap the bell, then "View all notifications" to see every update.',
+  },
+  {
     targets: ['[data-tour="guide"]', '[data-tour="menu"]'],
     title: 'Not sure what you need?',
     body: 'The Credential Guide explains each document, what it is for, and what it costs.',

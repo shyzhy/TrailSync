@@ -8,6 +8,8 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from .academics import is_alumnus
+
 class Role(models.Model):
     class RoleName(models.TextChoices):
         STUDENT = "Student", "Student"
@@ -107,17 +109,10 @@ class UserProfile(models.Model):
     # Printed on the request form; nullable because older profiles were never asked.
     birth_date = models.DateField(null=True, blank=True)
 
-    # With user_category, reconstructs the form's Student/Alumnus checkbox; nullable because older profiles were never asked.
-    academic_level = models.CharField(
-        max_length=20,
-        choices=[
-            ("High School", "High School"),
-            ("Undergraduate", "Undergraduate"),
-            ("Graduate", "Graduate"),
-        ],
-        null=True,
-        blank=True,
-    )
+    # Every option in academics.ACADEMIC_STATUS_OPTIONS that applies; several can at once (an alumnus now in grad school).
+    academic_status = models.JSONField(default=list, blank=True)
+    # Typed by the student in academics.normalize_semester's format; it helps Window 6 find the records, nothing verifies it.
+    last_semester_attended = models.CharField(max_length=40, blank=True, null=True)
 
     # When the student finished or skipped the walkthrough; stored on the account so it isn't re-offered on every device.
     tour_completed_at = models.DateTimeField(null=True, blank=True)
@@ -132,26 +127,19 @@ class UserProfile(models.Model):
 
     course = models.CharField(max_length=150, blank=True, null=True)
     college = models.CharField(max_length=150, blank=True, null=True)
-    year_level = models.CharField(max_length=50, blank=True, null=True)
 
-    user_category = models.CharField(
-        max_length=50,
-        choices=[
-            ("Student", "Student"),
-            ("Alumni", "Alumni"),
-        ],
-        # Unknown until onboarding step 2.
-        null=True,
-        blank=True,
-    )
-    # Alumni give a graduation date instead of a year level.
+    # Required whenever academic_status includes an Alumnus option.
     graduation_date = models.DateField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.user.get_full_name()} - {self.user_category}"
+        return f"{self.user.get_full_name()} - {', '.join(self.academic_status or []) or 'no status yet'}"
+
+    @property
+    def is_alumnus(self):
+        return is_alumnus(self.academic_status)
 
     def onboarding_state(self):
         """Which onboarding steps are done, computed from the data so it can never disagree with it."""
@@ -161,12 +149,9 @@ class UserProfile(models.Model):
             2: bool(
                 self.school_id_number
                 and self.course
-                and self.user_category
-                and self.academic_level
-                and (
-                    (self.user_category == "Student" and self.year_level)
-                    or (self.user_category == "Alumni" and self.graduation_date)
-                )
+                and self.academic_status
+                and self.last_semester_attended
+                and (self.graduation_date or not self.is_alumnus)
             ),
             3: bool(self.birth_date and (user.contact_number or "").strip()),
         }
@@ -331,8 +316,11 @@ class FormRequest(models.Model):
         choices=RequestStatus.choices,
         default=RequestStatus.SUBMITTED,
     )
-    # True for alumni who graduated before 2018, derived from the graduation date they gave.
+    # True for college alumni (undergraduate or graduate) who graduated before 2018, from the date they gave.
     requires_archive_retrieval = models.BooleanField(default=False)
+
+    # Pages per copy, counted by the Registrar at approval for per-page documents; students can't know it. Null otherwise.
+    page_count = models.PositiveIntegerField(null=True, blank=True)
 
     # Null until processing completes; 0 would falsely read as "done instantly".
     processing_time_hours = models.PositiveIntegerField(null=True, blank=True)
@@ -387,29 +375,31 @@ class FormRequest(models.Model):
         return f"{self.request_code} - {self.user.email}"
 
     def compute_amount_due(self):
-        """What this request costs at the Cashier (base x pages x copies, plus rush and INC add-ons); None when the document has no published fee."""
+        """What this request costs at the Cashier (base x pages x copies, plus add-ons); None with no published fee, or a per-page document not yet counted."""
         fee = self.transaction_type.fee_amount
         if fee is None:
             return None
 
         form_data = self._submission_form_data()
-
-        def _positive_int(value):
-            try:
-                return max(1, int(value))
-            except (TypeError, ValueError):
-                # Both live in free-form form_data, so either can be missing or a string.
-                return 1
-
         base = fee
         if self.transaction_type.pricing_unit == "per_page":
-            base = fee * _positive_int(form_data.get("number_of_pages"))
+            if not self.page_count:
+                return None
+            base = fee * self.page_count
 
-        total = base * _positive_int(form_data.get("number_of_copies"))
+        try:
+            copies = max(1, int(form_data.get("number_of_copies")))
+        except (TypeError, ValueError):
+            # Lives in free-form form_data, so it can be missing or a string.
+            copies = 1
+        return base * copies + self.fee_add_ons()
 
+    def fee_add_ons(self):
+        """The rush and Completion-of-INC fees this request carries on top of the document fee."""
+        total = Decimal("0.00")
         if self.is_rush:
             total += RUSH_FEE
-        if form_data.get("purpose") == FormSubmission.Purpose.COMPLETION_OF_INC:
+        if self._submission_form_data().get("purpose") == FormSubmission.Purpose.COMPLETION_OF_INC:
             total += COMPLETION_OF_INC_FEE
         return total
 
@@ -437,7 +427,7 @@ class FormRequest(models.Model):
 
 
 class FormSubmission(models.Model):
-    """The student's answers for one request; form_data is JSON because the questions vary by document and user category."""
+    """The student's answers for one request; form_data is JSON because the questions vary by document and academic status."""
 
     class Purpose(models.TextChoices):
         """Part 3 of FM-USTP-RGTR-09, verbatim, because the PDF prints these strings back."""

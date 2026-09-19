@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   avatarUrlFor,
   BusyLabel,
@@ -12,7 +12,7 @@ import {
 import { AvatarPicker, AvatarStatus, useAvatarUpload } from '../../components/student/AvatarUploader.jsx';
 import { APP_CSS } from '../../styles/appCss.js';
 import { FONT_SANS, FONT_SERIF } from '../../styles/fonts.js';
-import { ACADEMIC_LEVELS, COURSES, USER_CATEGORIES, YEAR_LEVELS } from '../../lib/academics.js';
+import { ACADEMIC_STATUS_OPTIONS, checkSemester, COURSES, isAlumnus, SEMESTER_EXAMPLE } from '../../lib/academics.js';
 import { errorFromResponse, formErrors, toApiError } from '../../lib/api.js';
 import {
   authFetch,
@@ -120,9 +120,8 @@ export default function OnboardingPage() {
     lastName: '',
     schoolId: '',
     course: '',
-    userCategory: '',
-    academicLevel: '',
-    yearLevel: '',
+    academicStatus: [],
+    lastSemester: '',
     graduationDate: '',
     birthDate: '',
     contactNumber: '',
@@ -171,9 +170,8 @@ export default function OnboardingPage() {
           lastName: data.last_name || '',
           schoolId: p.school_id_number || '',
           course: p.course || '',
-          userCategory: p.user_category || '',
-          academicLevel: p.academic_level || '',
-          yearLevel: p.year_level || '',
+          academicStatus: p.academic_status || [],
+          lastSemester: p.last_semester_attended || '',
           graduationDate: p.graduation_date || '',
           birthDate: p.birth_date || '',
           contactNumber: data.contact_number || '',
@@ -197,7 +195,13 @@ export default function OnboardingPage() {
   }, []);
 
   const locked = Boolean(me?.profile?.onboarding?.academic_locked);
-  const levelOptions = useMemo(() => ACADEMIC_LEVELS[values.userCategory] || [], [values.userCategory]);
+  const alumnus = isAlumnus(values.academicStatus);
+  const toggleStatus = (value) =>
+    set('academicStatus')(
+      values.academicStatus.includes(value)
+        ? values.academicStatus.filter((s) => s !== value)
+        : [...values.academicStatus, value],
+    );
 
   const go = (n) => {
     setErrors({});
@@ -216,11 +220,11 @@ export default function OnboardingPage() {
     }
     if (n === 2) {
       if (!values.schoolId.trim()) e.schoolId = 'Please enter your School ID number.';
-      if (!values.userCategory) e.userCategory = 'Please choose Student or Alumni.';
+      if (values.academicStatus.length === 0) e.academicStatus = 'Please tick at least one that describes you.';
       if (!values.course) e.course = 'Please choose your course.';
-      if (!values.academicLevel) e.academicLevel = 'Please choose your academic level.';
-      if (values.userCategory === 'Student' && !values.yearLevel) e.yearLevel = 'Please choose your year level.';
-      if (values.userCategory === 'Alumni') {
+      const semester = checkSemester(values.lastSemester);
+      if (semester.error) e.lastSemester = semester.error;
+      if (alumnus) {
         if (!values.graduationDate) e.graduationDate = 'Please enter your graduation date.';
         else if (values.graduationDate > todayIso()) e.graduationDate = 'Your graduation date can’t be in the future.';
       }
@@ -244,10 +248,9 @@ export default function OnboardingPage() {
         step: 'academic',
         school_id_number: values.schoolId,
         course: values.course,
-        user_category: values.userCategory,
-        academic_level: values.academicLevel,
-        year_level: values.userCategory === 'Student' ? values.yearLevel : '',
-        graduation_date: values.userCategory === 'Alumni' ? values.graduationDate : null,
+        academic_status: values.academicStatus,
+        last_semester_attended: checkSemester(values.lastSemester).value ?? values.lastSemester,
+        graduation_date: alumnus ? values.graduationDate : null,
       };
     }
     return { step: 'contact', birth_date: values.birthDate, contact_number: values.contactNumber };
@@ -260,9 +263,8 @@ export default function OnboardingPage() {
     last_name: 'lastName',
     school_id_number: 'schoolId',
     course: 'course',
-    user_category: 'userCategory',
-    academic_level: 'academicLevel',
-    year_level: 'yearLevel',
+    academic_status: 'academicStatus',
+    last_semester_attended: 'lastSemester',
     graduation_date: 'graduationDate',
     birth_date: 'birthDate',
     contact_number: 'contactNumber',
@@ -417,8 +419,8 @@ export default function OnboardingPage() {
                   <>
                     {locked && (
                       <p className="ts-info-note px-4 py-3 text-sm leading-relaxed">
-                        Your School ID number, course and category are already on file with a request, so they
-                        can&rsquo;t be changed here. If something&rsquo;s wrong, ask at Window 6.
+                        Your School ID number, course and academic status are already on file with a request, so
+                        they can&rsquo;t be changed here. If something&rsquo;s wrong, ask at Window 6.
                       </p>
                     )}
 
@@ -441,31 +443,39 @@ export default function OnboardingPage() {
                       />
                     </Field>
 
-                    <fieldset>
-                      <legend className="ts-ink mb-1.5 block text-sm font-medium">Are you a student or alumni?</legend>
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        {USER_CATEGORIES.map((c) => {
-                          const on = values.userCategory === c.value;
+                    {/* A checklist like the printed form's, because several can be true at once. */}
+                    <fieldset aria-describedby={errors.academicStatus ? 'academicStatus-error' : undefined}>
+                      <legend className="ts-ink mb-1.5 block text-sm font-medium">
+                        Which of these describes you? <span className="ts-soft font-normal">(Select all that apply)</span>
+                      </legend>
+                      <div className={`ts-well space-y-3 px-3.5 py-3.5 ${errors.academicStatus ? 'ts-well-error' : ''}`}>
+                        {ACADEMIC_STATUS_OPTIONS.map(({ value, hint }) => {
+                          const checked = values.academicStatus.includes(value);
                           return (
-                            <button
-                              key={c.value}
-                              type="button"
-                              aria-pressed={on}
-                              disabled={locked && Boolean(me?.profile?.user_category)}
-                              onClick={() => {
-                                set('userCategory')(c.value);
-                                // Clear a level that doesn't exist for the new category.
-                                if (!ACADEMIC_LEVELS[c.value].includes(values.academicLevel)) set('academicLevel')('');
-                              }}
-                              className={`ts-select-card px-4 py-3.5 text-left disabled:opacity-70 ${on ? 'ts-select-card-selected' : ''}`}
-                            >
-                              <span className="ts-ink block text-base font-semibold">{c.label}</span>
-                              <span className="ts-soft mt-0.5 block text-sm">{c.hint}</span>
-                            </button>
+                            <label key={value} className="flex cursor-pointer select-none items-start gap-2.5 text-sm">
+                              <span className="ts-checkbox-wrap mt-0.5">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleStatus(value)}
+                                  disabled={locked && Boolean(me?.profile?.academic_status?.length)}
+                                  className="ts-checkbox-input"
+                                />
+                                <span className="ts-checkbox-well" aria-hidden="true">
+                                  <svg viewBox="0 0 12 10" fill="none" className="ts-checkbox-check">
+                                    <path d="M1 5.2 4.3 8.5 11 1.5" stroke="#FAF8F3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                </span>
+                              </span>
+                              <span>
+                                <span className="ts-ink block font-medium">{value}</span>
+                                <span className="ts-soft block text-xs">{hint}</span>
+                              </span>
+                            </label>
                           );
                         })}
                       </div>
-                      <FieldError id="userCategory">{errors.userCategory}</FieldError>
+                      <FieldError id="academicStatus">{errors.academicStatus}</FieldError>
                     </fieldset>
 
                     <Field id="course" label="Course" error={errors.course}>
@@ -487,51 +497,41 @@ export default function OnboardingPage() {
                       </Select>
                     </Field>
 
-                    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                      <Field id="academicLevel" label="Academic level" error={errors.academicLevel}>
-                        <Select
-                          id="academicLevel"
-                          value={values.academicLevel}
-                          onChange={set('academicLevel')}
-                          error={errors.academicLevel}
-                          disabled={!values.userCategory}
-                        >
-                          <option value="">{values.userCategory ? 'Choose a level' : 'Choose student or alumni first'}</option>
-                          {levelOptions.map((l) => (
-                            <option key={l} value={l}>
-                              {l}
-                            </option>
-                          ))}
-                        </Select>
+                    {/* Typed rather than picked: only the student knows it, and nothing here can look it up. */}
+                    <Field
+                      id="lastSemester"
+                      label={`Last Semester You Attended (e.g. '${SEMESTER_EXAMPLE}')`}
+                      error={errors.lastSemester}
+                      hint="This helps Window 6 locate your records. If you’re enrolled now, enter this semester."
+                    >
+                      <input
+                        id="lastSemester"
+                        value={values.lastSemester}
+                        onChange={set('lastSemester')}
+                        onBlur={() => {
+                          const { value } = checkSemester(values.lastSemester);
+                          if (value && value !== values.lastSemester) set('lastSemester')(value);
+                        }}
+                        aria-invalid={Boolean(errors.lastSemester)}
+                        aria-describedby={errors.lastSemester ? 'lastSemester-error' : 'lastSemester-hint'}
+                        className={`ts-input w-full px-3.5 py-2.5 text-sm ${errors.lastSemester ? 'ts-input-error' : ''}`}
+                        placeholder={SEMESTER_EXAMPLE}
+                      />
+                    </Field>
+
+                    {alumnus && (
+                      <Field id="graduationDate" label="Graduation date" error={errors.graduationDate}>
+                        <input
+                          id="graduationDate"
+                          type="date"
+                          max={todayIso()}
+                          value={values.graduationDate}
+                          onChange={set('graduationDate')}
+                          aria-invalid={Boolean(errors.graduationDate)}
+                          className={`ts-input w-full px-3.5 py-2.5 text-sm ${errors.graduationDate ? 'ts-input-error' : ''}`}
+                        />
                       </Field>
-
-                      {values.userCategory === 'Student' && (
-                        <Field id="yearLevel" label="Year level" error={errors.yearLevel}>
-                          <Select id="yearLevel" value={values.yearLevel} onChange={set('yearLevel')} error={errors.yearLevel}>
-                            <option value="">Choose your year</option>
-                            {YEAR_LEVELS.map((y) => (
-                              <option key={y} value={y}>
-                                {y}
-                              </option>
-                            ))}
-                          </Select>
-                        </Field>
-                      )}
-
-                      {values.userCategory === 'Alumni' && (
-                        <Field id="graduationDate" label="Graduation date" error={errors.graduationDate}>
-                          <input
-                            id="graduationDate"
-                            type="date"
-                            max={todayIso()}
-                            value={values.graduationDate}
-                            onChange={set('graduationDate')}
-                            aria-invalid={Boolean(errors.graduationDate)}
-                            className={`ts-input w-full px-3.5 py-2.5 text-sm ${errors.graduationDate ? 'ts-input-error' : ''}`}
-                          />
-                        </Field>
-                      )}
-                    </div>
+                    )}
                   </>
                 )}
 

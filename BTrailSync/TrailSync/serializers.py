@@ -8,8 +8,17 @@ from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 
+from .academics import (
+    ACADEMIC_STATUS_OPTIONS,
+    ARCHIVE_STATUSES,
+    is_alumnus,
+    is_student,
+    normalize_semester,
+    ordered_statuses,
+)
 from .models import (
     FormRequest,
     FormSubmission,
@@ -37,6 +46,14 @@ def absolute_media_url(file_field):
     return urljoin(settings.BACKEND_BASE_URL.rstrip("/") + "/", url.lstrip("/"))
 
 
+def _validated_semester(value):
+    """A last-semester answer in its canonical spelling, or the student-facing reason it isn't plausible."""
+    try:
+        return normalize_semester(value, today=timezone.localdate())
+    except ValueError as exc:
+        raise serializers.ValidationError(str(exc))
+
+
 def build_profile_payload(user):
     """The same profile shape LoginView returns, reused by /api/me/."""
     if hasattr(user, "user_profile"):
@@ -47,15 +64,14 @@ def build_profile_payload(user):
             "middle_name": p.middle_name,
             "last_name": user.last_name,
             "course": p.course,
-            "year_level": p.year_level,
-            "user_category": p.user_category,
+            "academic_status": ordered_statuses(p.academic_status),
+            "last_semester_attended": p.last_semester_attended,
             # Absolute; null means "no photo, show initials".
             "profile_picture_url": absolute_media_url(p.profile_picture),
             "tour_completed_at": p.tour_completed_at.isoformat() if p.tour_completed_at else None,
-            "academic_level": p.academic_level,
             "graduation_date": p.graduation_date.isoformat() if p.graduation_date else None,
             "birth_date": p.birth_date.isoformat() if p.birth_date else None,
-            # Computed on every read. academic_locked: once a request exists, ID, course and category change only at Window 6.
+            # Computed on every read. academic_locked: once a request exists, ID, course and academic status change only at Window 6.
             "onboarding": {
                 **{k: v for k, v in p.onboarding_state().items() if k != "steps_done"},
                 "academic_locked": user.form_requests.exists(),
@@ -120,6 +136,13 @@ class UpdateProfileSerializer(serializers.Serializer):
     middle_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     last_name = serializers.CharField(max_length=150)
     contact_number = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    # Changes every term for a continuing student, so unlike the academic records it stays editable. Omitted = unchanged.
+    last_semester_attended = serializers.CharField(
+        max_length=40, required=False, error_messages={"blank": "Please enter the last semester you attended."}
+    )
+
+    def validate_last_semester_attended(self, value):
+        return _validated_semester(value)
 
     @transaction.atomic
     def save(self, **kwargs):
@@ -134,7 +157,11 @@ class UpdateProfileSerializer(serializers.Serializer):
         profile = getattr(user, "user_profile", None)
         if profile is not None:
             profile.middle_name = (data.get("middle_name") or "").strip() or None
-            profile.save(update_fields=["middle_name"])
+            fields = ["middle_name"]
+            if "last_semester_attended" in data:
+                profile.last_semester_attended = data["last_semester_attended"]
+                fields.append("last_semester_attended")
+            profile.save(update_fields=fields)
 
         return user
 
@@ -196,10 +223,11 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
     """GET /api/form-requests/ row: what the Track Requests ticket needs. Read-only, and never exposes staff-only fields."""
 
     transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
+    # With amount_due still null, tells the ticket the fee waits on the Registrar's page count.
+    pricing_unit = serializers.CharField(source="transaction_type.pricing_unit", read_only=True)
     purpose = serializers.SerializerMethodField()
     purpose_other = serializers.SerializerMethodField()
     number_of_copies = serializers.SerializerMethodField()
-    number_of_pages = serializers.SerializerMethodField()
     semester = serializers.SerializerMethodField()
     additional_notes = serializers.SerializerMethodField()
     graduation_date = serializers.SerializerMethodField()
@@ -216,12 +244,14 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
             "request_code",
             "request_status",
             "transaction_type",
+            "pricing_unit",
             "created_at",
             "requires_archive_retrieval",
             "purpose",
             "purpose_other",
             "number_of_copies",
-            "number_of_pages",
+            # Read-only: set by the Registrar at approval, never by the student.
+            "page_count",
             "semester",
             "additional_notes",
             "graduation_date",
@@ -252,9 +282,6 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
 
     def get_number_of_copies(self, obj):
         return self._form_data(obj).get("number_of_copies")
-
-    def get_number_of_pages(self, obj):
-        return self._form_data(obj).get("number_of_pages")
 
     def get_semester(self, obj):
         return self._form_data(obj).get("semester")
@@ -425,7 +452,8 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
     student_last_name = serializers.CharField(source="user.last_name", read_only=True)
     student_school_id_number = serializers.SerializerMethodField()
     student_course = serializers.SerializerMethodField()
-    student_year_level = serializers.SerializerMethodField()
+    student_academic_status = serializers.SerializerMethodField()
+    graduation_date = serializers.SerializerMethodField()
     purpose = serializers.SerializerMethodField()
     purpose_other = serializers.SerializerMethodField()
     number_of_copies = serializers.SerializerMethodField()
@@ -437,7 +465,12 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
     verification_remarks = serializers.SerializerMethodField()
     proxy = serializers.SerializerMethodField()
     student_full_name = serializers.SerializerMethodField()
-    number_of_pages = serializers.SerializerMethodField()
+    # What the approval step needs to show fee x pages x copies + add-ons before it is committed.
+    pricing_unit = serializers.CharField(source="transaction_type.pricing_unit", read_only=True)
+    fee_amount = serializers.DecimalField(
+        source="transaction_type.fee_amount", max_digits=8, decimal_places=2, read_only=True
+    )
+    fee_add_ons = serializers.SerializerMethodField()
     submission_extras = serializers.SerializerMethodField()
     approved_by_name = serializers.SerializerMethodField()
     verified_by_name = serializers.SerializerMethodField()
@@ -455,11 +488,15 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
             "student_last_name",
             "student_school_id_number",
             "student_course",
-            "student_year_level",
+            "student_academic_status",
+            "graduation_date",
             "purpose",
             "purpose_other",
             "number_of_copies",
-            "number_of_pages",
+            "pricing_unit",
+            "fee_amount",
+            "fee_add_ons",
+            "page_count",
             "submission_extras",
             "semester",
             "additional_notes",
@@ -493,9 +530,19 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
         p = self._profile(obj)
         return p.course if p else None
 
-    def get_student_year_level(self, obj):
+    def get_student_academic_status(self, obj):
+        """As it stood when the request was filed, falling back to the profile for requests filed before it was recorded."""
+        filed = self._form_data(obj).get("academic_status")
+        if filed:
+            return ordered_statuses(filed)
         p = self._profile(obj)
-        return p.year_level if p else None
+        return ordered_statuses(p.academic_status) if p else []
+
+    def get_graduation_date(self, obj):
+        return self._form_data(obj).get("graduation_date") or None
+
+    def get_fee_add_ons(self, obj):
+        return f"{obj.fee_add_ons():.2f}"
 
     def _form_data(self, obj):
         submission = getattr(obj, "submission", None)
@@ -553,9 +600,6 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
             parts.append(p.middle_name)
         parts.append(obj.user.last_name or "")
         return " ".join(x for x in parts if x).strip() or obj.user.email
-
-    def get_number_of_pages(self, obj):
-        return self._form_data(obj).get("number_of_pages")
 
     def get_submission_extras(self, obj):
         """Conditional answers as a flat label/value list the review page can render as-is."""
@@ -634,6 +678,32 @@ class ReleaseRequestSerializer(serializers.Serializer):
 
 class VerifyRequestSerializer(serializers.Serializer):
     remarks = serializers.CharField(required=False, allow_blank=True)
+
+
+class ApproveRequestSerializer(serializers.Serializer):
+    """Registrar approval. page_count (pages per copy) is required for per-page documents and ignored for flat-fee ones."""
+
+    page_count = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        min_value=1,
+        max_value=999,
+        error_messages={
+            "invalid": "Enter the page count as a whole number.",
+            "min_value": "The page count has to be at least 1.",
+            "max_value": "Please check the page count; it looks too high.",
+        },
+    )
+
+    def validate(self, attrs):
+        if self.context["transaction_type"].pricing_unit == "per_page":
+            if not attrs.get("page_count"):
+                raise serializers.ValidationError(
+                    {"page_count": "Enter how many pages the record runs to; this document is charged per page."}
+                )
+        else:
+            attrs["page_count"] = None
+        return attrs
 
 
 class RejectRequestSerializer(serializers.Serializer):
@@ -850,7 +920,10 @@ class CreateFormRequestSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"detail": "Please finish setting up your profile before requesting a document."}
             )
-        is_alumni = profile.user_category == "Alumni"
+        statuses = ordered_statuses(profile.academic_status)
+        is_alumni = is_alumnus(statuses)
+        # The Registrar counts pages at approval; a student-supplied count is never stored.
+        form_data.pop("number_of_pages", None)
 
         purpose = (form_data.get("purpose") or "").strip()
         if not purpose:
@@ -867,20 +940,17 @@ class CreateFormRequestSerializer(serializers.Serializer):
         if copies < 1:
             errors.setdefault("form_data", {})["number_of_copies"] = "Enter at least 1 copy."
 
-        if not (form_data.get("semester") or "").strip():
-            errors.setdefault("form_data", {})["semester"] = "Please select a semester / academic year."
-
-        # Per-page documents need a page count, or the fee would silently price as one page.
-        transaction_type = attrs["transaction_type"]
-        if transaction_type.pricing_unit == "per_page":
+        # Printed on the form as the last semester attended; prefilled from the profile but answered per request.
+        semester = form_data.get("semester")
+        if not (isinstance(semester, str) and semester.strip()):
+            errors.setdefault("form_data", {})["semester"] = "Please enter the last semester you attended."
+        else:
             try:
-                pages = int(form_data.get("number_of_pages", 0))
-            except (TypeError, ValueError):
-                pages = 0
-            if pages < 1:
-                errors.setdefault("form_data", {})["number_of_pages"] = (
-                    f"{transaction_type.name} is charged per page. Enter the number of pages."
-                )
+                form_data["semester"] = _validated_semester(semester)
+            except serializers.ValidationError as exc:
+                errors.setdefault("form_data", {})["semester"] = exc.detail[0]
+
+        transaction_type = attrs["transaction_type"]
 
         # The one purpose with its own fee and its own two fields.
         if purpose == FormSubmission.Purpose.COMPLETION_OF_INC:
@@ -914,13 +984,17 @@ class CreateFormRequestSerializer(serializers.Serializer):
                     "One or more selected certification types are not recognised."
                 )
 
-        # Alumni only.
+        # Anyone with an Alumnus option; everyone else's form leaves the graduation line blank.
         graduation_date = None
         if is_alumni:
             raw_grad_date = (form_data.get("graduation_date") or "").strip()
             graduation_date = _parse_iso_date(raw_grad_date)
             if graduation_date is None:
                 errors.setdefault("form_data", {})["graduation_date"] = "Please enter your graduation date."
+            elif graduation_date > timezone.localdate():
+                errors.setdefault("form_data", {})["graduation_date"] = "Your graduation date can't be in the future."
+        else:
+            form_data.pop("graduation_date", None)
 
         # System-enforced, not a dismissible warning.
         if purpose == FormSubmission.Purpose.BOARD_EXAM and not attrs.get("board_exam_photo"):
@@ -953,8 +1027,10 @@ class CreateFormRequestSerializer(serializers.Serializer):
         if errors:
             raise serializers.ValidationError(errors)
 
-        attrs["_is_alumni"] = is_alumni
+        # Recorded with the request, so its printed form keeps the status it was filed under.
+        form_data["academic_status"] = statuses
         attrs["_graduation_date"] = graduation_date
+        attrs["_archive_status"] = any(s in ARCHIVE_STATUSES for s in statuses)
         return attrs
 
     @transaction.atomic
@@ -963,8 +1039,10 @@ class CreateFormRequestSerializer(serializers.Serializer):
         form_data = validated_data["form_data"]
         graduation_date = validated_data["_graduation_date"]
 
-        # Pre-2018 graduates may need records pulled from the archive.
-        requires_archive = bool(graduation_date and graduation_date < date(2018, 1, 1))
+        # Pre-2018 college records sit in the archive; a high school alumnus's don't, whatever the date.
+        requires_archive = bool(
+            validated_data["_archive_status"] and graduation_date and graduation_date < date(2018, 1, 1)
+        )
 
         form_request = FormRequest.objects.create(
             user=user,
@@ -1082,12 +1160,6 @@ class ResendActivationSerializer(serializers.Serializer):
 
 # Onboarding: one serializer per wizard step, saved as the student presses Continue.
 
-ACADEMIC_LEVELS_BY_CATEGORY = {
-    # A current student is Undergraduate or Graduate; an alumnus may also have finished at high school level.
-    "Student": {"Undergraduate", "Graduate"},
-    "Alumni": {"High School", "Undergraduate", "Graduate"},
-}
-
 
 class OnboardingNameSerializer(serializers.Serializer):
     first_name = serializers.CharField(
@@ -1113,15 +1185,20 @@ class OnboardingAcademicSerializer(serializers.Serializer):
         max_length=50, error_messages={"blank": "Please enter your School ID number."}
     )
     course = serializers.CharField(max_length=150, error_messages={"blank": "Please choose your course."})
-    user_category = serializers.ChoiceField(
-        choices=["Student", "Alumni"],
-        error_messages={"invalid_choice": "Please choose Student or Alumni."},
+    academic_status = serializers.ListField(
+        child=serializers.ChoiceField(
+            choices=ACADEMIC_STATUS_OPTIONS,
+            error_messages={"invalid_choice": "Please choose from the options listed."},
+        ),
+        allow_empty=False,
+        error_messages={
+            "empty": "Please tick at least one that describes you.",
+            "not_a_list": "Please tick at least one that describes you.",
+        },
     )
-    academic_level = serializers.ChoiceField(
-        choices=["High School", "Undergraduate", "Graduate"],
-        error_messages={"invalid_choice": "Please choose your academic level."},
+    last_semester_attended = serializers.CharField(
+        max_length=40, error_messages={"blank": "Please enter the last semester you attended."}
     )
-    year_level = serializers.CharField(max_length=50, required=False, allow_blank=True)
     graduation_date = serializers.DateField(
         required=False, allow_null=True, error_messages={"invalid": "Please enter a valid date."}
     )
@@ -1137,23 +1214,21 @@ class OnboardingAcademicSerializer(serializers.Serializer):
             )
         return value
 
+    def validate_academic_status(self, value):
+        return ordered_statuses(value)
+
+    def validate_last_semester_attended(self, value):
+        return _validated_semester(value)
+
     def validate(self, attrs):
-        category = attrs["user_category"]
-        if attrs["academic_level"] not in ACADEMIC_LEVELS_BY_CATEGORY[category]:
-            raise serializers.ValidationError(
-                {"academic_level": "High School only applies to alumni. Please choose another level."}
-            )
-        if category == "Student":
-            if not (attrs.get("year_level") or "").strip():
-                raise serializers.ValidationError({"year_level": "Please choose your year level."})
-            attrs["graduation_date"] = None
-        else:
+        if is_alumnus(attrs["academic_status"]):
             graduated = attrs.get("graduation_date")
             if not graduated:
                 raise serializers.ValidationError({"graduation_date": "Please enter your graduation date."})
-            if graduated > date.today():
+            if graduated > timezone.localdate():
                 raise serializers.ValidationError({"graduation_date": "Your graduation date can't be in the future."})
-            attrs["year_level"] = ""
+        else:
+            attrs["graduation_date"] = None
         return attrs
 
     @transaction.atomic
@@ -1162,18 +1237,18 @@ class OnboardingAcademicSerializer(serializers.Serializer):
         profile = user.user_profile
         profile.school_id_number = data["school_id_number"]
         profile.course = data["course"].strip()
-        profile.user_category = data["user_category"]
-        profile.academic_level = data["academic_level"]
-        profile.year_level = (data.get("year_level") or "").strip() or None
+        profile.academic_status = data["academic_status"]
+        profile.last_semester_attended = data["last_semester_attended"]
         profile.graduation_date = data.get("graduation_date")
         profile.save(
             update_fields=[
-                "school_id_number", "course", "user_category", "academic_level",
-                "year_level", "graduation_date", "updated_at",
+                "school_id_number", "course", "academic_status",
+                "last_semester_attended", "graduation_date", "updated_at",
             ]
         )
-        # The rest of the app routes on role, so it follows the chosen category.
-        role = Role.objects.filter(role_name=data["user_category"]).first()
+        # The app routes on role: anyone still enrolled is a Student, even an alumnus now in grad school.
+        role_name = Role.RoleName.STUDENT if is_student(data["academic_status"]) else Role.RoleName.ALUMNI
+        role = Role.objects.filter(role_name=role_name).first()
         if role and user.role_id != role.id:
             user.role = role
             user.save(update_fields=["role"])

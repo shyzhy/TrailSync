@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { CheckIcon, ChevronIcon, FieldError, HelpTip, UploadIcon } from '../../../components/ui/index.js';
 import { FONT_SERIF } from '../../../styles/fonts.js';
+import { SEMESTER_EXAMPLE } from '../../../lib/academics.js';
 import { CAV_AGENCIES, CERTIFICATION_SUBTYPES, formatFee, PURPOSE_OPTIONS } from './requestFormOptions.js';
 import { MissingHint, RequiredMark, SubmitProblems } from './RequestFormParts.jsx';
 
@@ -20,10 +22,10 @@ export default function DetailsStep({ form }) {
     isAlumni,
     isIncCompletion,
     isPerPage,
+    mayBeArchived,
     needsCavAgency,
     needsCertificationSubtypes,
     numberOfCopies,
-    numberOfPages,
     photoError,
     pickBoardExamPhoto,
     problemsFor,
@@ -32,7 +34,7 @@ export default function DetailsStep({ form }) {
     requestingAsLine,
     selectedType,
     semester,
-    semesterOptions,
+    semesterCheck,
     semesterTaken,
     setAdditionalNotes,
     setCavAgency,
@@ -40,7 +42,6 @@ export default function DetailsStep({ form }) {
     setGraduationDate,
     setGuideOpen,
     setNumberOfCopies,
-    setNumberOfPages,
     setPurpose,
     setPurposeOther,
     setSemester,
@@ -50,6 +51,9 @@ export default function DetailsStep({ form }) {
     step2Valid,
     subjectCode,
   } = form;
+  // A format problem shows once they leave the field, not while they're still typing.
+  const [semesterTouched, setSemesterTouched] = useState(false);
+  const semesterError = errorFor('semester') || (semesterTouched && semester.trim() ? semesterCheck.error : '');
 
   return (
     <>
@@ -335,67 +339,49 @@ export default function DetailsStep({ form }) {
             <p className="ts-soft mt-1.5 text-xs">How many separate copies you need.</p>
           </div>
 
-          {/* Per-page documents only: two copies of a ten-page transcript are charged for twenty pages. */}
-          {isPerPage && (
-            <div>
-              <label htmlFor="numberOfPages" className="ts-ink mb-1.5 block text-sm font-medium">
-                Number of pages
-                <RequiredMark />
-              </label>
-              <input
-                id="numberOfPages"
-                type="number"
-                min="1"
-                value={numberOfPages}
-                onChange={(e) => setNumberOfPages(e.target.value)}
-                placeholder="e.g. 4"
-                {...invalidProps('number_of_pages', 'numberOfPages')}
-                className={`ts-input w-full px-3.5 py-2.5 text-sm ${errorClass('number_of_pages')}`}
-              />
-              <FieldError id="numberOfPages">{errorFor('number_of_pages')}</FieldError>
-              <p className="ts-soft mt-1.5 text-xs">
-                {selectedType?.name} is charged per page
-                {selectedType?.fee_amount ? ` (₱${Number(selectedType.fee_amount).toFixed(2)} each)` : ''}.
-                Ask the registrar if you are unsure how many pages yours runs to.
-              </p>
-            </div>
-          )}
-
           <div>
             <div className="mb-1.5 flex items-center">
               <label htmlFor="semester" className="ts-ink text-sm font-medium">
-                Your latest semester at USTP
+                Last Semester You Attended
                 <RequiredMark />
               </label>
-              <HelpTip label="Which semester should I pick?">
-                The most recent semester you were enrolled in. It&rsquo;s printed on your official request
-                form.
+              <HelpTip label="Which semester should I write?">
+                The most recent semester you were enrolled in, like &lsquo;{SEMESTER_EXAMPLE}&rsquo;. It&rsquo;s
+                printed on your official request form and helps Window 6 locate your records.
               </HelpTip>
             </div>
-            <div className="relative">
-              <select
-                id="semester"
-                value={semester}
-                onChange={(e) => setSemester(e.target.value)}
-                {...invalidProps('semester', 'semester')}
-                className={`ts-input ts-select w-full px-3.5 py-2.5 pr-10 text-sm ${errorClass('semester')}`}
-              >
-                <option value="">Choose a semester</option>
-                {semesterOptions.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-              <span className="ts-soft pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">
-                <ChevronIcon />
-              </span>
-            </div>
-            <FieldError id="semester">{errorFor('semester')}</FieldError>
+            <input
+              id="semester"
+              type="text"
+              value={semester}
+              onChange={(e) => setSemester(e.target.value)}
+              onBlur={() => {
+                setSemesterTouched(true);
+                if (semesterCheck.value && semesterCheck.value !== semester) setSemester(semesterCheck.value);
+              }}
+              placeholder={`e.g. ${SEMESTER_EXAMPLE}`}
+              aria-invalid={Boolean(semesterError)}
+              aria-describedby={semesterError ? 'semester-error' : 'semester-hint'}
+              className={`ts-input w-full px-3.5 py-2.5 text-sm ${semesterError ? 'ts-input-error' : ''}`}
+            />
+            {semesterError ? (
+              <FieldError id="semester">{semesterError}</FieldError>
+            ) : (
+              <p id="semester-hint" className="ts-soft mt-1.5 text-xs">Filled in from your profile. Change it if it&rsquo;s out of date.</p>
+            )}
           </div>
         </div>
 
-        {/* Alumni only. */}
+        {/* Students can't know how long their own record runs, so the Registrar counts the pages instead. */}
+        {isPerPage && (
+          <div className="ts-info-note px-3.5 py-2.5 text-sm">
+            {selectedType?.name} is charged per page
+            {selectedType?.fee_amount ? ` (${formatFee(selectedType.fee_amount)} a page)` : ''}. You don&rsquo;t need to
+            count them: the Registrar does when they approve your request, and your amount to pay appears then.
+          </div>
+        )}
+
+        {/* Anyone who ticked an Alumnus option in their profile. */}
         {isAlumni && (
           <div>
             <label htmlFor="graduationDate" className="ts-ink mb-1.5 block text-sm font-medium">
@@ -411,8 +397,8 @@ export default function DetailsStep({ form }) {
               className={`ts-input w-full px-3.5 py-2.5 text-sm ${errorClass('graduation_date')}`}
             />
             <FieldError id="graduationDate">{errorFor('graduation_date')}</FieldError>
-            {/* Mirrors the server's pre-2018 archive rule, so the wait is explained up front. */}
-            {graduationDate && graduationDate < '2018-01-01' && (
+            {/* Mirrors the server's archive rule (college alumni before 2018), so the wait is explained up front. */}
+            {mayBeArchived && graduationDate && graduationDate < '2018-01-01' && (
               <div className="ts-info-note mt-2 flex items-start px-3.5 py-2.5 text-sm">
                 <span>
                   Records from before 2018 are kept in the university archive, so this request may take a

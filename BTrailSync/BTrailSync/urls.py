@@ -11,6 +11,8 @@ from TrailSync.admin_api import (
     AdminActivityView,
     AdminCreateRegistrarView,
     AdminDashboardSummaryView,
+    AdminDocumentTypeDetailView,
+    AdminDocumentTypeListView,
     AdminResendSetupView,
 )
 
@@ -62,6 +64,8 @@ urlpatterns = [
     path('api/admin/accounts/<int:pk>/', AdminAccountDetailView.as_view(), name='admin-account-detail'),
     path('api/admin/accounts/<int:pk>/status/', AdminAccountStatusView.as_view(), name='admin-account-status'),
     path('api/admin/accounts/<int:pk>/resend-setup/', AdminResendSetupView.as_view(), name='admin-account-resend-setup'),
+    path('api/admin/document-types/', AdminDocumentTypeListView.as_view(), name='admin-document-types'),
+    path('api/admin/document-types/<int:pk>/', AdminDocumentTypeDetailView.as_view(), name='admin-document-type-detail'),
     path('api/me/', MeView.as_view(), name='me'),
     path('api/me/avatar/', MeAvatarView.as_view(), name='me-avatar'),
     path('api/me/tour/', MeTourView.as_view(), name='me-tour'),

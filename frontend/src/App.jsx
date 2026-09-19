@@ -10,6 +10,7 @@ import ResetPasswordPage from './pages/auth/ResetPasswordPage.jsx';
 import StudentLoginPage from './pages/auth/StudentLoginPage.jsx';
 import LandingPage from './pages/LandingPage.jsx';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage.jsx';
+import DocumentTypesPage from './pages/admin/DocumentTypesPage.jsx';
 import ManageAccountsPage from './pages/admin/ManageAccountsPage.jsx';
 import ProcessingQueuePage from './pages/registrar/ProcessingQueuePage.jsx';
 import RegistrarDashboardPage from './pages/registrar/RegistrarDashboardPage.jsx';
@@ -33,6 +34,7 @@ export default function App() {
   if (pathname.startsWith('/admin/login')) return <Page><AdminLoginPage /></Page>;
   if (pathname.startsWith('/admin/dashboard')) return <Page><AdminDashboardPage /></Page>;
   if (pathname.startsWith('/admin/accounts')) return <Page><ManageAccountsPage /></Page>;
+  if (pathname.startsWith('/admin/document-types')) return <Page><DocumentTypesPage /></Page>;
   if (pathname.startsWith('/create-account')) return <Page><CreateAccountPage /></Page>;
   if (pathname.startsWith('/activate')) return <Page><ActivatePage /></Page>;
   // One pair of pages for both audiences; ?from= only picks the look and the back-to-login target.

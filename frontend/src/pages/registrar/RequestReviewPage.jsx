@@ -12,6 +12,7 @@ import {
 } from '../../components/ui/index.js';
 import { APP_CSS } from '../../styles/appCss.js';
 import { FONT_SANS, FONT_SERIF } from '../../styles/fonts.js';
+import { academicStatusLine } from '../../lib/academics.js';
 import { errorFromResponse, formErrors, toApiError } from '../../lib/api.js';
 import { authFetch, clearSession, getAccessToken, getStoredUser, STAFF_LOGIN_PATH } from '../../lib/auth.js';
 import { STAFF_NEXT_STEP, STATUS, statusLabel, statusPillClass } from '../../lib/requestStatus.js';
@@ -25,6 +26,27 @@ function formatAmount(value) {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
   return Number.isNaN(n) ? null : PESO.format(n);
+}
+
+// The amount approval will assess, worked out as the server does: fee x pages x copies, plus rush/INC add-ons.
+function previewFee(request, pageCount) {
+  if (request.fee_amount == null) return { none: true };
+  const perPage = request.pricing_unit === 'per_page';
+  const pages = Number(pageCount);
+  if (perPage && !(Number.isInteger(pages) && pages >= 1 && pages <= 999)) return { needsPages: true };
+  const copies = Math.max(1, Number(request.number_of_copies) || 1);
+  // In centavos, so floating-point dust never reaches an official amount.
+  const feeCents = Math.round(Number(request.fee_amount) * 100);
+  const addOnCents = Math.round(Number(request.fee_add_ons || 0) * 100);
+  const total = (feeCents * (perPage ? pages : 1) * copies + addOnCents) / 100;
+  const working = [
+    `${formatAmount(request.fee_amount)}${perPage ? ' a page' : ''}`,
+    perPage ? `${pages} page${pages === 1 ? '' : 's'}` : null,
+    `${copies} cop${copies === 1 ? 'y' : 'ies'}`,
+  ]
+    .filter(Boolean)
+    .join(' × ');
+  return { total: formatAmount(total), working: addOnCents ? `${working} + ${formatAmount(addOnCents / 100)} add-ons` : working };
 }
 
 function formatFileSize(bytes) {
@@ -126,6 +148,7 @@ export default function RequestReviewPage({ requestId }) {
   const [request, setRequest] = useState(null);
 
   const [remarks, setRemarks] = useState('');
+  const [pageCount, setPageCount] = useState('');
   const [orNumber, setOrNumber] = useState('');
   const [paymentDate, setPaymentDate] = useState(todayISO);
   const [releaseDate, setReleaseDate] = useState('');
@@ -204,6 +227,7 @@ export default function RequestReviewPage({ requestId }) {
         const apiError = toApiError(error);
         // Input-specific messages go under that input; the rest sit above the actions.
         const { general, ...fields } = formErrors(apiError, [
+          'page_count',
           'or_number',
           'payment_date',
           'release_date',
@@ -252,6 +276,8 @@ export default function RequestReviewPage({ requestId }) {
   }, [schedule]);
 
   const currentStatus = request?.request_status;
+  const perPage = request?.pricing_unit === 'per_page';
+  const fee = request ? previewFee(request, pageCount) : null;
 
   return (
     <div className="ts-app-shell lg:flex" style={FONT_SANS}>
@@ -358,7 +384,7 @@ export default function RequestReviewPage({ requestId }) {
                     <p className="ts-soft mt-0.5 text-sm">
                       ID: {request.student_school_id_number || '—'}
                       {request.student_course ? ` · ${request.student_course}` : ''}
-                      {request.student_year_level ? ` · ${request.student_year_level}` : ''}
+                      {request.student_academic_status?.length ? ` · ${academicStatusLine(request.student_academic_status)}` : ''}
                     </p>
                   </div>
 
@@ -367,16 +393,15 @@ export default function RequestReviewPage({ requestId }) {
                   <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
                     <Field label="Document">{request.transaction_type}</Field>
                     <Field label="Copies">{request.number_of_copies}</Field>
-                    {request.number_of_pages != null && (
-                      <Field label="Pages">{request.number_of_pages}</Field>
-                    )}
+                    {request.page_count != null && <Field label="Pages (per copy)">{request.page_count}</Field>}
                     {(request.submission_extras || []).map((extra) => (
                       <Field key={extra.label} label={extra.label}>{extra.value}</Field>
                     ))}
                     <Field label="Purpose">
                       {request.purpose === 'Others' ? request.purpose_other || 'Others' : request.purpose}
                     </Field>
-                    <Field label="Semester">{request.semester}</Field>
+                    <Field label="Last semester attended">{request.semester}</Field>
+                    {request.graduation_date && <Field label="Graduated">{formatDate(request.graduation_date)}</Field>}
                     {amountDue && <Field label="Amount to pay">{amountDue}</Field>}
                     {request.or_number && <Field label="O.R. number">{request.or_number}</Field>}
                     {request.payment_date && <Field label="Date paid">{formatDate(request.payment_date)}</Field>}
@@ -550,7 +575,11 @@ export default function RequestReviewPage({ requestId }) {
                   <ActionCard
                     step={2}
                     title="Registrar approval"
-                    description="Approving works out the fee and lets the student print their form to pay at the Cashier."
+                    description={
+                      perPage
+                        ? 'Count the pages of the record, then approve: that sets the fee and lets the student print their form to pay at the Cashier.'
+                        : 'Approving works out the fee and lets the student print their form to pay at the Cashier.'
+                    }
                   >
                     {request.verified_by_name && (
                       <div className="ts-well mb-4 px-3.5 py-2.5">
@@ -559,6 +588,53 @@ export default function RequestReviewPage({ requestId }) {
                         <p className="ts-soft text-xs">Front Desk</p>
                       </div>
                     )}
+                    {/* Per-page documents: only the Registrar, holding the record, can know how long it runs. */}
+                    {perPage && (
+                      <div className="mb-4">
+                        <label htmlFor="pageCount" className="ts-ink mb-1.5 block text-sm font-medium">
+                          Page count <span className="ts-soft font-normal">(pages per copy)</span>
+                        </label>
+                        <input
+                          id="pageCount"
+                          type="number"
+                          inputMode="numeric"
+                          min="1"
+                          max="999"
+                          step="1"
+                          value={pageCount}
+                          onChange={(e) => {
+                            setPageCount(e.target.value);
+                            setActionFieldErrors((prev) => (prev.page_count ? { ...prev, page_count: undefined } : prev));
+                          }}
+                          placeholder="e.g. 4"
+                          aria-invalid={Boolean(actionFieldErrors.page_count)}
+                          aria-describedby={actionFieldErrors.page_count ? 'pageCount-error' : 'pageCount-hint'}
+                          className={`ts-input w-full px-3.5 py-2.5 text-sm ${actionFieldErrors.page_count ? 'ts-input-error' : ''}`}
+                        />
+                        {actionFieldErrors.page_count ? (
+                          <FieldError id="pageCount">{actionFieldErrors.page_count}</FieldError>
+                        ) : (
+                          <p id="pageCount-hint" className="ts-soft mt-1.5 text-xs">
+                            {request.transaction_type} is charged per page. Count the pages of one copy of the record.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="ts-well mb-4 px-3.5 py-2.5">
+                      <p className="ts-review-label">Fee to be assessed</p>
+                      {fee.total ? (
+                        <>
+                          <p className="ts-ink mt-0.5 text-base font-semibold">{fee.total}</p>
+                          <p className="ts-soft text-xs">{fee.working}</p>
+                        </>
+                      ) : (
+                        <p className="ts-soft mt-0.5 text-sm">
+                          {fee.none ? 'This document has no set fee.' : 'Enter the page count to see the fee.'}
+                        </p>
+                      )}
+                    </div>
+
                     <label htmlFor="approvalRemarks" className="ts-ink mb-1.5 block text-sm font-medium">
                       Notes <span className="ts-soft font-normal">(needed only if you turn it down)</span>
                     </label>
@@ -585,13 +661,16 @@ export default function RequestReviewPage({ requestId }) {
                         onConfirm={() =>
                           runTransition('approve', `/api/registrar/queue/${request.id}/approve/`, {
                             method: 'POST',
+                            body: perPage ? { page_count: Number(pageCount) } : {},
                             successMessage: 'Approved. The student can now print and pay.',
                           })
                         }
                       >
                         <p>
-                          The fee is worked out and {request.student_full_name} can print their form and pay at the
-                          Cashier. This can&rsquo;t be undone.
+                          {fee.total ? `The fee is set at ${fee.total}` : 'The fee is worked out'}
+                          {perPage ? ` for ${pageCount} page${Number(pageCount) === 1 ? '' : 's'} per copy` : ''}, and{' '}
+                          {request.student_full_name} can print their form and pay at the Cashier. This can&rsquo;t be
+                          undone.
                         </p>
                       </ConfirmStep>
                     ) : confirming === 'reject' ? (
@@ -618,12 +697,15 @@ export default function RequestReviewPage({ requestId }) {
                       <div className="mt-5 flex flex-col gap-2.5">
                         <button
                           type="button"
-                          disabled={busy}
+                          disabled={busy || Boolean(fee.needsPages)}
                           onClick={() => setConfirming('approve')}
                           className="ts-btn-primary flex items-center justify-center gap-2 py-3 text-sm font-medium"
                         >
                           Approve and set the fee
                         </button>
+                        {fee.needsPages && (
+                          <p className="ts-soft text-center text-sm">Enter the page count above to approve.</p>
+                        )}
                         <button
                           type="button"
                           disabled={busy || !remarks.trim()}

@@ -87,25 +87,6 @@ export function formatFee(amount) {
   return Number.isFinite(n) ? `₱${n.toFixed(2)}` : null;
 }
 
-// Recent semesters generated from today's date: the current term and the three before it, newest first.
-export function getSemesterOptions() {
-  const now = new Date();
-  let year = now.getFullYear();
-  let term = now.getMonth() + 1 >= 8 ? 1 : now.getMonth() + 1 <= 5 ? 2 : 3; // 1 = 1st sem, 2 = 2nd sem, 3 = summer
-  const options = [];
-  for (let i = 0; i < 4; i++) {
-    if (term === 1) options.push(`1st Semester, SY ${year}-${year + 1}`);
-    else if (term === 2) options.push(`2nd Semester, SY ${year - 1}-${year}`);
-    else options.push(`Summer, SY ${year - 1}-${year}`);
-    term -= 1;
-    if (term === 0) {
-      term = 3;
-      year -= 1;
-    }
-  }
-  return options;
-}
-
 // Mirrors the server's check_upload for the 2x2 photo, so a wrong file is caught when picked.
 export const BOARD_EXAM_PHOTO_TYPES = ['image/jpeg', 'image/png'];
 export const BOARD_EXAM_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
@@ -124,7 +105,6 @@ export const INLINE_FIELDS = new Set([
   'cav_agency',
   'certification_subtypes',
   'number_of_copies',
-  'number_of_pages',
   'semester',
   'graduation_date',
   'proxy_full_name',

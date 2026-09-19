@@ -86,7 +86,7 @@ export default function StudentShell({
     <ShellContext.Provider value={{ unreadCount, setUnreadCount, startTour, refreshUnread, notify }}>
       <div className="ts-app-shell ts-student md:flex" style={FONT_SANS}>
         <style>{APP_CSS}</style>
-        <StudentSidebar active={active} onLogout={onLogout} me={me} unreadCount={unreadCount} />
+        <StudentSidebar active={active} onLogout={onLogout} me={me} />
         {/* ts-student-main pads the bottom so the fixed phone nav never covers the end of a page. */}
         <div className="ts-student-main flex min-w-0 flex-1 flex-col">
           <StudentTopBar title={title} unreadCount={unreadCount} setUnreadCount={setUnreadCount} notify={notify} />
@@ -95,7 +95,7 @@ export default function StudentShell({
           <div className="h-24" aria-hidden="true" />
         </div>
         <HelpButton onStartTour={startTour} />
-        <BottomNav active={active} me={me} unreadCount={unreadCount} onLogout={onLogout} />
+        <BottomNav active={active} me={me} onLogout={onLogout} />
         <Toast message={toast?.message} tone={toast?.tone} onDismiss={() => setToast(null)} />
         {tourOpen && <GuidedTour onClose={finishTour} />}
       </div>

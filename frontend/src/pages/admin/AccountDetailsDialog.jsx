@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BusyLabel, ErrorState, Modal, Skeleton, SkeletonGroup } from '../../components/ui/index.js';
 import { FONT_SERIF } from '../../styles/fonts.js';
+import { academicStatusLine, isAlumnus } from '../../lib/academics.js';
 import { errorFromResponse, toApiError } from '../../lib/api.js';
 import { authFetch } from '../../lib/auth.js';
 import { formatDate, formatDateTime, ROLE_TAG, STATE_PILL } from './accountDisplay.js';
 
-function Row({ label, children }) {
+function Row({ label, children, className }) {
   return (
-    <div>
+    <div className={className}>
       <dt className="ts-review-label">{label}</dt>
       <dd className="ts-review-value break-words">{children || '—'}</dd>
     </div>
@@ -118,13 +119,11 @@ export default function AccountDetailsDialog({ accountId, onClose, onChangeStatu
               <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
                 <Row label="School ID number">{student.school_id_number}</Row>
                 <Row label="Course">{student.course}</Row>
-                <Row label="Student or alumnus">{student.user_category}</Row>
-                <Row label="Academic level">{student.academic_level}</Row>
-                {student.user_category === 'Alumni' ? (
-                  <Row label="Graduated">{formatDate(student.graduation_date)}</Row>
-                ) : (
-                  <Row label="Year level">{student.year_level}</Row>
-                )}
+                <Row label="Academic status" className="sm:col-span-2">
+                  {academicStatusLine(student.academic_status)}
+                </Row>
+                <Row label="Last semester attended">{student.last_semester_attended}</Row>
+                {isAlumnus(student.academic_status) && <Row label="Graduated">{formatDate(student.graduation_date)}</Row>}
                 <Row label="Requests">
                   {student.request_count}
                   {student.last_request_at ? ` · latest ${formatDate(student.last_request_at)}` : ''}

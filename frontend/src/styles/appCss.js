@@ -163,6 +163,11 @@ export const APP_CSS = `
     border: 1px solid rgba(227,223,210,0.9);
     box-shadow: inset 0 2px 5px rgba(31,41,55,0.07), inset 0 -1px 0 rgba(255,255,255,0.7);
   }
+  /* A checklist with a problem, matching .ts-input-error. */
+  .ts-well-error {
+    border-color: rgba(185,28,28,0.5);
+    box-shadow: inset 0 2px 4px rgba(185,28,28,0.14), inset 0 -1px 0 rgba(255,255,255,0.7);
+  }
 
   /* Ready to Print: blue, the one stage waiting on the student. */
   .ts-pill-blue {
@@ -312,16 +317,7 @@ export const APP_CSS = `
     backdrop-filter: blur(2px);
   }
 
-  /* Nav extras: unread count and the "not built yet" item */
-  .ts-nav-count {
-    margin-left: auto;
-    min-width: 20px; height: 20px; padding: 0 6px;
-    border-radius: 999px;
-    display: inline-flex; align-items: center; justify-content: center;
-    font-size: 11px; font-weight: 700; color: #fff;
-    background: #B91C1C;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.25);
-  }
+  /* Nav extra: the "not built yet" item */
   .ts-nav-item-soon { cursor: default; opacity: 0.55; }
   .ts-nav-item-soon:hover { background: transparent; }
   .ts-nav-soon {
@@ -483,16 +479,6 @@ export const APP_CSS = `
     background: linear-gradient(90deg, #E4B45C, #B8872B);
   }
   .ts-bottom-nav-item:focus-visible { outline: none; box-shadow: inset 0 0 0 3px rgba(184,135,43,0.65); }
-  .ts-bottom-nav-count {
-    position: absolute;
-    top: 4px; left: 50%; margin-left: 4px;
-    min-width: 17px; height: 17px; padding: 0 4px;
-    border-radius: 999px;
-    display: inline-flex; align-items: center; justify-content: center;
-    font-size: 10px; font-weight: 700; color: #fff;
-    background: #B91C1C;
-    border: 2px solid #24406B;
-  }
   @media (min-width: 768px) { .ts-bottom-nav { display: none; } }
 
   /* Nothing at the end of a page should hide behind the fixed bar. */
@@ -677,6 +663,8 @@ export const APP_CSS = `
   .ts-switch-thumb {
     position: absolute;
     top: 3px; left: 3px;
+    /* Clicks pass through to the checkbox underneath, or tapping the knob itself would do nothing. */
+    pointer-events: none;
     width: 20px; height: 20px;
     border-radius: 999px;
     background: linear-gradient(180deg, #FFFFFF, #F1EEE6);

@@ -1,14 +1,15 @@
 import { useCallback, useRef, useState } from 'react';
 import { useDismiss } from './useDismiss.js';
-import { Avatar, CloseIcon, GridIcon, LogoutIcon, MenuIcon, Toast, UsersIcon } from '../ui/index.js';
+import { Avatar, CloseIcon, DocumentIcon, GridIcon, LogoutIcon, MenuIcon, Toast, UsersIcon } from '../ui/index.js';
 import { ADMIN_CSS } from '../../styles/adminCss.js';
 import { APP_CSS } from '../../styles/appCss.js';
 import { FONT_SANS, FONT_SERIF } from '../../styles/fonts.js';
 
-// Deliberately two items: this portal only oversees accounts, the Registrar's work stays on the staff side.
+// Kept short: this portal oversees accounts and the document catalogue; the Registrar's work stays on the staff side.
 const ADMIN_NAV_ITEMS = [
   { key: 'dashboard', href: '/admin/dashboard', label: 'Dashboard', Icon: GridIcon },
   { key: 'accounts', href: '/admin/accounts', label: 'Manage Accounts', Icon: UsersIcon },
+  { key: 'documents', href: '/admin/document-types', label: 'Document Types', Icon: DocumentIcon },
 ];
 
 function AdminSidebar({ active, me, onLogout }) {

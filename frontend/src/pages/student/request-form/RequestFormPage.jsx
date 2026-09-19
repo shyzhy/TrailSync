@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import StudentShell from '../../../components/layout/StudentShell.jsx';
 import { ErrorState, SuccessSeal } from '../../../components/ui/index.js';
 import { FONT_SERIF } from '../../../styles/fonts.js';
+import { academicStatusLine, checkSemester, hasCollegeAlumnus, isAlumnus } from '../../../lib/academics.js';
 import { errorFromResponse, toApiError } from '../../../lib/api.js';
 import {
   authFetch,
@@ -17,7 +18,6 @@ import PickupStep from './PickupStep.jsx';
 import {
   BOARD_EXAM_PHOTO_MAX_BYTES,
   BOARD_EXAM_PHOTO_TYPES,
-  getSemesterOptions,
   INLINE_FIELDS,
   stepForField,
 } from './requestFormOptions.js';
@@ -42,7 +42,6 @@ export default function RequestFormPage() {
   const [purpose, setPurpose] = useState('');
   const [purposeOther, setPurposeOther] = useState('');
   const [numberOfCopies, setNumberOfCopies] = useState(1);
-  const [numberOfPages, setNumberOfPages] = useState('');
   const [cavAgency, setCavAgency] = useState('');
   const [certificationSubtypes, setCertificationSubtypes] = useState([]);
   const [semesterTaken, setSemesterTaken] = useState('');
@@ -70,8 +69,6 @@ export default function RequestFormPage() {
   // Server errors with the answers they were about: a message stays on a field only until that answer changes.
   const [serverErrors, setServerErrors] = useState({ messages: {}, answers: {} });
 
-  const semesterOptions = useMemo(() => getSemesterOptions(), []);
-
   const load = useCallback(async () => {
     setStatus('loading');
     setLoadError(null);
@@ -83,6 +80,9 @@ export default function RequestFormPage() {
       const [meData, typesData] = await Promise.all([meRes.json(), typesRes.json()]);
       setMe(meData);
       setTransactionTypes(typesData);
+      // Start from the profile; the student can still correct them for this request.
+      setSemester((prev) => prev || meData.profile?.last_semester_attended || '');
+      setGraduationDate((prev) => prev || meData.profile?.graduation_date || '');
 
       // A deep link pre-selects the document and skips to Step 2, but only for a type that exists and is available.
       const deepLinkId = new URLSearchParams(window.location.search).get('transaction_type');
@@ -115,11 +115,17 @@ export default function RequestFormPage() {
   };
 
   const profile = me?.profile;
-  const isAlumni = profile?.user_category === 'Alumni';
+  const isAlumni = isAlumnus(profile?.academic_status);
+  const mayBeArchived = hasCollegeAlumnus(profile?.academic_status);
   const selectedType = transactionTypes.find((t) => String(t.id) === String(transactionTypeId));
-  const requestingAsLine = [me?.first_name && me?.last_name ? `${me.first_name} ${me.last_name}` : null, profile?.course, profile?.user_category === 'Student' ? profile?.year_level : null]
+  const requestingAsLine = [
+    me?.first_name && me?.last_name ? `${me.first_name} ${me.last_name}` : null,
+    profile?.course,
+    academicStatusLine(profile?.academic_status),
+  ]
     .filter(Boolean)
     .join(' · ');
+  const semesterCheck = checkSemester(semester);
 
   // What the chosen document implies: per-page pricing and its own sub-selections.
   const isPerPage = selectedType?.pricing_unit === 'per_page';
@@ -136,10 +142,10 @@ export default function RequestFormPage() {
     needsCavAgency && !cavAgency && 'the agency',
     needsCertificationSubtypes && certificationSubtypes.length === 0 && 'what the certification should say',
     !(Number(numberOfCopies) >= 1) && 'how many copies',
-    !semester && 'the semester',
+    !semester.trim() && 'the last semester you attended',
+    semester.trim() && semesterCheck.error && 'the last semester, written like the example',
     isAlumni && !graduationDate && 'your graduation date',
     purpose === 'For Board Exam' && !boardExamPhoto && 'your 2x2 photo',
-    isPerPage && !(Number(numberOfPages) >= 1) && 'the number of pages',
     isIncCompletion && !semesterTaken.trim() && 'the semester you took the subject',
     isIncCompletion && !subjectCode.trim() && 'the subject code',
   ].filter(Boolean);
@@ -156,7 +162,6 @@ export default function RequestFormPage() {
     purpose,
     purpose_other: purposeOther,
     number_of_copies: String(numberOfCopies),
-    number_of_pages: String(numberOfPages),
     semester,
     graduation_date: graduationDate,
     board_exam_photo: boardExamPhoto,
@@ -241,12 +246,11 @@ export default function RequestFormPage() {
         purpose,
         purpose_other: purpose === 'Others' ? purposeOther.trim() : '',
         number_of_copies: Number(numberOfCopies),
-        semester,
+        semester: semesterCheck.value ?? semester.trim(),
         additional_notes: additionalNotes.trim(),
       };
       if (isAlumni) formData.graduation_date = graduationDate;
-      // Only sent when the document or purpose asks for it.
-      if (isPerPage) formData.number_of_pages = Number(numberOfPages);
+      // Only sent when the document or purpose asks for it; page counts are the Registrar's, never sent.
       if (needsCavAgency) formData.cav_agency = cavAgency;
       if (needsCertificationSubtypes) formData.certification_subtypes = certificationSubtypes;
       if (isIncCompletion) {
@@ -315,10 +319,10 @@ export default function RequestFormPage() {
     isAlumni,
     isIncCompletion,
     isPerPage,
+    mayBeArchived,
     needsCavAgency,
     needsCertificationSubtypes,
     numberOfCopies,
-    numberOfPages,
     photoError,
     pickBoardExamPhoto,
     problemsFor,
@@ -331,7 +335,7 @@ export default function RequestFormPage() {
     requestingAsLine,
     selectedType,
     semester,
-    semesterOptions,
+    semesterCheck,
     semesterTaken,
     setAdditionalNotes,
     setCavAgency,
@@ -340,7 +344,6 @@ export default function RequestFormPage() {
     setGraduationDate,
     setGuideOpen,
     setNumberOfCopies,
-    setNumberOfPages,
     setProxyContactNumber,
     setProxyEnabled,
     setProxyFullName,

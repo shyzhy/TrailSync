@@ -16,6 +16,7 @@ import {
 } from '../../components/ui/index.js';
 import MiniCalendar from '../../components/student/MiniCalendar.jsx';
 import { FONT_SERIF } from '../../styles/fonts.js';
+import { academicStatusLine } from '../../lib/academics.js';
 import { errorFromResponse, toApiError } from '../../lib/api.js';
 import {
   authFetch,
@@ -105,9 +106,7 @@ export default function StudentDashboard() {
   };
 
   const profile = me?.profile;
-  const subtitleParts = [profile?.course, profile?.user_category === 'Student' ? profile?.year_level : null].filter(
-    Boolean
-  );
+  const subtitleParts = [profile?.course, academicStatusLine(profile?.academic_status)].filter(Boolean);
 
   return (
     <StudentShell active="home" title="Home" me={me} onLogout={handleLogout} onMeChange={setMe} offerTour={status === 'ready'}>

@@ -12,6 +12,7 @@ from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen import canvas as pdfcanvas
 
+from .academics import is_alumnus, is_student
 from .models import COMPLETION_OF_INC_FEE, RUSH_FEE
 from .receipts import EM_DASH, MIDDOT, _fit, _fonts, _local, _student_name, format_money
 
@@ -214,16 +215,18 @@ def build_official_form_pdf(form_request) -> bytes:
         fonts,
     )
 
-    # Only Student vs Alumnus is ticked; academic level isn't encoded by the boxes.
-    if profile is not None:
-        box = CLASSIFICATION_BOXES.get("Alumnus" if profile.user_category == "Alumni" else "Student")
-        _tick(c, box, fonts)
+    # The two lines are independent on the paper form too: an alumnus now in grad school ticks both.
+    statuses = data.get("academic_status") or (profile.academic_status if profile else [])
+    if is_student(statuses):
+        _tick(c, CLASSIFICATION_BOXES["Student"], fonts)
+    if is_alumnus(statuses):
+        _tick(c, CLASSIFICATION_BOXES["Alumnus"], fonts)
 
     # Part 1
     _text(c, "contact_number", user.contact_number, fonts)
     _text(c, "graduation_date", data.get("graduation_date"), fonts)
-    # The form asks graduates for a graduation date and everyone else for their last semester.
-    if not data.get("graduation_date"):
+    # Graduates give a graduation date; anyone still enrolled, or without one, also gives their last semester.
+    if is_student(statuses) or not data.get("graduation_date"):
         _text(c, "last_semester_attended", data.get("semester"), fonts)
 
     # Answered from the student's own history, deliberately not from duplicate_flag.
@@ -295,6 +298,18 @@ def build_official_form_pdf(form_request) -> bytes:
     if form_request.amount_due is not None:
         total = format_money(form_request.amount_due)
         extras = []
+        # The paper form has no pages box, so the Registrar's count is shown with the amount it produced. The rate is
+        # worked back from the stored amount, because the admin may have changed the fee since it was assessed.
+        if form_request.page_count:
+            try:
+                copies = max(1, int(data.get("number_of_copies")))
+            except (TypeError, ValueError):
+                copies = 1
+            rate = (form_request.amount_due - form_request.fee_add_ons()) / (form_request.page_count * copies)
+            extras.append(
+                f"{form_request.page_count} page{'s' if form_request.page_count != 1 else ''} x {copies} "
+                f"cop{'ies' if copies != 1 else 'y'} at {format_money(rate)}/page"
+            )
         if form_request.is_rush:
             extras.append(f"incl. rush {format_money(RUSH_FEE)}")
         if purpose == "For Completion of INC":

@@ -1,6 +1,5 @@
 import {
   Avatar,
-  BellIcon,
   BookIcon,
   ChatIcon,
   HomeIcon,
@@ -10,20 +9,20 @@ import {
 } from '../ui/index.js';
 import { FONT_SERIF } from '../../styles/fonts.js';
 
-// Student navigation items; Ask TrailSync is a placeholder until that page exists.
+// Student navigation items; Ask TrailSync is a placeholder until that page exists. Notifications has no item: the
+// header bell (with its unread badge and "View all notifications" link) is the one way in.
 
 export const NAV_ITEMS = [
   { key: 'home', href: '/portal', label: 'Home', Icon: HomeIcon },
   { key: 'request', href: '/request-form', label: 'Request a document', Icon: PlusCircleIcon },
   { key: 'track', href: '/track-requests', label: 'Track my requests', Icon: TicketIcon },
-  { key: 'notifications', href: '/notifications', label: 'Notifications', Icon: BellIcon },
   { key: 'guide', href: '/credential-guide', label: 'Credential Guide', Icon: BookIcon },
   // A labelled, non-navigating item: a menu link that does nothing reads as the app being broken.
   { key: 'ask', href: null, label: 'Ask TrailSync', Icon: ChatIcon, soon: true },
 ];
 
 // `me` is optional: without it the sidebar renders without the profile footer.
-export function StudentSidebar({ active, onLogout, me, unreadCount = 0 }) {
+export function StudentSidebar({ active, onLogout, me }) {
   const profile = me?.profile;
   const idLine = [profile?.school_id_number, profile?.course].filter(Boolean).join(' · ');
 
@@ -65,11 +64,6 @@ export function StudentSidebar({ active, onLogout, me, unreadCount = 0 }) {
               <Icon />
               {/* The label stays the accessible name when it is visually hidden on a tablet. */}
               <span className="sr-only lg:not-sr-only">{label}</span>
-              {key === 'notifications' && unreadCount > 0 && (
-                <span className="ts-nav-count" aria-label={`${unreadCount} unread`}>
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </span>
-              )}
             </a>
           ),
         )}
