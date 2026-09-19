@@ -5,7 +5,10 @@ from decimal import Decimal
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
 from django.conf import settings
+from django.core.files.storage import FileSystemStorage
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.utils import timezone
 
 from .academics import is_alumnus
@@ -215,6 +218,9 @@ class TransactionType(models.Model):
     """A requestable document; the single admin-editable source for its requirements, fee and processing time."""
 
     name = models.CharField(max_length=150, unique=True)
+    # What code refers to a document by (the official form's Part 2 lines, for one), so rewording the display name
+    # can't break the link. Set by migration for the documents the paper form lists; null for any other.
+    code = models.SlugField(max_length=50, unique=True, null=True, blank=True, editable=False)
     description = models.TextField(blank=True, null=True)
     # Lets the Registrar pause a document without deleting it; the server refuses new requests for it.
     is_available = models.BooleanField(default=True)
@@ -446,8 +452,8 @@ class FormRequest(models.Model):
         return None
 
     def receipt_available(self):
-        """True only at Approved - Ready to Print; the print-and-pay form stops once payment is logged."""
-        return self.request_status == self.RequestStatus.APPROVED
+        """The official form: drawn fresh at Approved - Ready to Print, then the archived copy once payment is logged."""
+        return self.request_status == self.RequestStatus.APPROVED or self.price_locked()
 
     def can_cancel(self):
         """Only before payment is logged: after that, undoing it is a refund conversation with staff, not a button."""
@@ -465,6 +471,11 @@ class FormRequest(models.Model):
 CANCELLABLE_STATUSES = frozenset(
     {FormRequest.RequestStatus.SUBMITTED, FormRequest.RequestStatus.VERIFIED, FormRequest.RequestStatus.APPROVED}
 )
+
+
+def private_storage():
+    """Kept off MEDIA_ROOT, which DEBUG serves by URL: these files only leave through a view that checks who is asking."""
+    return FileSystemStorage(location=settings.PRIVATE_FILES_ROOT)
 
 
 class FormSubmission(models.Model):
@@ -492,6 +503,11 @@ class FormSubmission(models.Model):
     form_data = models.JSONField(default=dict, blank=True)
     # Required when the purpose is Board Exam (enforced in the serializer).
     board_exam_photo = models.FileField(upload_to="board_exam_photos/%Y/%m/", null=True, blank=True)
+    # The official form as it stood when the payment was logged: a record, written once at payment. Downloads are drawn
+    # fresh instead (Part 2's price list must stay current), so this is never served and can't go stale on anyone.
+    generated_pdf_path = models.FileField(
+        storage=private_storage, upload_to="official_forms/%Y/%m/", max_length=255, null=True, blank=True
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -696,3 +712,10 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.notification_type} -> {self.user.email}"
+
+
+@receiver(post_delete, sender=FormSubmission)
+def _delete_archived_form(sender, instance, **kwargs):
+    # The archive holds personal data, so it goes with its request instead of lingering on disk.
+    if instance.generated_pdf_path:
+        instance.generated_pdf_path.delete(save=False)

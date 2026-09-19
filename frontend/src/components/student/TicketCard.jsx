@@ -299,17 +299,20 @@ export default function TicketCard({ request, expanded, onToggle, onChanged }) {
               )}
             </div>
 
-            {/* Only one is ever live: the print-and-pay form stops the moment payment is logged, which is when the claim stub starts. */}
+            {/* Before payment this is the print-and-pay form, drawn at today's fee. After, it's the paid copy kept on
+                record, and the claim stub below is what the student brings, so the form steps back to a secondary button. */}
             {request.receipt_available && (
               <div className="ts-ticket-actions">
                 <p className="ts-soft text-xs">
-                  Print this form, pay at the Cashier, then present it at Window 6.
+                  {amountLocked
+                    ? 'Your request form as it stood when your payment was logged, for your records.'
+                    : 'Print this form, pay at the Cashier, then present it at Window 6.'}
                 </p>
                 <button
                   type="button"
                   onClick={() => downloadDocument('receipt', `TrailSync-${request.request_code}.pdf`)}
                   disabled={docState === 'receipt'}
-                  className="ts-btn-primary inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 text-sm font-medium"
+                  className={`${amountLocked ? 'ts-btn-glass' : 'ts-btn-primary'} inline-flex shrink-0 items-center justify-center gap-2 px-4 py-2 text-sm font-medium`}
                 >
                   <DownloadIcon />
                   {/* The official request form (FM-USTP-RGTR-09) the student brings to the Cashier, not a proof of payment. */}

@@ -19,7 +19,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .exports import build_released_workbook
-from .official_form import build_official_form_pdf
+from .official_form import archive_official_form, build_official_form_pdf
 from .receipts import build_claim_stub_pdf
 from .avatars import AvatarRejected, process_avatar
 from .models import (
@@ -1165,19 +1165,21 @@ class RegistrarQueueRejectView(APIView):
         return Response(RegistrarQueueRowSerializer(form_request).data)
 
 
+def _document_queryset():
+    """Everything the PDFs print, fetched in one query."""
+    return FormRequest.objects.select_related(
+        "user__user_profile",
+        "transaction_type",
+        "submission",
+        "release_slot",
+        "release_schedule",
+        "registrar_approved_by__user",
+    )
+
+
 def _student_document_target(request, pk):
     """The FormRequest for a student-facing PDF: its own student or approved staff; anyone else gets 404, not 403."""
-    form_request = get_object_or_404(
-        FormRequest.objects.select_related(
-            "user__user_profile",
-            "transaction_type",
-            "submission",
-            "release_slot",
-            "release_schedule",
-            "registrar_approved_by__user",
-        ),
-        pk=pk,
-    )
+    form_request = get_object_or_404(_document_queryset(), pk=pk)
     is_owner = form_request.user_id == request.user.id
     if not (is_owner or IsApprovedRegistrarStaff().has_permission(request, None)):
         raise Http404
@@ -1193,7 +1195,11 @@ def _pdf_response(pdf_bytes, filename):
 
 
 class FormRequestReceiptView(APIView):
-    """GET /api/form-requests/<pk>/receipt/ - the printable Cashier form, only while Approved - Ready to Print."""
+    """GET /api/form-requests/<pk>/receipt/ - the official form, from Approved - Ready to Print on.
+
+    Drawn fresh on every download. The amount is today's price until payment is logged and the locked one after; Part
+    2's price list is always today's fees. Nothing is saved here (the payment-time record is written at Approve & Log).
+    """
 
     permission_classes = [IsAuthenticated]
 
@@ -1204,9 +1210,8 @@ class FormRequestReceiptView(APIView):
             return Response(
                 {
                     "detail": (
-                        "This form is not available. It can be printed once the Office of "
-                        "the Registrar has approved your request, and stops being available "
-                        "once your payment has been logged."
+                        "This form is not available yet. It can be printed once the Office of "
+                        "the Registrar has approved your request."
                     ),
                     "request_status": form_request.request_status,
                 },
@@ -1386,6 +1391,10 @@ def _blocked_by_clearance_response(form_request):
     )
 
 
+def _archive_official_form(pk):
+    archive_official_form(_document_queryset().get(pk=pk))
+
+
 def _peso(amount):
     return "no set fee" if amount is None else f"PHP {amount:,.2f}"
 
@@ -1454,6 +1463,9 @@ class RegistrarApproveLogView(APIView):
 
         # The digital claim stub goes live at payment, the window in which the student needs it.
         form_request.claim_stub_issued_at = timezone.now()
+        # Keep the official form as it stands at payment, once the payment is committed. It is a record, not what
+        # downloads serve; if writing it fails, that is logged rather than undoing the payment.
+        transaction.on_commit(lambda: _archive_official_form(pk), robust=True)
         form_request.digital_stub_active = True
 
         form_request.save(

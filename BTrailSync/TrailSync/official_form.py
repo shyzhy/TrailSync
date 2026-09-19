@@ -1,233 +1,151 @@
-"""The official FM-USTP-RGTR-09 form: a transparent overlay of the dynamic values merged onto the university's own PDF, with coordinates measured from that exact file."""
+"""The official FM-USTP-RGTR-09 form: the university's own page with an AcroForm field over each blank, filled by name.
+
+Which field holds which value lives here; where each field sits lives in the template
+(assets/templates/Request_of_Credentials_Form_2023_fillable.pdf, built by `manage.py build_pdf_templates`).
+"""
 
 from __future__ import annotations
 
-import hashlib
-import io
-from pathlib import Path
+from decimal import Decimal
 
+from django.core.files.base import ContentFile
+from django.db import transaction
 from django.utils import timezone
-from pypdf import PdfReader, PdfWriter
-from reportlab.lib import colors
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfgen import canvas as pdfcanvas
 
 from .academics import is_alumnus, is_student
-from .models import COMPLETION_OF_INC_FEE, RUSH_FEE
-from .receipts import EM_DASH, MIDDOT, _fit, _fonts, _local, _student_name, format_money
+from .models import COMPLETION_OF_INC_FEE, RUSH_FEE, FormSubmission, TransactionType
+from .pdf_forms import abbreviate, fill_pdf, local, money, student_name
 
-TEMPLATE_PATH = Path(__file__).resolve().parent / "assets" / "templates" / "FM-USTP-RGTR-09.pdf"
-TEMPLATE_SHA256 = "3d21a47d645bde0d0be7b9036bdfb32f0615418cc90428f0d15f309ad4768320"
+TEMPLATE = "Request_of_Credentials_Form_2023_fillable.pdf"
 
-# The template is not A4: 595.32 x 864.00 pt.
-PAGE_W = 595.32
-PAGE_H = 864.00
+# Part 2's documents, by TransactionType.code: the tick before each line and the price after it. Matching on the code
+# rather than the name keeps a reworded display name from silently dropping a tick or a price. A document the paper
+# form doesn't list has no code here and gets neither.
+PART2_CODES = (
+    "certification", "diploma_replacement", "form_137", "evaluation", "authentication",
+    "honorable_dismissal", "cav_certification", "correction_of_name", "transcript_of_records", "permit_to_study",
+)
+DOCUMENT_FIELDS = {code: f"doc_{code}" for code in PART2_CODES}
+PRICE_FIELDS = {code: f"price_{code}" for code in PART2_CODES}
+# Rush Fee is a line of Part 2 but an add-on, not a document: its price is RUSH_FEE.
+RUSH_FIELD = "doc_rush_fee"
+RUSH_PRICE_FIELD = "price_rush_fee"
 
-INK = colors.HexColor("#101418")
-TICK = "✓"
-
-# Text blanks: (x, y) where each underscore run starts, and the width before the next printed element.
-TEXT_FIELDS = {
-    "printed_name": (175.1, 727.0, 170.0),
-    "course": (391.0, 727.0, 54.0),
-    "date_of_request": (534.7, 727.0, 42.0),
-    "birth_date": (80.3, 708.0, 66.0),
-    "contact_number": (349.3, 589.5, 79.0),
-    "graduation_date": (217.2, 567.3, 98.0),
-    "last_semester_attended": (285.0, 555.4, 108.0),
-    "prior_document": (259.0, 533.2, 129.0),
-    "prior_date_requested": (470.5, 533.2, 59.0),
-    # Part 3 conditional answers
-    "inc_semester_taken": (447.0, 322.8, 75.0),
-    "inc_subject_code": (410.0, 310.9, 139.0),
-    "purpose_other": (130.0, 287.2, 149.0),
-    "cav_other": (289.0, 397.1, 49.0),
-    "certification_other": (492.0, 373.7, 74.0),
-    # Signature and cashier band
-    "verified_by": (74.0, 237.3, 126.0),
-    "amount": (75.0, 169.8, 49.0),
-    # Claim stub
-    "stub_name": (62.6, 83.2, 164.0),
-    "stub_course": (291.8, 83.2, 59.0),
-    "stub_date_requested": (481.7, 83.2, 89.0),
-    "stub_credential": (152.8, 67.7, 144.0),
-    "stub_assessed_by": (399.6, 43.9, 54.0),
+CAV_AGENCY_FIELDS = {
+    "DFA": "cav_dfa",
+    "CHED": "cav_ched",
+    "DEP-ED": "cav_dep_ed",
+    "PNP": "cav_pnp",
+    "POEA": "cav_poea",
+    "BFP": "cav_bfp",
+    "BJMP": "cav_bjmp",
+    "Others": "cav_others",
 }
 
-# Checkbox squares and check-blanks, by the label printed beside them.
-CLASSIFICATION_BOXES = {"Student": (153.0, 708.9), "Alumnus": (342.0, 708.9)}
-PRIOR_REQUEST_BOXES = {"YES": (268.2, 543.9), "NO": (316.0, 543.9)}
-CLEARED_BOXES = {"Yes": (76.6, 511.5), "No": (77.5, 499.7)}
-
-# Part 2: the "____" before each document name.
-DOCUMENT_BLANKS = {
-    "Certification": (359.0, 469.0),
-    "Diploma Replacement": (35.0, 455.7),
-    "Form 137": (194.0, 455.7),
-    "Evaluation": (35.0, 443.9),
-    "Authentication": (194.0, 443.9),
-    "Honorable Dismissal": (35.0, 432.3),
-    "CAV Certification": (194.4, 432.3),
-    "Correction of Name": (35.0, 420.5),
-    "Transcript of Records": (35.0, 408.7),
-    "Permit to Study": (35.0, 397.1),
-    "Rush Fee": (35.0, 385.3),
+CERTIFICATION_FIELDS = {
+    "CAR": "cert_car",
+    "Letter of No Objection": "cert_letter_of_no_objection",
+    "GPA": "cert_gpa",
+    "Graduated": "cert_graduated",
+    "Endorsement": "cert_endorsement",
+    "Earned units": "cert_earned_units",
+    "Officially enrolled": "cert_officially_enrolled",
+    "Grading System": "cert_grading_system",
+    "Subjects enrolled": "cert_subjects_enrolled",
+    "Subjects w/ grades": "cert_subjects_with_grades",
+    "USTP Conversion": "cert_ustp_conversion",
+    "English Medium of Instruction": "cert_english_medium_of_instruction",
+    "Others": "cert_others",
+    "Authorization Letter": "cert_authorization_letter",
 }
 
-CAV_AGENCY_BOXES = {
-    "DFA": (196.6, 420.9),
-    "CHED": (244.4, 420.9),
-    "DEP-ED": (294.7, 420.9),
-    "PNP": (195.6, 409.1),
-    "POEA": (244.0, 409.1),
-    "BFP": (293.8, 409.1),
-    "BJMP": (196.1, 397.5),
-    "Others": (244.9, 397.5),
+PURPOSE_FIELDS = {
+    "For Evaluation": "purpose_evaluation",
+    "For Employment": "purpose_employment",
+    "For Completion of INC": "purpose_completion_of_inc",
+    "For Scholarship": "purpose_scholarship",
+    "For Personal File": "purpose_personal_file",
+    "For Passport": "purpose_passport",
+    "For Advanced Studies": "purpose_advanced_studies",
+    "For Board Exam": "purpose_board_exam",
+    "For Ranking": "purpose_ranking",
+    "Others": "purpose_others",
 }
 
-CERTIFICATION_BOXES = {
-    "CAR": (359.0, 456.1),
-    "Letter of No Objection": (467.0, 456.1),
-    "GPA": (359.0, 444.4),
-    "Graduated": (467.0, 444.4),
-    "Endorsement": (359.0, 432.7),
-    "Earned units": (467.0, 432.7),
-    "Officially enrolled": (359.0, 421.0),
-    "Grading System": (467.0, 421.0),
-    "Subjects enrolled": (359.0, 409.2),
-    "Subjects w/ grades": (467.0, 409.2),
-    "USTP Conversion": (359.0, 397.6),
-    "English Medium of Instruction": (359.0, 385.8),
-    "Others": (492.0, 385.8),
-    "Authorization Letter": (359.0, 374.2),
-}
-
-# Part 3: the "____" before each purpose.
-PURPOSE_BLANKS = {
-    "For Evaluation": (40.0, 334.7),
-    "For Employment": (179.0, 334.7),
-    "For Completion of INC": (323.0, 334.7),
-    "For Scholarship": (40.0, 322.8),
-    "For Personal File": (179.0, 322.8),
-    "For Passport": (40.0, 310.9),
-    "For Advanced Studies": (179.0, 310.9),
-    "For Board Exam": (40.0, 299.1),
-    "For Ranking": (179.0, 299.1),
-    "Others": (40.0, 287.2),
-}
-
-# Rush Fee is an add-on line on the form, not a document of its own.
-_DOCUMENT_ALIASES = {"Rush Fee": None}
+TEXT_FIELDS = frozenset({
+    "signature_over_printed_name", "course", "date_of_request", "birth_date",
+    "contact_no", "date_of_graduation", "last_semester_sy", "previously_requested_document", "previously_requested_date",
+    "cav_others_specify", "cert_others_specify", "inc_semester_taken", "inc_subject_code", "purpose_others_specify",
+    "verified_by", "approved_by_name", "amount", "or_number", "payment_date", "date_of_release",
+    "stub_name", "stub_course", "stub_date_of_request", "stub_credential_requested", "stub_date_of_release",
+    "stub_assessed_by", "stub_or_number", "footer_note",
+    *PRICE_FIELDS.values(), RUSH_PRICE_FIELD,
+})
+CHECKBOX_FIELDS = frozenset({
+    "classification_student", "classification_alumnus", "already_requested_yes", "already_requested_no",
+    "cleared_yes", "cleared_no", RUSH_FIELD,
+    *DOCUMENT_FIELDS.values(), *CAV_AGENCY_FIELDS.values(), *CERTIFICATION_FIELDS.values(), *PURPOSE_FIELDS.values(),
+})
+REQUIRED_FIELDS = TEXT_FIELDS | CHECKBOX_FIELDS
 
 
-class TemplateChanged(RuntimeError):
-    """The base PDF is not the file these coordinates were measured against."""
+def _date(value):
+    return f"{value:%m/%d/%Y}" if value else None
 
 
-def _verify_template() -> bytes:
-    if not TEMPLATE_PATH.exists():
-        raise TemplateChanged(
-            f"Official form template missing at {TEMPLATE_PATH}. "
-            "It ships in the repo under TrailSync/assets/templates/."
-        )
-    raw = TEMPLATE_PATH.read_bytes()
-    digest = hashlib.sha256(raw).hexdigest()
-    if digest != TEMPLATE_SHA256:
-        raise TemplateChanged(
-            "The official form template has changed since the overlay coordinates "
-            f"were measured (expected {TEMPLATE_SHA256[:12]}..., found {digest[:12]}...). "
-            "Re-measure the underscore runs and checkbox squares against the new "
-            "revision and update TEXT_FIELDS / the checkbox maps, then update "
-            "TEMPLATE_SHA256. Refusing to render rather than print values into the "
-            "wrong boxes."
-        )
-    return raw
+def catalog_price(fee, pricing_unit) -> str:
+    """A Part 2 price as the paper form writes them: "(₱100)", or "(₱150/pg)" for a per-page document."""
+    if fee is None:
+        return "(no set fee)"
+    fee = Decimal(fee)
+    number = f"{fee:,.0f}" if fee == fee.to_integral_value() else f"{fee:,.2f}"
+    return f"(₱{number}{'/pg' if pricing_unit == 'per_page' else ''})"
 
 
-_CONNECTORS = {"of", "in", "and", "the", "for"}
+def part2_prices() -> dict:
+    """Today's fee for every line of Part 2, read fresh on every render, paid request or not.
+
+    This is a price list, not what this request costs: that is the Amount field, which locks at payment. A document
+    missing from the catalogue leaves its line without a price rather than showing a stale one.
+    """
+    documents = TransactionType.objects.filter(code__in=PART2_CODES).only("code", "fee_amount", "pricing_unit")
+    prices = {PRICE_FIELDS[d.code]: catalog_price(d.fee_amount, d.pricing_unit) for d in documents}
+    prices[RUSH_PRICE_FIELD] = catalog_price(RUSH_FEE, "flat")
+    return prices
 
 
-def _abbreviate(text):
-    """Course code from a degree title: "BS Information Technology" -> "BSIT"."""
-    parts = []
-    for word in str(text).split():
-        cleaned = word.strip(".,()")
-        if not cleaned:
-            continue
-        if cleaned.lower() in _CONNECTORS:
-            continue
-        parts.append(cleaned if cleaned.isupper() else cleaned[0].upper())
-    return "".join(parts)
-
-
-def _text(c, key, value, fonts, size=8.0, font_key="sans", abbreviate=False):
-    """Draw one value into a named blank, shrunk to fit rather than overrun."""
-    if value in (None, ""):
-        return
-    x, y, width = TEXT_FIELDS[key]
-    font = fonts[font_key]
-    text = str(value)
-    # Prefer an honest abbreviation over a truncation where the form expects a code.
-    if abbreviate and pdfmetrics.stringWidth(text, font, size) > width:
-        short = _abbreviate(text)
-        if short and pdfmetrics.stringWidth(short, font, size) <= width:
-            text = short
-    # Otherwise step the size down a little before truncating.
-    while size > 5.5 and pdfmetrics.stringWidth(text, font, size) > width:
-        size -= 0.25
-    c.setFillColor(INK)
-    c.setFont(font, size)
-    c.drawString(x, y, _fit(text, font, size, width))
-
-
-def _tick(c, pos, fonts, size=9.0):
-    if pos is None:
-        return
-    x, y = pos
-    c.setFillColor(INK)
-    c.setFont(fonts["sans_bold"], size)
-    c.drawString(x + 1.0, y + 1.0, TICK)
-
-
-def build_official_form_pdf(form_request) -> bytes:
-    """Render one FormRequest onto the real FM-USTP-RGTR-09 page. Callers own authorisation and the receipt_available() check."""
-    template_bytes = _verify_template()
-    fonts = _fonts()
-
+def official_form_values(form_request) -> tuple[dict, set[str]]:
+    """What goes in each field: text by field name, and the names of the boxes to tick."""
     user = form_request.user
     profile = getattr(user, "user_profile", None)
     submission = getattr(form_request, "submission", None)
     data = (submission.form_data if submission else None) or {}
+    text: dict = {}
+    checked: set[str] = set()
 
-    buffer = io.BytesIO()
-    c = pdfcanvas.Canvas(buffer, pagesize=(PAGE_W, PAGE_H))
-
-    # Header
-    _text(c, "printed_name", _student_name(user, profile), fonts, size=9.0)
-    _text(c, "course", profile.course if profile else None, fonts, abbreviate=True)
-    _text(
-        c, "date_of_request",
-        f"{_local(form_request.created_at):%m/%d/%Y}", fonts, size=7.5,
-    )
-    _text(
-        c, "birth_date",
-        f"{profile.birth_date:%m/%d/%Y}" if (profile and profile.birth_date) else None,
-        fonts,
-    )
+    name = student_name(user, profile)
+    course = profile.course if profile else None
+    # A code the form expects: offer the abbreviation before shrinking a long degree title.
+    course_choices = (course, abbreviate(course)) if course else None
+    requested_on = _date(local(form_request.created_at))
+    text.update({
+        "signature_over_printed_name": name,
+        "course": course_choices,
+        "date_of_request": requested_on,
+        "birth_date": _date(profile.birth_date) if profile else None,
+        "contact_no": user.contact_number,
+        "date_of_graduation": data.get("graduation_date"),
+    })
 
     # The two lines are independent on the paper form too: an alumnus now in grad school ticks both.
     statuses = data.get("academic_status") or (profile.academic_status if profile else [])
     if is_student(statuses):
-        _tick(c, CLASSIFICATION_BOXES["Student"], fonts)
+        checked.add("classification_student")
     if is_alumnus(statuses):
-        _tick(c, CLASSIFICATION_BOXES["Alumnus"], fonts)
-
-    # Part 1
-    _text(c, "contact_number", user.contact_number, fonts)
-    _text(c, "graduation_date", data.get("graduation_date"), fonts)
+        checked.add("classification_alumnus")
     # Graduates give a graduation date; anyone still enrolled, or without one, also gives their last semester.
     if is_student(statuses) or not data.get("graduation_date"):
-        _text(c, "last_semester_attended", data.get("semester"), fonts)
+        text["last_semester_sy"] = data.get("semester")
 
     # Answered from the student's own history, deliberately not from duplicate_flag.
     prior = (
@@ -237,71 +155,82 @@ def build_official_form_pdf(form_request) -> bytes:
         .order_by("-created_at")
         .first()
     )
-    _tick(c, PRIOR_REQUEST_BOXES["YES" if prior else "NO"], fonts)
+    checked.add("already_requested_yes" if prior else "already_requested_no")
     if prior is not None:
-        _text(c, "prior_document", form_request.transaction_type.name, fonts, size=7.0)
-        _text(c, "prior_date_requested", f"{_local(prior.created_at):%m/%d/%Y}", fonts, size=7.0)
+        text["previously_requested_document"] = form_request.transaction_type.name
+        text["previously_requested_date"] = _date(local(prior.created_at))
 
     # Left blank unless Front Desk recorded a clearance: the form treats it as the student's own declaration.
-    clearance = form_request.clearance_check_result
-    if clearance == "Cleared":
-        _tick(c, CLEARED_BOXES["Yes"], fonts)
-    elif clearance == "Not Cleared":
-        _tick(c, CLEARED_BOXES["No"], fonts)
+    if form_request.clearance_check_result == "Cleared":
+        checked.add("cleared_yes")
+    elif form_request.clearance_check_result == "Not Cleared":
+        checked.add("cleared_no")
 
     # Part 2
     document_name = form_request.transaction_type.name
-    blank = DOCUMENT_BLANKS.get(_DOCUMENT_ALIASES.get(document_name, document_name))
-    _tick(c, blank, fonts)
+    if form_request.transaction_type.code in DOCUMENT_FIELDS:
+        checked.add(DOCUMENT_FIELDS[form_request.transaction_type.code])
+    text.update(part2_prices())
     if form_request.is_rush:
-        _tick(c, DOCUMENT_BLANKS["Rush Fee"], fonts)
-
+        checked.add(RUSH_FIELD)
     agency = data.get("cav_agency")
-    if agency:
-        _tick(c, CAV_AGENCY_BOXES.get(agency), fonts)
+    if agency in CAV_AGENCY_FIELDS:
+        checked.add(CAV_AGENCY_FIELDS[agency])
         if agency == "Others":
-            _text(c, "cav_other", data.get("cav_agency_other"), fonts, size=7.0)
-
+            text["cav_others_specify"] = data.get("cav_agency_other")
     for subtype in data.get("certification_subtypes") or []:
-        _tick(c, CERTIFICATION_BOXES.get(subtype), fonts)
+        if subtype in CERTIFICATION_FIELDS:
+            checked.add(CERTIFICATION_FIELDS[subtype])
 
     # Part 3
     purpose = data.get("purpose")
-    _tick(c, PURPOSE_BLANKS.get(purpose), fonts)
+    if purpose in PURPOSE_FIELDS:
+        checked.add(PURPOSE_FIELDS[purpose])
     if purpose == "Others":
-        _text(c, "purpose_other", data.get("purpose_other"), fonts)
+        text["purpose_others_specify"] = data.get("purpose_other")
     if purpose == "For Completion of INC":
-        _text(c, "inc_semester_taken", data.get("semester_taken"), fonts, size=7.0)
-        _text(c, "inc_subject_code", data.get("subject_code"), fonts)
+        text["inc_semester_taken"] = data.get("semester_taken")
+        text["inc_subject_code"] = data.get("subject_code")
 
-    # Verified line from the verification event; the Registrar's name is pre-printed, so the Approved block is never written to.
-    verification = form_request.verifications.filter(verification_status="Verified").first()
-    if verification is not None and verification.verified_by is not None:
-        _text(c, "verified_by", verification.verified_by.user.get_full_name(), fonts, size=8.5)
+    # Verified stays blank for the Front Desk's own signature. Approved names the Registrar staff who approved it in
+    # TrailSync, beside the University Registrar's name that the form itself prints.
+    approver = form_request.registrar_approved_by
+    approver_name = approver.user.get_full_name() if approver else None
+    text["approved_by_name"] = approver_name
 
-    # The amount is filled in at today's fee (the form is only printable before payment, so it is never the locked one);
-    # the Cashier and release fields are handwritten.
+    # Today's fee until payment is logged; the locked amount on the archived copy made at payment.
     amount = form_request.current_amount_due()
-    _text(c, "amount", format_money(amount), fonts, size=8.5)
+    text["amount"] = money(amount)
+    # Blank until the stage that fills them has happened.
+    scheduled = form_request.scheduled_release()
+    release_on = _date(scheduled[0]) if scheduled else None
+    text.update({
+        "or_number": form_request.or_number,
+        "payment_date": _date(form_request.payment_date),
+        "date_of_release": release_on,
+    })
 
     # Claim stub
-    _text(c, "stub_name", _student_name(user, profile), fonts)
-    _text(c, "stub_course", profile.course if profile else None, fonts, size=7.0, abbreviate=True)
-    _text(c, "stub_date_requested", f"{_local(form_request.created_at):%m/%d/%Y}", fonts)
-    _text(c, "stub_credential", document_name, fonts)
-    approver = form_request.registrar_approved_by
-    _text(
-        c, "stub_assessed_by",
-        approver.user.get_full_name() if approver else None, fonts, size=6.5,
-    )
+    text.update({
+        "stub_name": name,
+        "stub_course": course_choices,
+        "stub_date_of_request": requested_on,
+        "stub_credential_requested": document_name,
+        "stub_date_of_release": release_on,
+        "stub_assessed_by": approver_name,
+        "stub_or_number": form_request.or_number,
+    })
 
-    # The tracking number goes in the bottom margin, since the paper form has no field for it.
-    footer_bits = [f"TrailSync {form_request.request_code}"]
+    text["footer_note"] = _footer(form_request, data, amount, approver)
+    return text, checked
+
+
+def _footer(form_request, data, amount, approver) -> str:
+    """The tracking number, and the working behind the amount, which the paper form has no boxes for."""
+    bits = [f"TrailSync {form_request.request_code}"]
     if amount is not None:
-        total = format_money(amount)
         extras = []
-        # The paper form has no pages box, so the Registrar's count is shown with the amount it produced. The rate is
-        # worked back from the amount rather than read from the fee, so the working always matches the total printed.
+        # The rate is worked back from the amount rather than read from the fee, so it always matches the total.
         if form_request.page_count:
             try:
                 copies = max(1, int(data.get("number_of_copies")))
@@ -310,43 +239,47 @@ def build_official_form_pdf(form_request) -> bytes:
             rate = (amount - form_request.fee_add_ons()) / (form_request.page_count * copies)
             extras.append(
                 f"{form_request.page_count} page{'s' if form_request.page_count != 1 else ''} x {copies} "
-                f"cop{'ies' if copies != 1 else 'y'} at {format_money(rate)}/page"
+                f"cop{'ies' if copies != 1 else 'y'} at {money(rate)}/page"
             )
         if form_request.is_rush:
-            extras.append(f"incl. rush {format_money(RUSH_FEE)}")
-        if purpose == "For Completion of INC":
-            extras.append(f"incl. INC {format_money(COMPLETION_OF_INC_FEE)}")
-        footer_bits.append(f"Assessed {total}" + (f" ({', '.join(extras)})" if extras else ""))
+            extras.append(f"incl. rush {money(RUSH_FEE)}")
+        if data.get("purpose") == "For Completion of INC":
+            extras.append(f"incl. INC {money(COMPLETION_OF_INC_FEE)}")
+        bits.append(f"Assessed {money(amount)}" + (f" ({', '.join(extras)})" if extras else ""))
     if approver is not None and form_request.registrar_approved_at:
-        stamped = _local(form_request.registrar_approved_at)
-        footer_bits.append(
-            f"Approved by {approver.user.get_full_name()} on {stamped:%b %d, %Y %I:%M %p}"
-        )
-    footer_bits.append(f"Generated {_local(timezone.now()):%b %d, %Y %I:%M %p}")
+        bits.append(f"Approved by {approver.user.get_full_name()} on {local(form_request.registrar_approved_at):%b %d, %Y %I:%M %p}")
+    bits.append(f"Generated {local(timezone.now()):%b %d, %Y %I:%M %p}")
+    return "  ·  ".join(bits)
 
-    # Baseline at 14pt so the ascenders clear the claim stub's bottom border.
-    c.setFillColor(colors.HexColor("#5B6474"))
-    c.setFont(fonts["sans"], 5.8)
-    c.drawString(27.0, 14.0, _fit(f"  {MIDDOT}  ".join(footer_bits), fonts["sans"], 5.8, PAGE_W - 54))
 
-    c.showPage()
-    c.save()
-
-    # Merge
-    overlay = PdfReader(io.BytesIO(buffer.getvalue())).pages[0]
-    base = PdfReader(io.BytesIO(template_bytes))
-    page = base.pages[0]
-    page.merge_page(overlay)
-
-    writer = PdfWriter()
-    writer.add_page(page)
-    writer.add_metadata(
-        {
-            "/Title": f"Request for Credential/s Form {EM_DASH} {form_request.request_code}",
+def build_official_form_pdf(form_request) -> bytes:
+    """The filled, flattened form for one FormRequest. Callers own authorisation and the receipt_available() check."""
+    text, checked = official_form_values(form_request)
+    return fill_pdf(
+        TEMPLATE,
+        text,
+        checked,
+        required=REQUIRED_FIELDS,
+        metadata={
+            "/Title": f"Request for Credential/s Form — {form_request.request_code}",
             "/Author": "USTP-CDO Office of the Registrar",
             "/Subject": "FM-USTP-RGTR-09",
-        }
+        },
     )
-    out = io.BytesIO()
-    writer.write(out)
-    return out.getvalue()
+
+
+def archive_official_form(form_request) -> None:
+    """Keep the form as it stood when the payment was logged: a record, written once.
+
+    Downloads never serve it. They are drawn fresh every time, because Part 2's price list must always be today's; the
+    amount on them stays the locked one regardless, since that comes from amount_due.
+    """
+    with transaction.atomic():
+        # Row-locked so two payments can't both write a record.
+        submission = FormSubmission.objects.select_for_update().filter(form_request_id=form_request.pk).first()
+        if submission is None or submission.generated_pdf_path:
+            return
+        submission.generated_pdf_path.save(
+            f"{form_request.request_code}.pdf", ContentFile(build_official_form_pdf(form_request)), save=False
+        )
+        submission.save(update_fields=["generated_pdf_path"])

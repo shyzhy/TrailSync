@@ -144,6 +144,9 @@ STATIC_URL = 'static/'
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# Files that must never be reachable by URL (MEDIA_ROOT is, in DEBUG): the archived official forms of paid requests.
+PRIVATE_FILES_ROOT = BASE_DIR / 'private'
+
 # Email settings come from .env; with EMAIL_BACKEND unset, messages print to the runserver log instead.
 EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
 EMAIL_HOST = config('EMAIL_HOST', default='localhost')

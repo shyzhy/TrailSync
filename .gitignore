@@ -11,6 +11,8 @@ staticfiles/
 # User uploads: student profile photos, board exam photos, requirement
 # attachments, claim signatures. Personal data, not source - never commit it.
 BTrailSync/media/
+# Archived official forms of paid requests (names, birth dates, ID numbers): the same.
+BTrailSync/private/
 
 # Environment / secrets
 .env
