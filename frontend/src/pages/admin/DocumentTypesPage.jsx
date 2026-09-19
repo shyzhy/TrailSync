@@ -34,7 +34,7 @@ function EditFields({ doc, layout, onSaved, onCancel }) {
   const [time, setTime] = useState(doc.processing_time ?? '');
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
-  // A fee change is confirmed first: amount_due is fixed at approval, so this only ever reaches new assessments.
+  // A fee change is confirmed first: it reprices every unpaid request at once (only paid ones keep their amount).
   const [confirming, setConfirming] = useState(false);
   // Both layouts are in the page at once (one hidden), so ids carry the layout to stay unique.
   const ids = (name) => `${layout}-${name}-${doc.id}`;
@@ -136,10 +136,10 @@ function EditFields({ doc, layout, onSaved, onCancel }) {
       </div>
 
       <p className="ts-soft text-sm">
-        {doc.awaiting_assessment > 0
-          ? `${doc.awaiting_assessment} request${doc.awaiting_assessment === 1 ? '' : 's'} not yet approved will be charged the new fee. `
+        {doc.unpaid_requests > 0
+          ? `${doc.unpaid_requests} unpaid request${doc.unpaid_requests === 1 ? '' : 's'} will show the new fee. `
           : ''}
-        Requests already approved keep the fee they were given.
+        Requests already paid keep the amount they paid.
       </p>
       {errors.general && (
         <div role="alert" className="ts-banner ts-banner-error px-3.5 py-2.5 text-sm">
@@ -153,7 +153,7 @@ function EditFields({ doc, layout, onSaved, onCancel }) {
             Update the fee for {doc.name} from {feeText(doc.fee_amount, doc.pricing_unit)} to {feeText(newFee, unit)}?
           </p>
           <p className="mt-1.5 leading-relaxed">
-            This applies to new requests only &mdash; requests already assessed keep their original amount.
+            This will update the price shown on all requests that haven&rsquo;t been paid yet.
           </p>
           <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button type="button" onClick={() => setConfirming(false)} disabled={saving} className="ts-btn-glass px-5 py-2.5 text-sm font-medium">
@@ -291,8 +291,8 @@ export default function DocumentTypesPage() {
           Manage Document Types
         </h1>
         <p className="ts-soft mt-1.5 max-w-3xl text-base">
-          Keep fees and processing times in line with Window 6. A new fee applies to requests the Registrar approves from
-          now on; requests already approved keep the fee they were given.
+          Keep fees and processing times in line with Window 6. A new fee shows on every request that hasn&rsquo;t been
+          paid yet; requests already paid keep the amount they paid.
         </p>
 
         {status === 'error' && (

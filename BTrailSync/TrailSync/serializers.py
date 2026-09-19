@@ -219,6 +219,12 @@ class ChangeEmailConfirmSerializer(serializers.Serializer):
     token = serializers.CharField()
 
 
+def amount_due_text(form_request):
+    """current_amount_due() in the shape the API has always sent amounts: a two-decimal string, or null."""
+    amount = form_request.current_amount_due()
+    return None if amount is None else f"{amount:.2f}"
+
+
 class TrackedFormRequestSerializer(serializers.ModelSerializer):
     """GET /api/form-requests/ row: what the Track Requests ticket needs. Read-only, and never exposes staff-only fields."""
 
@@ -238,6 +244,9 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
     can_cancel = serializers.SerializerMethodField()
     can_change_proxy = serializers.SerializerMethodField()
     uploaded_files = serializers.SerializerMethodField()
+    # Today's price until the payment is logged, then the locked one; amount_locked says which it is.
+    amount_due = serializers.SerializerMethodField()
+    amount_locked = serializers.SerializerMethodField()
 
     class Meta:
         model = FormRequest
@@ -263,6 +272,7 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
             "release_schedule",
             # Safe for a student to read; clearance, or_number and duplicate_flag are intentionally absent.
             "amount_due",
+            "amount_locked",
             "payment_date",
             # Decided by the API so each button and its endpoint's own gate always agree.
             "receipt_available",
@@ -317,6 +327,12 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
 
     def get_can_cancel(self, obj):
         return obj.can_cancel()
+
+    def get_amount_due(self, obj):
+        return amount_due_text(obj)
+
+    def get_amount_locked(self, obj):
+        return obj.price_locked()
 
     def get_can_change_proxy(self, obj):
         return obj.can_change_proxy()
@@ -418,6 +434,7 @@ class RegistrarReleasedRowSerializer(serializers.ModelSerializer):
     transaction_type = serializers.CharField(source="transaction_type.name", read_only=True)
     claimed_by = serializers.SerializerMethodField()
     claimed_by_proxy = serializers.SerializerMethodField()
+    amount_due = serializers.SerializerMethodField()
 
     class Meta:
         model = FormRequest
@@ -436,6 +453,9 @@ class RegistrarReleasedRowSerializer(serializers.ModelSerializer):
 
     def _schedule(self, obj):
         return getattr(obj, "release_schedule", None)
+
+    def get_amount_due(self, obj):
+        return amount_due_text(obj)
 
     def get_date_released(self, obj):
         schedule = self._schedule(obj)
@@ -484,6 +504,9 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
         source="transaction_type.fee_amount", max_digits=8, decimal_places=2, read_only=True
     )
     fee_add_ons = serializers.SerializerMethodField()
+    # As on the student's ticket: today's price until the payment is logged, then the locked one.
+    amount_due = serializers.SerializerMethodField()
+    amount_locked = serializers.SerializerMethodField()
     # Echoed back by the Release action, which refuses if the proxy has changed since the page was loaded.
     proxy_version = serializers.SerializerMethodField()
     submission_extras = serializers.SerializerMethodField()
@@ -526,6 +549,7 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
             # Staff-facing fraud signal; the student serializer omits it.
             "duplicate_flag",
             "amount_due",
+            "amount_locked",
             "or_number",
             "payment_date",
             "approved_by_name",
@@ -561,6 +585,12 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
 
     def get_fee_add_ons(self, obj):
         return f"{obj.fee_add_ons():.2f}"
+
+    def get_amount_due(self, obj):
+        return amount_due_text(obj)
+
+    def get_amount_locked(self, obj):
+        return obj.price_locked()
 
     def get_proxy_version(self, obj):
         return proxy_version(obj)
@@ -682,6 +712,8 @@ class ApproveLogSerializer(serializers.Serializer):
 
     or_number = serializers.CharField(max_length=50, allow_blank=False, trim_whitespace=True)
     payment_date = serializers.DateField()
+    # The amount the page showed, which is the one about to be locked; refused if the fee has moved since. Omitted, unchecked.
+    expected_amount_due = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, allow_null=True)
 
 
 class MarkReadySerializer(serializers.Serializer):

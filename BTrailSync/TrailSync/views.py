@@ -1067,7 +1067,10 @@ class RegistrarQueueVerifyView(APIView):
 
 
 class RegistrarQueueApproveView(APIView):
-    """POST /api/registrar/queue/<id>/approve/ - Registrar sign-off (Verified -> Approved), where the fee is assessed and stamped."""
+    """POST /api/registrar/queue/<id>/approve/ - Registrar sign-off (Verified -> Approved), recording the page count.
+
+    No price is stored here: until the payment is logged the amount follows the current fee (see current_amount_due).
+    """
 
     permission_classes = [IsApprovedRegistrarStaff]
 
@@ -1092,22 +1095,21 @@ class RegistrarQueueApproveView(APIView):
         form_request.request_status = FormRequest.RequestStatus.APPROVED
         form_request.registrar_approved_by = staff_profile
         form_request.registrar_approved_at = timezone.now()
-        # The page count is known only now, when the Registrar has pulled the record, so the fee is assessed here too.
+        # The page count is known only now, when the Registrar has pulled the record; the price is locked later, at payment.
         form_request.page_count = serializer.validated_data["page_count"]
-        form_request.amount_due = form_request.compute_amount_due()
         form_request.save(
             update_fields=[
                 "request_status",
                 "registrar_approved_by",
                 "registrar_approved_at",
                 "page_count",
-                "amount_due",
                 "updated_at",
             ]
         )
 
-        amount = form_request.amount_due
-        owed = f"The fee is PHP {amount:,.2f}. " if amount is not None else ""
+        # Said as today's price: the notification is kept, but the fee can still change before they pay.
+        amount = form_request.current_amount_due()
+        owed = f"At the current fee this comes to PHP {amount:,.2f}. " if amount is not None else ""
         _notify_student(
             form_request,
             Notification.NotificationType.APPROVED,
@@ -1185,6 +1187,8 @@ def _student_document_target(request, pk):
 def _pdf_response(pdf_bytes, filename):
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    # The amount on an unpaid form follows the current fee, so a stored copy could print yesterday's price.
+    response["Cache-Control"] = "no-store"
     return response
 
 
@@ -1382,6 +1386,10 @@ def _blocked_by_clearance_response(form_request):
     )
 
 
+def _peso(amount):
+    return "no set fee" if amount is None else f"PHP {amount:,.2f}"
+
+
 def _queue_queryset():
     return FormRequest.objects.select_related(
         "user__user_profile",
@@ -1404,7 +1412,7 @@ class RegistrarQueueDetailView(APIView):
 
 
 class RegistrarApproveLogView(APIView):
-    """PATCH /api/form-requests/<id>/approve-log/ - log the Cashier payment (Approved -> Processing)."""
+    """PATCH /api/form-requests/<id>/approve-log/ - log the Cashier payment (Approved -> Processing), locking the price."""
 
     permission_classes = [IsApprovedRegistrarStaff]
 
@@ -1422,6 +1430,24 @@ class RegistrarApproveLogView(APIView):
         serializer = ApproveLogSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        # The price is locked now, from the fee at this moment, and never worked out again.
+        amount = form_request.calculate_amount_due()
+        # Never lock a number the Registrar didn't see: if the fee moved while the page was open, show them the new one first.
+        if "expected_amount_due" in serializer.validated_data and serializer.validated_data["expected_amount_due"] != amount:
+            shown = serializer.validated_data["expected_amount_due"]
+            return Response(
+                {
+                    "detail": (
+                        f"The fee for {form_request.transaction_type.name} changed while this page was open: this "
+                        f"request now comes to {_peso(amount)}, not {_peso(shown)}. The page has been refreshed. "
+                        "Check the new amount, then save the payment again."
+                    ),
+                    "request_status": form_request.request_status,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        form_request.amount_due = amount
         form_request.or_number = serializer.validated_data["or_number"]
         form_request.payment_date = serializer.validated_data["payment_date"]
         form_request.request_status = FormRequest.RequestStatus.PROCESSING
@@ -1432,6 +1458,7 @@ class RegistrarApproveLogView(APIView):
 
         form_request.save(
             update_fields=[
+                "amount_due",
                 "or_number",
                 "payment_date",
                 "request_status",

@@ -366,10 +366,13 @@ class AdminActivityView(APIView):
 
 # Document types: what an admin updates when Window 6 announces a new fee, turnaround or a paused document.
 
+# Every stage before the payment is logged: the requests whose price follows the fee (see FormRequest.current_amount_due).
+UNPAID_STATUSES = [FormRequest.RequestStatus.SUBMITTED, FormRequest.RequestStatus.VERIFIED, FormRequest.RequestStatus.APPROVED]
+
+
 def _document_types():
-    # Requests the Registrar hasn't approved yet: the only ones a fee change will still reach.
-    awaiting = Q(form_requests__request_status__in=[FormRequest.RequestStatus.SUBMITTED, FormRequest.RequestStatus.VERIFIED])
-    return TransactionType.objects.annotate(awaiting_assessment=Count("form_requests", filter=awaiting)).order_by("name")
+    unpaid = Q(form_requests__request_status__in=UNPAID_STATUSES)
+    return TransactionType.objects.annotate(unpaid_requests=Count("form_requests", filter=unpaid)).order_by("name")
 
 
 class AdminDocumentTypeSerializer(serializers.ModelSerializer):
@@ -389,12 +392,12 @@ class AdminDocumentTypeSerializer(serializers.ModelSerializer):
             "max_decimal_places": "Use at most two decimal places (centavos).",
         },
     )
-    awaiting_assessment = serializers.IntegerField(read_only=True)
+    unpaid_requests = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = TransactionType
-        fields = ["id", "name", "fee_amount", "pricing_unit", "processing_time", "is_available", "updated_at", "awaiting_assessment"]
-        read_only_fields = ["id", "name", "updated_at", "awaiting_assessment"]
+        fields = ["id", "name", "fee_amount", "pricing_unit", "processing_time", "is_available", "updated_at", "unpaid_requests"]
+        read_only_fields = ["id", "name", "updated_at", "unpaid_requests"]
         extra_kwargs = {"pricing_unit": {"error_messages": {"invalid_choice": "Choose Flat or Per page."}}}
 
     def validate_processing_time(self, value):
@@ -402,7 +405,7 @@ class AdminDocumentTypeSerializer(serializers.ModelSerializer):
 
 
 class AdminDocumentTypeListView(generics.ListAPIView):
-    """GET /api/admin/document-types/ - every document with its fee, and how many requests still await assessment."""
+    """GET /api/admin/document-types/ - every document with its fee, and how many unpaid requests a fee change would reach."""
 
     permission_classes = [IsAdminAccount]
     serializer_class = AdminDocumentTypeSerializer
@@ -414,8 +417,8 @@ class AdminDocumentTypeListView(generics.ListAPIView):
 class AdminDocumentTypeDetailView(APIView):
     """PATCH /api/admin/document-types/<id>/ - fee, pricing unit, processing time or availability.
 
-    Applies from the next assessment: amount_due is stored on each request when the Registrar approves it and is never
-    recomputed, so requests already approved keep the fee they were given.
+    Reaches every request not yet paid, at its next view or download: their price is worked out from the current fee.
+    Paid requests keep the amount locked when their payment was logged.
     """
 
     permission_classes = [IsAdminAccount]

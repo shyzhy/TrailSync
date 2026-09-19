@@ -346,7 +346,8 @@ class FormRequest(models.Model):
     )
     clearance_checked_at = models.DateTimeField(null=True, blank=True)
 
-    # amount_due is set when the Registrar approves, never from client input; or_number and payment_date are staff-entered.
+    # The locked price: stored only when the payment is logged, never from client input. Until then it stays null and
+    # current_amount_due() works the price out from today's fee. or_number and payment_date are staff-entered.
     amount_due = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     or_number = models.CharField(max_length=50, null=True, blank=True)
     payment_date = models.DateField(null=True, blank=True)
@@ -383,8 +384,26 @@ class FormRequest(models.Model):
     def __str__(self):
         return f"{self.request_code} - {self.user.email}"
 
-    def compute_amount_due(self):
-        """What this request costs at the Cashier (base x pages x copies, plus add-ons); None with no published fee, or a per-page document not yet counted."""
+    def current_amount_due(self):
+        """The amount every screen and printout shows: the locked amount once payment is logged, otherwise today's price.
+
+        A Rejected or Cancelled request is never paid, so it has nothing to show.
+        """
+        if self.price_locked():
+            return self.amount_due
+        if self.request_status in (self.RequestStatus.REJECTED, self.RequestStatus.CANCELLED):
+            return None
+        return self.calculate_amount_due()
+
+    def price_locked(self):
+        """True once the Cashier payment is logged; from then on amount_due is the price, whatever the fee becomes."""
+        return bool(self.or_number)
+
+    def calculate_amount_due(self):
+        """The price at today's fee (base x pages x copies, plus add-ons); None with no published fee, or a per-page document not yet counted.
+
+        The one place the price is worked out. It reads the fee live, so it is only ever stored when the payment is logged.
+        """
         fee = self.transaction_type.fee_amount
         if fee is None:
             return None

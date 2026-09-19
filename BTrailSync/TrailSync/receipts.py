@@ -318,8 +318,8 @@ def build_claim_stub_pdf(form_request) -> bytes:
         when = f"To be scheduled {EM_DASH} check back soon"
     right_y = _field(c, col2, right_y, col_w, "Date of Release", when, fonts)
 
-    # Known by the time the stub is downloadable, so printed as recorded rather than as blank rules.
-    amount_text = format_money(form_request.amount_due) or EM_DASH
+    # Locked by the time the stub is downloadable (it goes live at payment), so printed as recorded, not as blank rules.
+    amount_text = format_money(form_request.current_amount_due()) or EM_DASH
     right_y = _field(c, col2, right_y, col_w, "Amount Assessed", amount_text, fonts)
     right_y = _field(
         c, col2, right_y, col_w, "O.R. Number", form_request.or_number or EM_DASH, fonts

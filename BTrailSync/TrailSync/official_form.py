@@ -279,8 +279,10 @@ def build_official_form_pdf(form_request) -> bytes:
     if verification is not None and verification.verified_by is not None:
         _text(c, "verified_by", verification.verified_by.user.get_full_name(), fonts, size=8.5)
 
-    # The assessed amount is filled in; the Cashier and release fields are handwritten.
-    _text(c, "amount", format_money(form_request.amount_due), fonts, size=8.5)
+    # The amount is filled in at today's fee (the form is only printable before payment, so it is never the locked one);
+    # the Cashier and release fields are handwritten.
+    amount = form_request.current_amount_due()
+    _text(c, "amount", format_money(amount), fonts, size=8.5)
 
     # Claim stub
     _text(c, "stub_name", _student_name(user, profile), fonts)
@@ -295,17 +297,17 @@ def build_official_form_pdf(form_request) -> bytes:
 
     # The tracking number goes in the bottom margin, since the paper form has no field for it.
     footer_bits = [f"TrailSync {form_request.request_code}"]
-    if form_request.amount_due is not None:
-        total = format_money(form_request.amount_due)
+    if amount is not None:
+        total = format_money(amount)
         extras = []
         # The paper form has no pages box, so the Registrar's count is shown with the amount it produced. The rate is
-        # worked back from the stored amount, because the admin may have changed the fee since it was assessed.
+        # worked back from the amount rather than read from the fee, so the working always matches the total printed.
         if form_request.page_count:
             try:
                 copies = max(1, int(data.get("number_of_copies")))
             except (TypeError, ValueError):
                 copies = 1
-            rate = (form_request.amount_due - form_request.fee_add_ons()) / (form_request.page_count * copies)
+            rate = (amount - form_request.fee_add_ons()) / (form_request.page_count * copies)
             extras.append(
                 f"{form_request.page_count} page{'s' if form_request.page_count != 1 else ''} x {copies} "
                 f"cop{'ies' if copies != 1 else 'y'} at {format_money(rate)}/page"

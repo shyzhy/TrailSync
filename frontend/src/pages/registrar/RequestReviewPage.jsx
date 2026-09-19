@@ -28,7 +28,8 @@ function formatAmount(value) {
   return Number.isNaN(n) ? null : PESO.format(n);
 }
 
-// The amount approval will assess, worked out as the server does: fee x pages x copies, plus rush/INC add-ons.
+// The amount at the current fee, worked out as the server does: fee x pages x copies, plus rush/INC add-ons. Nothing
+// is fixed at approval; the server locks the amount when the payment is recorded.
 function previewFee(request, pageCount) {
   if (request.fee_amount == null) return { none: true };
   const perPage = request.pricing_unit === 'per_page';
@@ -411,7 +412,9 @@ export default function RequestReviewPage({ requestId }) {
                     </Field>
                     <Field label="Last semester attended">{request.semester}</Field>
                     {request.graduation_date && <Field label="Graduated">{formatDate(request.graduation_date)}</Field>}
-                    {amountDue && <Field label="Amount to pay">{amountDue}</Field>}
+                    {amountDue && (
+                      <Field label={request.amount_locked ? 'Amount paid' : 'Amount to pay (current fee)'}>{amountDue}</Field>
+                    )}
                     {request.or_number && <Field label="O.R. number">{request.or_number}</Field>}
                     {request.payment_date && <Field label="Date paid">{formatDate(request.payment_date)}</Field>}
                     {request.verified_by_name && (
@@ -631,11 +634,12 @@ export default function RequestReviewPage({ requestId }) {
                     )}
 
                     <div className="ts-well mb-4 px-3.5 py-2.5">
-                      <p className="ts-review-label">Fee to be assessed</p>
+                      <p className="ts-review-label">Amount at the current fee</p>
                       {fee.total ? (
                         <>
                           <p className="ts-ink mt-0.5 text-base font-semibold">{fee.total}</p>
                           <p className="ts-soft text-xs">{fee.working}</p>
+                          <p className="ts-soft mt-1 text-xs">Follows the fee until the payment is recorded, then stays fixed.</p>
                         </>
                       ) : (
                         <p className="ts-soft mt-0.5 text-sm">
@@ -676,11 +680,16 @@ export default function RequestReviewPage({ requestId }) {
                         }
                       >
                         <p>
-                          {fee.total ? `The fee is set at ${fee.total}` : 'The fee is worked out'}
-                          {perPage ? ` for ${pageCount} page${Number(pageCount) === 1 ? '' : 's'} per copy` : ''}, and{' '}
-                          {request.student_full_name} can print their form and pay at the Cashier. This can&rsquo;t be
-                          undone.
+                          {request.student_full_name} can then print their form and pay at the Cashier. This can&rsquo;t
+                          be undone.
                         </p>
+                        {fee.total && (
+                          <p>
+                            At the current fee that comes to {fee.total}
+                            {perPage ? ` for ${pageCount} page${Number(pageCount) === 1 ? '' : 's'} per copy` : ''}. The
+                            amount is locked in when you record the payment.
+                          </p>
+                        )}
                       </ConfirmStep>
                     ) : confirming === 'reject' ? (
                       <ConfirmStep
@@ -710,7 +719,7 @@ export default function RequestReviewPage({ requestId }) {
                           onClick={() => setConfirming('approve')}
                           className="ts-btn-primary flex items-center justify-center gap-2 py-3 text-sm font-medium"
                         >
-                          Approve and set the fee
+                          Approve this request
                         </button>
                         {fee.needsPages && (
                           <p className="ts-soft text-center text-sm">Enter the page count above to approve.</p>
@@ -742,8 +751,9 @@ export default function RequestReviewPage({ requestId }) {
                   >
                     {amountDue && (
                       <div className="ts-well mb-4 px-3.5 py-2.5">
-                        <p className="ts-review-label">Amount to pay</p>
+                        <p className="ts-review-label">Amount to collect</p>
                         <p className="ts-ink text-lg font-semibold" style={FONT_SERIF}>{amountDue}</p>
+                        <p className="ts-soft text-xs">At the current fee. Saving the payment locks this amount.</p>
                       </div>
                     )}
                     <div className="space-y-3.5">
@@ -789,13 +799,15 @@ export default function RequestReviewPage({ requestId }) {
                         onCancel={() => setConfirming(null)}
                         onConfirm={() =>
                           runTransition('approve-log', `/api/form-requests/${request.id}/approve-log/`, {
-                            body: { or_number: orNumber.trim(), payment_date: paymentDate },
+                            // The amount on screen is the one being locked; the server refuses if the fee moved since.
+                            body: { or_number: orNumber.trim(), payment_date: paymentDate, expected_amount_due: request.amount_due },
                             successMessage: 'Payment saved. The document can now be prepared.',
                           })
                         }
                       >
                         <p>
-                          O.R. {orNumber.trim()}, paid {formatDate(paymentDate)}. The request moves on to being
+                          O.R. {orNumber.trim()}, paid {formatDate(paymentDate)}
+                          {amountDue ? `, for ${amountDue}` : ''}. The amount is locked, the request moves on to being
                           prepared, and the student&rsquo;s claim stub becomes available.
                         </p>
                       </ConfirmStep>

@@ -87,9 +87,12 @@ export default function TicketCard({ request, expanded, onToggle, onChanged }) {
       onChanged(null);
     }
   };
+  // Until payment is logged this is today's price, so a fee change shows here at the next load; after, it's what was paid.
   const amountDue = formatAmount(request.amount_due);
-  // Before approval there is no amount yet, and for a per-page document there can't be until the pages are counted.
-  const amountPending = !amountDue && [STATUS.SUBMITTED, STATUS.VERIFIED].includes(request.request_status);
+  const amountLocked = Boolean(request.amount_locked);
+  // A per-page document has no price until the Registrar counts the pages at approval.
+  const amountPending =
+    !amountDue && request.pricing_unit === 'per_page' && [STATUS.SUBMITTED, STATUS.VERIFIED].includes(request.request_status);
 
   // Fetched rather than linked (the endpoints need the Authorization header), then saved through a throwaway anchor so no popup blocker interferes.
   async function downloadDocument(kind, filename) {
@@ -254,20 +257,18 @@ export default function TicketCard({ request, expanded, onToggle, onChanged }) {
               )}
               {amountDue && (
                 <div>
-                  <p className="ts-review-label">Amount to pay</p>
+                  <p className="ts-review-label">{amountLocked ? 'Amount paid' : 'Amount to pay'}</p>
                   <p className="ts-review-value">{amountDue}</p>
-                  <p className="ts-soft text-xs">Paid at the Cashier</p>
+                  <p className="ts-soft text-xs">
+                    {amountLocked ? 'Paid at the Cashier' : 'At the current fee, paid at the Cashier'}
+                  </p>
                 </div>
               )}
               {amountPending && (
                 <div>
                   <p className="ts-review-label">Amount to pay</p>
                   <p className="ts-review-value">Pending</p>
-                  <p className="ts-soft text-xs">
-                    {request.pricing_unit === 'per_page'
-                      ? 'Set when the Registrar approves and counts the pages'
-                      : 'Set when the Registrar approves your request'}
-                  </p>
+                  <p className="ts-soft text-xs">Set when the Registrar approves and counts the pages</p>
                 </div>
               )}
               {request.graduation_date && (
