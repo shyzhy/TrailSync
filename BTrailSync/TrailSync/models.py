@@ -365,6 +365,8 @@ class FormRequest(models.Model):
     payment_date = models.DateField(null=True, blank=True)
 
     # Claim-stub and pickup fields.
+    # When the student tapped "I'm Here for Pickup" at Window 6. It is their arrival, not our notice: the waiting list
+    # is drawn from it, so nothing else may set it.
     arrival_notice_sent_at = models.DateTimeField(null=True, blank=True)
     claim_stub_issued_at = models.DateTimeField(null=True, blank=True)
     digital_stub_active = models.BooleanField(default=False)
@@ -474,6 +476,31 @@ class FormRequest(models.Model):
         if self.request_status != self.RequestStatus.APPROVED or self.price_locked():
             return False
         return not any(p.verification_status == PaymentProof.VerificationStatus.PENDING for p in self.payment_proofs.all())
+
+    def can_announce_arrival(self):
+        """Only at Ready for Pickup, and only once: a second tap would just reset their place in the queue."""
+        return self.request_status == self.RequestStatus.READY and self.arrival_notice_sent_at is None
+
+    def missed_pickup(self):
+        """True once staff have flagged a booked pickup the student didn't come to."""
+        schedule = getattr(self, "release_schedule", None)
+        return bool(schedule and schedule.missed_pickup_notified_at)
+
+    def can_request_reschedule(self):
+        """Only after a missed pickup is flagged, and never on top of a request already waiting on an answer."""
+        schedule = getattr(self, "release_schedule", None)
+        if self.request_status != self.RequestStatus.READY or not (schedule and schedule.missed_pickup_notified_at):
+            return False
+        return schedule.reschedule_status != ReleaseSchedule.RescheduleStatus.PENDING
+
+    def can_flag_missed_pickup(self):
+        """A booked date that has passed with the document still uncollected, not already flagged."""
+        schedule = getattr(self, "release_schedule", None)
+        if self.request_status != self.RequestStatus.READY or schedule is None or schedule.release_date is None:
+            return False
+        if schedule.release_status == "Claimed" or schedule.missed_pickup_notified_at:
+            return False
+        return schedule.release_date < timezone.localdate()
 
     def can_change_proxy(self):
         """Only once the document is ready: earlier is too soon to matter, and after release it has been collected."""
@@ -595,6 +622,11 @@ class RequestProxy(models.Model):
 class ReleaseSchedule(models.Model):
     """The claim record for one request's release: who collected it, when, and how they signed."""
 
+    class RescheduleStatus(models.TextChoices):
+        PENDING = "Pending", "Waiting for the Registrar"
+        APPROVED = "Approved", "Approved"
+        REJECTED = "Rejected", "Rejected"
+
     form_request = models.OneToOneField(
         FormRequest,
         on_delete=models.CASCADE,
@@ -618,6 +650,17 @@ class ReleaseSchedule(models.Model):
         ReleaseSlot,
         on_delete=models.SET_NULL,
         related_name="release_schedules",
+        null=True,
+        blank=True,
+    )
+
+    # Set by staff when a booked pickup passes uncollected; it is what lets the student ask for a new date.
+    missed_pickup_notified_at = models.DateTimeField(null=True, blank=True)
+    # The date the student proposes, and where that proposal stands. Approving moves release_date to it.
+    requested_reschedule_date = models.DateField(null=True, blank=True)
+    reschedule_status = models.CharField(
+        max_length=20,
+        choices=RescheduleStatus.choices,
         null=True,
         blank=True,
     )

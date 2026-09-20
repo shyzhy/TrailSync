@@ -5,6 +5,7 @@ import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
 
 import PaymentProofPanel from '../../../src/components/PaymentProofPanel';
+import PickupActions from '../../../src/components/PickupActions';
 import { shortDate } from '../../../src/components/TicketCard';
 import { Banner, Body, Button, Card, Field, Heading, Input, Label, Loading, Muted, OptionRow, Pill, Screen, Title } from '../../../src/components/ui';
 import { API_BASE_URL } from '../../../src/lib/config';
@@ -234,6 +235,18 @@ export default function RequestDetail() {
           </Button>
         </Card>
       ) : null}
+
+      {/* The pickup moment: "I'm here", and a new date when one was missed. */}
+      <PickupActions
+        request={request}
+        onUpdated={(updated) => {
+          setRequest(updated);
+          setNotice(updated.arrival_notice_sent_at && updated.request_status === 'Ready'
+            ? 'Window 6 has been notified — please wait, they’ll call you shortly.'
+            : 'Your new pickup date request has been sent for approval.');
+        }}
+        onStale={load}
+      />
 
       <PaymentProofPanel request={request} onUpdated={(updated) => { setRequest(updated); setNotice('Submitted — we’ll review your payment and notify you once it’s confirmed.'); }} />
 

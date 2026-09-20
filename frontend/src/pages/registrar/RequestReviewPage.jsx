@@ -101,9 +101,9 @@ function Field({ label, children, className = '' }) {
   );
 }
 
-function ActionCard({ step, title, description, children }) {
+function ActionCard({ step, title, description, children, anchor }) {
   return (
-    <div className="ts-card p-6">
+    <div className="ts-card p-6" id={anchor}>
       {step && (
         <p className="ts-soft text-xs font-semibold uppercase tracking-wide">Step {step} of 5</p>
       )}
@@ -929,11 +929,96 @@ export default function RequestReviewPage({ requestId }) {
                     step={5}
                     title="Hand it over"
                     description="The last step. Record who actually collected the document."
+                    anchor="release"
                   >
                     {scheduleLine && (
                       <div className="ts-well mb-4 px-3.5 py-2.5">
                         <p className="ts-review-label">Due for pickup</p>
                         <p className="ts-ink mt-0.5 text-sm font-semibold">{scheduleLine}</p>
+                        {request.arrival_notice_sent_at && (
+                          <p className="ts-soft mt-1 text-sm">The student is at the window now.</p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* A pickup that has come and gone, and anything the student has asked for since. */}
+                    {(request.can_flag_missed_pickup || schedule?.reschedule_status === 'Pending' || schedule?.missed_pickup_notified_at) && (
+                      <div className="ts-info-note mb-4 block px-3.5 py-3 text-sm">
+                        {schedule?.reschedule_status === 'Pending' ? (
+                          <>
+                            <p className="ts-ink font-semibold">
+                              {request.student_full_name} is asking for {formatDate(schedule.requested_reschedule_date)}
+                            </p>
+                            <p className="mt-1 leading-relaxed">
+                              They missed {formatDate(schedule.release_date)}. Approving moves the pickup to the new date and
+                              tells them; turning it down asks them for another.
+                            </p>
+                            <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() =>
+                                  runTransition('reschedule-reject', `/api/registrar/queue/${request.id}/reschedule/reject/`, {
+                                    method: 'POST',
+                                    body: {},
+                                    successMessage: 'Sent back to the student.',
+                                  })
+                                }
+                                className="ts-btn-outline-danger px-5 py-2.5 text-sm font-medium"
+                              >
+                                <BusyLabel busy={actionLoading === 'reschedule-reject'} busyLabel="Sending…">
+                                  Reject this date
+                                </BusyLabel>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() =>
+                                  runTransition('reschedule-approve', `/api/registrar/queue/${request.id}/reschedule/approve/`, {
+                                    method: 'POST',
+                                    body: {},
+                                    successMessage: 'New pickup date confirmed.',
+                                  })
+                                }
+                                className="ts-btn-primary px-5 py-2.5 text-sm font-medium"
+                              >
+                                <BusyLabel busy={actionLoading === 'reschedule-approve'} busyLabel="Saving…">
+                                  Approve {formatDate(schedule.requested_reschedule_date)}
+                                </BusyLabel>
+                              </button>
+                            </div>
+                          </>
+                        ) : schedule?.missed_pickup_notified_at ? (
+                          <p className="leading-relaxed">
+                            Flagged as a missed pickup. The student has been asked to request a new date.
+                          </p>
+                        ) : (
+                          <>
+                            <p className="ts-ink font-semibold">This pickup date has passed</p>
+                            <p className="mt-1 leading-relaxed">
+                              {formatDate(schedule?.release_date)} came and went with the document still here. Telling the
+                              student lets them ask for a new date.
+                            </p>
+                            <div className="mt-3 sm:text-right">
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() =>
+                                  runTransition('missed-pickup', `/api/registrar/queue/${request.id}/missed-pickup/`, {
+                                    method: 'POST',
+                                    body: {},
+                                    successMessage: 'The student has been told.',
+                                  })
+                                }
+                                className="ts-btn-primary px-5 py-2.5 text-sm font-medium"
+                              >
+                                <BusyLabel busy={actionLoading === 'missed-pickup'} busyLabel="Sending…">
+                                  Notify Missed Pickup
+                                </BusyLabel>
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
 

@@ -7,6 +7,7 @@ import { LIFECYCLE, STATUS, STEP_LABEL, studentStatusLabel } from '../../lib/req
 import { useStudentShell } from '../layout/StudentShell.jsx';
 import { CancelRequestDialog, ProxyDialog } from './RequestActionDialogs.jsx';
 import PaymentProofPanel from './PaymentProofPanel.jsx';
+import PickupActions from './PickupActions.jsx';
 
 const PESO = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
 
@@ -345,6 +346,9 @@ export default function TicketCard({ request, expanded, onToggle, onChanged }) {
                 </button>
               </div>
             )}
+
+            {/* The pickup moment itself: "I'm here", and a new date when one was missed. */}
+            <PickupActions request={request} onChanged={onChanged} />
 
             {/* At Ready for Pickup plans can change: name someone else, or replace the person already named. */}
             {request.can_change_proxy && (

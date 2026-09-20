@@ -262,6 +262,9 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
     can_cancel = serializers.SerializerMethodField()
     can_change_proxy = serializers.SerializerMethodField()
     can_upload_payment_proof = serializers.SerializerMethodField()
+    # The pickup moment: telling Window 6 they have arrived, and asking for a new date after a missed one.
+    can_announce_arrival = serializers.SerializerMethodField()
+    can_request_reschedule = serializers.SerializerMethodField()
     # The student's last upload, so the ticket can show it waiting, accepted or turned down with the reason.
     payment_proof = serializers.SerializerMethodField()
     uploaded_files = serializers.SerializerMethodField()
@@ -300,6 +303,9 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
             "can_cancel",
             "can_change_proxy",
             "can_upload_payment_proof",
+            "can_announce_arrival",
+            "can_request_reschedule",
+            "arrival_notice_sent_at",
             "payment_proof",
             # Switched on when staff log the payment, so the student has something to show at Window 6.
             "digital_stub_active",
@@ -354,6 +360,12 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
     def get_can_upload_payment_proof(self, obj):
         return obj.can_upload_payment_proof()
 
+    def get_can_announce_arrival(self, obj):
+        return obj.can_announce_arrival()
+
+    def get_can_request_reschedule(self, obj):
+        return obj.can_request_reschedule()
+
     def get_payment_proof(self, obj):
         return serialize_payment_proof(obj.latest_payment_proof())
 
@@ -389,6 +401,13 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
                 {
                     "claimed_at": schedule.claimed_at.isoformat() if schedule.claimed_at else None,
                     "claimant_name": schedule.claimant_name,
+                    "missed_pickup_notified_at": (
+                        schedule.missed_pickup_notified_at.isoformat() if schedule.missed_pickup_notified_at else None
+                    ),
+                    "requested_reschedule_date": (
+                        schedule.requested_reschedule_date.isoformat() if schedule.requested_reschedule_date else None
+                    ),
+                    "reschedule_status": schedule.reschedule_status,
                 }
             )
         # The pickup date as staff set it, via the one accessor that knows the precedence.
@@ -535,6 +554,8 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
     fee_add_ons = serializers.SerializerMethodField()
     # Every upload for this request, newest first: the one to review, and what was turned down before it.
     payment_proofs = serializers.SerializerMethodField()
+    # Whether this is one staff can flag as a missed pickup, and when the student turned up at the window.
+    can_flag_missed_pickup = serializers.SerializerMethodField()
     # As on the student's ticket: today's price until the payment is logged, then the locked one.
     amount_due = serializers.SerializerMethodField()
     amount_locked = serializers.SerializerMethodField()
@@ -591,6 +612,8 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
             "proxy_changed_at",
             "proxy_version",
             "payment_proofs",
+            "can_flag_missed_pickup",
+            "arrival_notice_sent_at",
         ]
 
     def _profile(self, obj):
@@ -617,6 +640,9 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
 
     def get_payment_proofs(self, obj):
         return [serialize_payment_proof(p) for p in obj.payment_proofs.all()]
+
+    def get_can_flag_missed_pickup(self, obj):
+        return obj.can_flag_missed_pickup()
 
     def get_fee_add_ons(self, obj):
         return f"{obj.fee_add_ons():.2f}"
@@ -737,6 +763,13 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
                         else None
                     ),
                     "release_slot_id": schedule.release_slot_id,
+                    "missed_pickup_notified_at": (
+                        schedule.missed_pickup_notified_at.isoformat() if schedule.missed_pickup_notified_at else None
+                    ),
+                    "requested_reschedule_date": (
+                        schedule.requested_reschedule_date.isoformat() if schedule.requested_reschedule_date else None
+                    ),
+                    "reschedule_status": schedule.reschedule_status,
                 }
             )
         return data
@@ -794,6 +827,28 @@ class RejectPaymentProofSerializer(serializers.Serializer):
 
     def validate_rejection_reason(self, value):
         return value.strip()
+
+
+class RescheduleRequestSerializer(serializers.Serializer):
+    """POST /api/form-requests/<id>/reschedule/ body: the date the student proposes instead."""
+
+    requested_reschedule_date = serializers.DateField(
+        error_messages={"invalid": "Please choose a date.", "required": "Please choose a date."}
+    )
+
+    def validate_requested_reschedule_date(self, value):
+        if value < timezone.localdate():
+            raise serializers.ValidationError("Please choose a date that hasn't passed.")
+        return value
+
+
+class RescheduleDecisionSerializer(serializers.Serializer):
+    """Approve or reject body; the reason is optional and is only used when turning a date down."""
+
+    reason = serializers.CharField(max_length=300, required=False, allow_blank=True)
+
+    def validate_reason(self, value):
+        return (value or "").strip()
 
 
 class MarkReadySerializer(serializers.Serializer):

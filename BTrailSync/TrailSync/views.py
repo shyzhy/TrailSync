@@ -78,6 +78,8 @@ from .serializers import (
     RejectPaymentProofSerializer,
     RejectRequestSerializer,
     ReleaseRequestSerializer,
+    RescheduleDecisionSerializer,
+    RescheduleRequestSerializer,
     TrackedFormRequestSerializer,
     TransactionTypeSerializer,
     UpdateProfileSerializer,
@@ -1325,6 +1327,79 @@ class FormRequestPaymentProofView(APIView):
         return Response(TrackedFormRequestSerializer(form_request).data, status=status.HTTP_201_CREATED)
 
 
+class FormRequestArrivedView(APIView):
+    """POST /api/form-requests/<id>/arrived/ - the student is at Window 6 now.
+
+    It puts them on the counter's waiting list and nothing else: no notification row, because this is only worth
+    knowing while they are standing there.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        _lock_request(pk)
+        form_request = _own_request(request, pk)
+
+        if form_request.request_status != FormRequest.RequestStatus.READY:
+            return _wrong_state(form_request, "Ready for Pickup")
+        if form_request.arrival_notice_sent_at is not None:
+            return Response(
+                {
+                    "detail": "Window 6 already knows you're here. Please wait, they'll call you shortly.",
+                    "request_status": form_request.request_status,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        form_request.arrival_notice_sent_at = timezone.now()
+        form_request.save(update_fields=["arrival_notice_sent_at", "updated_at"])
+        return Response(TrackedFormRequestSerializer(form_request).data)
+
+
+class FormRequestRescheduleView(APIView):
+    """POST /api/form-requests/<id>/reschedule/ - the student asks for a new pickup date after missing one."""
+
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        _lock_request(pk)
+        form_request = _own_request(request, pk)
+        schedule = getattr(form_request, "release_schedule", None)
+
+        if form_request.request_status != FormRequest.RequestStatus.READY:
+            return _wrong_state(form_request, "Ready for Pickup")
+        if schedule is None or not schedule.missed_pickup_notified_at:
+            return Response(
+                {
+                    "detail": (
+                        "Your pickup date is still as booked, so there is nothing to reschedule. "
+                        "Talk to Window 6 if you need to change it."
+                    ),
+                    "request_status": form_request.request_status,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if schedule.reschedule_status == ReleaseSchedule.RescheduleStatus.PENDING:
+            return Response(
+                {
+                    "detail": "You already have a date waiting for the Registrar's answer.",
+                    "request_status": form_request.request_status,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        serializer = RescheduleRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        schedule.requested_reschedule_date = serializer.validated_data["requested_reschedule_date"]
+        schedule.reschedule_status = ReleaseSchedule.RescheduleStatus.PENDING
+        schedule.save(update_fields=["requested_reschedule_date", "reschedule_status", "updated_at"])
+
+        form_request.refresh_from_db()
+        return Response(TrackedFormRequestSerializer(form_request).data)
+
+
 class FormRequestCancelView(APIView):
     """POST /api/form-requests/<id>/cancel/ - the student ends their own request, only before payment is logged.
 
@@ -1681,6 +1756,161 @@ class RegistrarPaymentProofRejectView(APIView):
         return Response(RegistrarQueueRowSerializer(_queue_queryset().get(pk=form_request.pk)).data)
 
 
+class RegistrarPickupDeskView(APIView):
+    """GET /api/registrar/pickup-desk/ - what the counter needs right now, in one poll.
+
+    Two lists: students who have tapped "I'm here" and are still waiting, oldest arrival first, and the new pickup
+    dates waiting for an answer. Both are small, and the dashboard asks for them every few seconds.
+    """
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    def get(self, request):
+        now = timezone.now()
+        waiting = (
+            FormRequest.objects.filter(
+                request_status=FormRequest.RequestStatus.READY,
+                arrival_notice_sent_at__isnull=False,
+            )
+            .select_related("user", "transaction_type")
+            .order_by("arrival_notice_sent_at")
+        )
+        reschedules = (
+            FormRequest.objects.filter(
+                release_schedule__reschedule_status=ReleaseSchedule.RescheduleStatus.PENDING,
+            )
+            .select_related("user", "transaction_type", "release_schedule")
+            .order_by("release_schedule__updated_at")
+        )
+
+        return Response(
+            {
+                "waiting": [
+                    {
+                        "id": fr.id,
+                        "request_code": fr.request_code,
+                        "student_name": fr.user.get_full_name() or fr.user.email,
+                        "transaction_type": fr.transaction_type.name,
+                        "arrived_at": fr.arrival_notice_sent_at,
+                        # Sent as whole minutes so every row counts from the same instant, not from whenever it rendered.
+                        "waiting_minutes": int((now - fr.arrival_notice_sent_at).total_seconds() // 60),
+                    }
+                    for fr in waiting
+                ],
+                "reschedules": [
+                    {
+                        "id": fr.id,
+                        "request_code": fr.request_code,
+                        "student_name": fr.user.get_full_name() or fr.user.email,
+                        "transaction_type": fr.transaction_type.name,
+                        "release_date": fr.release_schedule.release_date,
+                        "requested_reschedule_date": fr.release_schedule.requested_reschedule_date,
+                    }
+                    for fr in reschedules
+                ],
+            }
+        )
+
+
+class RegistrarMissedPickupView(APIView):
+    """POST /api/registrar/queue/<id>/missed-pickup/ - flag a booked pickup the student didn't come to."""
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        _lock_request(pk)
+        form_request = get_object_or_404(_queue_queryset(), pk=pk)
+        schedule = getattr(form_request, "release_schedule", None)
+
+        if form_request.request_status != FormRequest.RequestStatus.READY:
+            return _wrong_state(form_request, "Ready for Pickup")
+        if not form_request.can_flag_missed_pickup():
+            detail = (
+                "This pickup is already flagged as missed."
+                if schedule and schedule.missed_pickup_notified_at
+                else "This request's pickup date hasn't passed yet."
+            )
+            return Response(
+                {"detail": f"{detail} The page has been refreshed.", "request_status": form_request.request_status},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        schedule.missed_pickup_notified_at = timezone.now()
+        schedule.save(update_fields=["missed_pickup_notified_at", "updated_at"])
+
+        _notify_student(
+            form_request,
+            Notification.NotificationType.READY,
+            "Missed pickup",
+            (
+                f"You missed your scheduled pickup on {schedule.release_date:%B %d, %Y} for "
+                f"{form_request.request_code}. Please request a new pickup date."
+            ),
+        )
+        form_request.refresh_from_db()
+        return Response(RegistrarQueueRowSerializer(_queue_queryset().get(pk=pk)).data)
+
+
+class RegistrarRescheduleDecisionView(APIView):
+    """POST /api/registrar/queue/<id>/reschedule/<decision>/ - approve or turn down the date a student proposed."""
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    @transaction.atomic
+    def post(self, request, pk, decision):
+        _lock_request(pk)
+        form_request = get_object_or_404(_queue_queryset(), pk=pk)
+        schedule = getattr(form_request, "release_schedule", None)
+
+        if schedule is None or schedule.reschedule_status != ReleaseSchedule.RescheduleStatus.PENDING:
+            return Response(
+                {
+                    "detail": "There is no pickup date waiting for an answer on this request. The page has been refreshed.",
+                    "request_status": form_request.request_status,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if form_request.request_status != FormRequest.RequestStatus.READY:
+            return _wrong_state(form_request, "Ready for Pickup")
+
+        serializer = RescheduleDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_date = schedule.requested_reschedule_date
+
+        if decision == "approve":
+            schedule.release_date = new_date
+            schedule.reschedule_status = ReleaseSchedule.RescheduleStatus.APPROVED
+            # Back on track: the missed pickup it came from is settled.
+            schedule.missed_pickup_notified_at = None
+            schedule.save(update_fields=["release_date", "reschedule_status", "missed_pickup_notified_at", "updated_at"])
+            _notify_student(
+                form_request,
+                Notification.NotificationType.READY,
+                "New pickup date confirmed",
+                (
+                    f"Your new pickup date for {form_request.request_code} is {new_date:%B %d, %Y}, between "
+                    f"{_release_window_text()} at Window 6. Bring your claim stub and a valid ID."
+                ),
+            )
+        else:
+            schedule.reschedule_status = ReleaseSchedule.RescheduleStatus.REJECTED
+            schedule.save(update_fields=["reschedule_status", "updated_at"])
+            reason = serializer.validated_data.get("reason")
+            _notify_student(
+                form_request,
+                Notification.NotificationType.READY,
+                "Pickup date not available",
+                (
+                    f"{new_date:%B %d, %Y} doesn't work for {form_request.request_code}."
+                    + (f" {reason}" if reason else "")
+                    + " Please request another date."
+                ),
+            )
+
+        return Response(RegistrarQueueRowSerializer(_queue_queryset().get(pk=pk)).data)
+
+
 class RegistrarMarkReadyView(APIView):
     """PATCH /api/form-requests/<id>/mark-ready/ - Processing -> Ready for Pickup; staff choose only the date."""
 
@@ -1705,14 +1935,8 @@ class RegistrarMarkReadyView(APIView):
         schedule.save(update_fields=["release_date", "release_time_start", "updated_at"])
 
         form_request.request_status = FormRequest.RequestStatus.READY
-        form_request.arrival_notice_sent_at = timezone.now()
-        form_request.save(
-            update_fields=[
-                "request_status",
-                "arrival_notice_sent_at",
-                "updated_at",
-            ]
-        )
+        # arrival_notice_sent_at is the student's own "I'm here" tap at the window, so nothing is stamped here.
+        form_request.save(update_fields=["request_status", "updated_at"])
 
         when = f" on {release_date:%B %d, %Y}, between {_release_window_text()}"
         _notify_student(

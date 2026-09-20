@@ -11,6 +11,7 @@ import {
   WarningIcon,
 } from '../../components/ui/index.js';
 import ReleaseCalendar from '../../components/registrar/ReleaseCalendar.jsx';
+import PickupDesk from '../../components/registrar/PickupDesk.jsx';
 import { APP_CSS } from '../../styles/appCss.js';
 import { FONT_SANS, FONT_SERIF } from '../../styles/fonts.js';
 import { errorFromResponse, toApiError } from '../../lib/api.js';
@@ -213,6 +214,9 @@ export default function RegistrarDashboardPage() {
             </ul>
           </div>
         )}
+
+        {/* Above the counts: someone is physically at the window, which outranks anything else on this page. */}
+        <PickupDesk />
 
         {/* On failure one error state replaces the counts and lists: zeros would tell staff there's no work. */}
         {status === 'error' && (
