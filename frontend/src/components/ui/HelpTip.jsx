@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { useBackButton } from '../../lib/backButton.js';
 
 // A small "?" with a one-sentence explanation: hover on desktop, tap on a phone, and never toggles the label it sits in.
 export function HelpTip({ children, label = 'What does this mean?' }) {
@@ -9,7 +8,6 @@ export function HelpTip({ children, label = 'What does this mean?' }) {
   const wrapRef = useRef(null);
   const bubbleRef = useRef(null);
   const open = pinned || hover;
-  useBackButton(pinned, () => setPinned(false), { overlay: true });
 
   useEffect(() => {
     if (!pinned) return undefined;

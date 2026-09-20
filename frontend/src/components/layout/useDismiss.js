@@ -1,8 +1,6 @@
 import { useEffect } from 'react';
-import { useBackButton } from '../../lib/backButton.js';
 
 export function useDismiss(open, onClose, ref) {
-  useBackButton(open, onClose, { overlay: true });
   useEffect(() => {
     if (!open) return undefined;
     const onPointer = (e) => {

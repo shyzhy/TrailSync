@@ -1,12 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { CloseIcon } from './icons.jsx';
-import { useBackButton } from '../../lib/backButton.js';
 
 // A dialog over a dimmed page: closes on Escape, the close button or a click outside, and takes focus when it opens.
 export function Modal({ label, onClose, children, className = '' }) {
   const panelRef = useRef(null);
   // In the Android app, the back button closes the dialog rather than leaving the page under it.
-  useBackButton(true, onClose, { overlay: true });
 
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();

@@ -1,0 +1,68 @@
+{
+  "expo": {
+    "name": "TrailSync",
+    "slug": "trailsync",
+    "scheme": "trailsync",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "ph.edu.ustp.trailsync",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "TrailSync needs your photo library so you can attach requirements and a photo of your Cashier receipt.",
+        "NSCameraUsageDescription": "TrailSync needs the camera so you can photograph your Cashier receipt."
+      }
+    },
+    "android": {
+      "package": "ph.edu.ustp.trailsync",
+      "adaptiveIcon": {
+        "backgroundColor": "#24406B",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "TrailSync needs your photo library so you can attach requirements and a photo of your Cashier receipt.",
+          "cameraPermission": "TrailSync needs the camera so you can photograph your Cashier receipt."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#24406B"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#FAF8F3",
+          "imageWidth": 200
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "eas": {
+        "projectId": ""
+      }
+    }
+  }
+}

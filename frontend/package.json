@@ -6,25 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "build:mobile": "vite build --mode mobile",
-    "mobile:sync": "npm run build:mobile && cap sync android",
-    "mobile:run": "npm run mobile:sync && cap run android",
-    "mobile:open": "cap open android",
-    "mobile:assets": "capacitor-assets generate --android --iconBackgroundColor \"#FAF8F3\" --iconBackgroundColorDark \"#FAF8F3\" --splashBackgroundColor \"#FAF8F3\" --splashBackgroundColorDark \"#FAF8F3\""
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@capacitor/android": "^8.5.2",
-    "@capacitor/app": "^8.1.1",
-    "@capacitor/core": "^8.5.2",
-    "@capacitor/splash-screen": "^8.0.2",
-    "@capacitor/status-bar": "^8.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@capacitor/assets": "^3.0.5",
-    "@capacitor/cli": "^8.5.2",
     "@tailwindcss/vite": "^4.1.0",
     "@vitejs/plugin-react": "^4.3.4",
     "tailwindcss": "^4.1.0",
