@@ -91,6 +91,12 @@ class User(AbstractUser):
     def __str__(self):
         return f"{self.email} - {self.get_full_name()}"
 
+def receipt_upload_to(instance, filename):
+    """Random, per-upload filename: a receipt photo shows an amount and an O.R. number, so its URL shouldn't be guessable."""
+    suffix = ".png" if str(filename).lower().endswith(".png") else ".jpg"
+    return f"payment_receipts/{uuid.uuid4().hex}{suffix}"
+
+
 def profile_picture_upload_to(instance, filename):
     """Random, per-upload filename: unguessable on public media URLs, and a new URL defeats caching when a photo is replaced."""
     return f"profile_pictures/{uuid.uuid4().hex}.jpg"
@@ -459,6 +465,16 @@ class FormRequest(models.Model):
         """Only before payment is logged: after that, undoing it is a refund conversation with staff, not a button."""
         return self.request_status in CANCELLABLE_STATUSES
 
+    def latest_payment_proof(self):
+        """The student's most recent upload, whatever came of it; earlier attempts stay in the history."""
+        return self.payment_proofs.order_by("-uploaded_at").first()
+
+    def can_upload_payment_proof(self):
+        """Only while the form is printable and the payment isn't logged, and never with a review already waiting."""
+        if self.request_status != self.RequestStatus.APPROVED or self.price_locked():
+            return False
+        return not any(p.verification_status == PaymentProof.VerificationStatus.PENDING for p in self.payment_proofs.all())
+
     def can_change_proxy(self):
         """Only once the document is ready: earlier is too soon to matter, and after release it has been collected."""
         return self.request_status == self.RequestStatus.READY
@@ -685,6 +701,7 @@ class Notification(models.Model):
         RELEASED = "Released", "Released"
         REJECTED = "Rejected", "Rejected"
         CANCELLED = "Cancelled", "Cancelled"
+        PAYMENT_PROOF = "Payment Proof", "Payment proof"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -712,6 +729,61 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.notification_type} -> {self.user.email}"
+
+
+class PaymentProof(models.Model):
+    """A student's own proof of having paid at the Cashier: the O.R. number they read off the receipt, and its photo.
+
+    One row per attempt. A rejected upload is kept, both as the Registrar's record of what they turned down and so the
+    student can see why, and the next try is a new row rather than an overwrite.
+    """
+
+    class VerificationStatus(models.TextChoices):
+        PENDING = "Pending", "Pending review"
+        ACCEPTED = "Accepted", "Accepted"
+        REJECTED = "Rejected", "Rejected"
+        # Staff logged the payment in person while this upload was still waiting, so there is nothing left to review.
+        SUPERSEDED = "Superseded", "No longer needed"
+
+    form_request = models.ForeignKey(
+        FormRequest,
+        on_delete=models.CASCADE,
+        related_name="payment_proofs",
+    )
+    # Written only by the student's own upload endpoint, which checks the type and size before this is saved.
+    receipt_image_path = models.ImageField(upload_to=receipt_upload_to, max_length=255)
+    # What the student typed from their receipt. The Registrar confirms or corrects it before it becomes or_number.
+    student_entered_or_number = models.CharField(max_length=50)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    verification_status = models.CharField(
+        max_length=20,
+        choices=VerificationStatus.choices,
+        default=VerificationStatus.PENDING,
+    )
+    reviewed_by = models.ForeignKey(
+        StaffProfile,
+        on_delete=models.SET_NULL,
+        related_name="payment_proof_reviews",
+        null=True,
+        blank=True,
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    # Required on a rejection: the student can only fix what they are told about.
+    rejection_reason = models.TextField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+
+    def __str__(self):
+        return f"{self.verification_status} proof for {self.form_request.request_code}"
+
+
+@receiver(post_delete, sender=PaymentProof)
+def _delete_receipt_image(sender, instance, **kwargs):
+    # A receipt photo is the student's own financial record; it goes with the request rather than lingering on disk.
+    if instance.receipt_image_path:
+        instance.receipt_image_path.delete(save=False)
 
 
 @receiver(post_delete, sender=FormSubmission)

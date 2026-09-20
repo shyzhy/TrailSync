@@ -23,6 +23,7 @@ from .models import (
     FormRequest,
     FormSubmission,
     Notification,
+    PaymentProof,
     ReleaseSchedule,
     RequestProxy,
     RequirementVerification,
@@ -219,6 +220,23 @@ class ChangeEmailConfirmSerializer(serializers.Serializer):
     token = serializers.CharField()
 
 
+def serialize_payment_proof(proof, include_image=True):
+    """One upload as both sides read it. The student sees their own photo back; staff need it to check the O.R. number."""
+    if proof is None:
+        return None
+    reviewer = proof.reviewed_by
+    return {
+        "id": proof.id,
+        "student_entered_or_number": proof.student_entered_or_number,
+        "receipt_image_url": absolute_media_url(proof.receipt_image_path) if include_image else None,
+        "uploaded_at": proof.uploaded_at,
+        "verification_status": proof.verification_status,
+        "reviewed_by": reviewer.user.get_full_name() if reviewer else None,
+        "reviewed_at": proof.reviewed_at,
+        "rejection_reason": proof.rejection_reason,
+    }
+
+
 def amount_due_text(form_request):
     """current_amount_due() in the shape the API has always sent amounts: a two-decimal string, or null."""
     amount = form_request.current_amount_due()
@@ -243,6 +261,9 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
     receipt_available = serializers.SerializerMethodField()
     can_cancel = serializers.SerializerMethodField()
     can_change_proxy = serializers.SerializerMethodField()
+    can_upload_payment_proof = serializers.SerializerMethodField()
+    # The student's last upload, so the ticket can show it waiting, accepted or turned down with the reason.
+    payment_proof = serializers.SerializerMethodField()
     uploaded_files = serializers.SerializerMethodField()
     # Today's price until the payment is logged, then the locked one; amount_locked says which it is.
     amount_due = serializers.SerializerMethodField()
@@ -278,6 +299,8 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
             "receipt_available",
             "can_cancel",
             "can_change_proxy",
+            "can_upload_payment_proof",
+            "payment_proof",
             # Switched on when staff log the payment, so the student has something to show at Window 6.
             "digital_stub_active",
             # Read-only here; attachments are only written at submission.
@@ -327,6 +350,12 @@ class TrackedFormRequestSerializer(serializers.ModelSerializer):
 
     def get_can_cancel(self, obj):
         return obj.can_cancel()
+
+    def get_can_upload_payment_proof(self, obj):
+        return obj.can_upload_payment_proof()
+
+    def get_payment_proof(self, obj):
+        return serialize_payment_proof(obj.latest_payment_proof())
 
     def get_amount_due(self, obj):
         return amount_due_text(obj)
@@ -504,6 +533,8 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
         source="transaction_type.fee_amount", max_digits=8, decimal_places=2, read_only=True
     )
     fee_add_ons = serializers.SerializerMethodField()
+    # Every upload for this request, newest first: the one to review, and what was turned down before it.
+    payment_proofs = serializers.SerializerMethodField()
     # As on the student's ticket: today's price until the payment is logged, then the locked one.
     amount_due = serializers.SerializerMethodField()
     amount_locked = serializers.SerializerMethodField()
@@ -559,6 +590,7 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
             "cancelled_at",
             "proxy_changed_at",
             "proxy_version",
+            "payment_proofs",
         ]
 
     def _profile(self, obj):
@@ -582,6 +614,9 @@ class RegistrarQueueRowSerializer(serializers.ModelSerializer):
 
     def get_graduation_date(self, obj):
         return self._form_data(obj).get("graduation_date") or None
+
+    def get_payment_proofs(self, obj):
+        return [serialize_payment_proof(p) for p in obj.payment_proofs.all()]
 
     def get_fee_add_ons(self, obj):
         return f"{obj.fee_add_ons():.2f}"
@@ -714,6 +749,51 @@ class ApproveLogSerializer(serializers.Serializer):
     payment_date = serializers.DateField()
     # The amount the page showed, which is the one about to be locked; refused if the fee has moved since. Omitted, unchecked.
     expected_amount_due = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, allow_null=True)
+
+
+RECEIPT_PHOTO_BYTES = 10 * 1024 * 1024
+RECEIPT_PHOTO_TYPES = ("JPG", "PNG")
+
+
+class PaymentProofUploadSerializer(serializers.Serializer):
+    """POST /api/form-requests/<id>/payment-proof/ body: what the student read off their receipt, and its photo."""
+
+    student_entered_or_number = serializers.CharField(
+        max_length=50,
+        error_messages={"blank": "Enter the O.R. number on your receipt.", "required": "Enter the O.R. number on your receipt."},
+    )
+    receipt_image = serializers.ImageField(
+        error_messages={"required": "Attach a photo of your receipt.", "invalid_image": "That file isn't an image. Please attach a photo."}
+    )
+
+    def validate_student_entered_or_number(self, value):
+        return value.strip()
+
+    def validate_receipt_image(self, value):
+        # Checked by what the file actually starts with, not by its name or the Content-Type the browser sent.
+        check_upload(value, RECEIPT_PHOTO_TYPES, RECEIPT_PHOTO_BYTES, "Your receipt photo")
+        return value
+
+
+class AcceptPaymentProofSerializer(serializers.Serializer):
+    """POST /api/registrar/payment-proofs/<id>/accept/ body: the O.R. number and date as staff confirm them."""
+
+    or_number = serializers.CharField(max_length=50, allow_blank=False, trim_whitespace=True)
+    payment_date = serializers.DateField()
+    # The amount the page showed, as with Approve & Log: refused if the fee moved since it was opened.
+    expected_amount_due = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, allow_null=True)
+
+
+class RejectPaymentProofSerializer(serializers.Serializer):
+    """POST /api/registrar/payment-proofs/<id>/reject/ body. The reason is required: the student can only fix what they're told."""
+
+    rejection_reason = serializers.CharField(
+        max_length=300,
+        error_messages={"blank": "Say what was wrong with the photo.", "required": "Say what was wrong with the photo."},
+    )
+
+    def validate_rejection_reason(self, value):
+        return value.strip()
 
 
 class MarkReadySerializer(serializers.Serializer):

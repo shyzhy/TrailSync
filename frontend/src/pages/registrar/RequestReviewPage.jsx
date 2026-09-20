@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import PaymentProofReview from '../../components/registrar/PaymentProofReview.jsx';
 import { RegistrarMobileHeader, RegistrarSidebar } from '../../components/layout/RegistrarSidebar.jsx';
 import {
   BusyLabel,
@@ -747,8 +748,28 @@ export default function RequestReviewPage({ requestId }) {
                   <ActionCard
                     step={3}
                     title="Record the payment"
-                    description="The student pays at the Cashier and brings back their printed form. Copy the details from it."
+                    description="Either accept the receipt the student uploaded, or copy the details from the printed form they bring in."
                   >
+                    {/* Shown only when there is an upload: the counter route below works the same with or without one. */}
+                    <PaymentProofReview
+                      request={request}
+                      busy={busy}
+                      onReviewed={(updated, kind) => {
+                        if (!updated) {
+                          load();
+                          return;
+                        }
+                        setRequest(updated);
+                        setToast({
+                          message: kind === 'accept' ? 'Payment saved. The document can now be prepared.' : 'Sent back to the student.',
+                          tone: 'success',
+                        });
+                      }}
+                    />
+
+                    {(request.payment_proofs || []).some((p) => p.verification_status === 'Pending') && (
+                      <p className="ts-soft mb-3 text-sm">Or record the payment from a printed receipt brought to the window:</p>
+                    )}
                     {amountDue && (
                       <div className="ts-well mb-4 px-3.5 py-2.5">
                         <p className="ts-review-label">Amount to collect</p>

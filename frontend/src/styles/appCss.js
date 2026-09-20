@@ -845,6 +845,22 @@ export const APP_CSS = `
     .ts-ticket-actions { flex-direction: row; align-items: center; justify-content: space-between; gap: 1.25rem; }
   }
 
+  /* Big enough for staff to read an O.R. number off the photo without leaving the page, and capped so a tall
+     portrait shot doesn't push the buttons off screen. */
+  .ts-receipt-image {
+    max-height: 26rem;
+    object-fit: contain;
+    border-radius: 0.6rem;
+    border: 1px solid #E3DFD2;
+    background: #FFFFFF;
+  }
+
+  /* The payment-proof panel is a block of its own, not the note-and-button row the other ticket actions use. */
+  .ts-ticket-actions-stack, .ts-ticket-actions-stack * { min-width: 0; }
+  @media (min-width: 640px) {
+    .ts-ticket-actions.ts-ticket-actions-stack { flex-direction: column; align-items: stretch; }
+  }
+
   /* Neutral tags for fees and purposes, distinct from the status pills. */
   .ts-tag {
     display: inline-flex;

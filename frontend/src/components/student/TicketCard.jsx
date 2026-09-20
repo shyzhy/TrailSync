@@ -6,6 +6,7 @@ import { authFetch } from '../../lib/auth.js';
 import { LIFECYCLE, STATUS, STEP_LABEL, studentStatusLabel } from '../../lib/requestStatus.js';
 import { useStudentShell } from '../layout/StudentShell.jsx';
 import { CancelRequestDialog, ProxyDialog } from './RequestActionDialogs.jsx';
+import PaymentProofPanel from './PaymentProofPanel.jsx';
 
 const PESO = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
 
@@ -319,6 +320,11 @@ export default function TicketCard({ request, expanded, onToggle, onChanged }) {
                   {docState === 'receipt' ? 'Preparing…' : 'Download form'}
                 </button>
               </div>
+            )}
+
+            {/* A second way to the same place as Window 6's counter: send the receipt instead of carrying it in. */}
+            {request.receipt_available && !amountLocked && (
+              <PaymentProofPanel request={request} onChanged={onChanged} />
             )}
 
             {request.digital_stub_active && (

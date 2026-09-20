@@ -27,6 +27,7 @@ from .models import (
     RELEASE_TIME_START,
     FormRequest,
     Notification,
+    PaymentProof,
     ReleaseSchedule,
     RequestProxy,
     RequirementVerification,
@@ -50,6 +51,7 @@ from .account_links import (
 )
 from .serializers import (
     ONBOARDING_STEPS,
+    AcceptPaymentProofSerializer,
     ActivateAccountSerializer,
     ApproveLogSerializer,
     ApproveRequestSerializer,
@@ -67,11 +69,13 @@ from .serializers import (
     PasswordResetConfirmSerializer,
     PasswordResetLinkSerializer,
     PasswordResetRequestSerializer,
+    PaymentProofUploadSerializer,
     ProxyAssignmentSerializer,
     RegistrarQueueRowSerializer,
     RegistrarRecentSubmissionSerializer,
     RegistrarReleasedRowSerializer,
     RegistrarTodaysPickupRowSerializer,
+    RejectPaymentProofSerializer,
     RejectRequestSerializer,
     ReleaseRequestSerializer,
     TrackedFormRequestSerializer,
@@ -752,6 +756,7 @@ class FormRequestListCreateView(generics.ListCreateAPIView):
         qs = (
             FormRequest.objects.filter(user=self.request.user)
             .select_related("transaction_type", "submission", "release_slot", "proxy", "release_schedule")
+            .prefetch_related("payment_proofs")
             .order_by("-created_at")
         )
 
@@ -1252,10 +1257,72 @@ class FormRequestClaimStubView(APIView):
 def _own_request(request, pk):
     """The student's own request for an action on it; anyone else's is a 404, as if it didn't exist."""
     return get_object_or_404(
-        FormRequest.objects.select_related("transaction_type", "submission", "release_slot", "proxy", "release_schedule"),
+        FormRequest.objects.select_related("transaction_type", "submission", "release_slot", "proxy", "release_schedule")
+        .prefetch_related("payment_proofs"),
         pk=pk,
         user=request.user,
     )
+
+
+class FormRequestPaymentProofView(APIView):
+    """POST /api/form-requests/<id>/payment-proof/ - the student's own proof of having paid at the Cashier.
+
+    A second way to reach the same place as Window 6's Approve & Log, not a replacement: staff can still log a payment
+    from the printed receipt whatever is uploaded here. Nothing moves until the Registrar accepts the upload.
+    """
+
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        # Locked so this can't cross with staff logging the payment at the window at the same moment.
+        _lock_request(pk)
+        form_request = _own_request(request, pk)
+
+        if form_request.price_locked():
+            return Response(
+                {
+                    "detail": (
+                        "Your payment is already logged for this request, so there is nothing to upload. "
+                        "Check Track Requests for where it is now."
+                    ),
+                    "request_status": form_request.request_status,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        if form_request.request_status != FormRequest.RequestStatus.APPROVED:
+            return _wrong_state(form_request, "Approved - Ready to Print")
+        if not form_request.can_upload_payment_proof():
+            return Response(
+                {
+                    "detail": (
+                        "Your last upload is still being reviewed. We'll let you know as soon as it has been checked."
+                    ),
+                    "request_status": form_request.request_status,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        serializer = PaymentProofUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        proof = PaymentProof.objects.create(
+            form_request=form_request,
+            receipt_image_path=serializer.validated_data["receipt_image"],
+            student_entered_or_number=serializer.validated_data["student_entered_or_number"],
+        )
+
+        _notify_student(
+            form_request,
+            Notification.NotificationType.PAYMENT_PROOF,
+            "Payment proof submitted",
+            (
+                f"We received your receipt for {form_request.request_code} (O.R. {proof.student_entered_or_number}). "
+                "We'll review it and let you know once your payment is confirmed."
+            ),
+        )
+        form_request.refresh_from_db()
+        return Response(TrackedFormRequestSerializer(form_request).data, status=status.HTTP_201_CREATED)
 
 
 class FormRequestCancelView(APIView):
@@ -1289,6 +1356,8 @@ class FormRequestCancelView(APIView):
         form_request.request_status = FormRequest.RequestStatus.CANCELLED
         form_request.cancelled_at = timezone.now()
         form_request.save(update_fields=["request_status", "cancelled_at", "updated_at"])
+        # Nothing left to review on a request its own student has ended.
+        _close_pending_proofs(form_request)
 
         _notify_student(
             form_request,
@@ -1395,6 +1464,64 @@ def _archive_official_form(pk):
     archive_official_form(_document_queryset().get(pk=pk))
 
 
+def _log_payment(form_request, validated, *, keep_proof=None):
+    """Record a Cashier payment: lock the amount, move to Processing and open the claim stub.
+
+    Both routes end here: the Registrar typing a printed receipt in at Window 6, and the Registrar accepting a payment
+    proof the student uploaded. Returns a 409 Response if the fee moved since the page was drawn, otherwise None.
+    """
+    # The price is locked now, from the fee at this moment, and never worked out again.
+    amount = form_request.calculate_amount_due()
+    # Never lock a number the Registrar didn't see: if the fee moved while the page was open, show them the new one first.
+    if "expected_amount_due" in validated and validated["expected_amount_due"] != amount:
+        shown = validated["expected_amount_due"]
+        return Response(
+            {
+                "detail": (
+                    f"The fee for {form_request.transaction_type.name} changed while this page was open: this "
+                    f"request now comes to {_peso(amount)}, not {_peso(shown)}. The page has been refreshed. "
+                    "Check the new amount, then save the payment again."
+                ),
+                "request_status": form_request.request_status,
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    form_request.amount_due = amount
+    form_request.or_number = validated["or_number"]
+    form_request.payment_date = validated["payment_date"]
+    form_request.request_status = FormRequest.RequestStatus.PROCESSING
+
+    # The digital claim stub goes live at payment, the window in which the student needs it.
+    form_request.claim_stub_issued_at = timezone.now()
+    form_request.digital_stub_active = True
+    # Keep the official form as it stands at payment, once the payment is committed. It is a record, not what
+    # downloads serve; if writing it fails, that is logged rather than undoing the payment.
+    transaction.on_commit(lambda: _archive_official_form(form_request.pk), robust=True)
+
+    form_request.save(
+        update_fields=[
+            "amount_due",
+            "or_number",
+            "payment_date",
+            "request_status",
+            "claim_stub_issued_at",
+            "digital_stub_active",
+            "updated_at",
+        ]
+    )
+    _close_pending_proofs(form_request, keep=keep_proof)
+    return None
+
+
+def _close_pending_proofs(form_request, keep=None):
+    """An upload still waiting has nothing left to review once the payment is recorded, so it stops sitting in the queue."""
+    waiting = form_request.payment_proofs.filter(verification_status=PaymentProof.VerificationStatus.PENDING)
+    if keep is not None:
+        waiting = waiting.exclude(pk=keep.pk)
+    waiting.update(verification_status=PaymentProof.VerificationStatus.SUPERSEDED, reviewed_at=timezone.now())
+
+
 def _peso(amount):
     return "no set fee" if amount is None else f"PHP {amount:,.2f}"
 
@@ -1408,7 +1535,7 @@ def _queue_queryset():
         "release_slot",
         "release_schedule",
         "registrar_approved_by__user",
-    )
+    ).prefetch_related("payment_proofs__reviewed_by__user")
 
 
 class RegistrarQueueDetailView(APIView):
@@ -1439,46 +1566,9 @@ class RegistrarApproveLogView(APIView):
         serializer = ApproveLogSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        # The price is locked now, from the fee at this moment, and never worked out again.
-        amount = form_request.calculate_amount_due()
-        # Never lock a number the Registrar didn't see: if the fee moved while the page was open, show them the new one first.
-        if "expected_amount_due" in serializer.validated_data and serializer.validated_data["expected_amount_due"] != amount:
-            shown = serializer.validated_data["expected_amount_due"]
-            return Response(
-                {
-                    "detail": (
-                        f"The fee for {form_request.transaction_type.name} changed while this page was open: this "
-                        f"request now comes to {_peso(amount)}, not {_peso(shown)}. The page has been refreshed. "
-                        "Check the new amount, then save the payment again."
-                    ),
-                    "request_status": form_request.request_status,
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        form_request.amount_due = amount
-        form_request.or_number = serializer.validated_data["or_number"]
-        form_request.payment_date = serializer.validated_data["payment_date"]
-        form_request.request_status = FormRequest.RequestStatus.PROCESSING
-
-        # The digital claim stub goes live at payment, the window in which the student needs it.
-        form_request.claim_stub_issued_at = timezone.now()
-        # Keep the official form as it stands at payment, once the payment is committed. It is a record, not what
-        # downloads serve; if writing it fails, that is logged rather than undoing the payment.
-        transaction.on_commit(lambda: _archive_official_form(pk), robust=True)
-        form_request.digital_stub_active = True
-
-        form_request.save(
-            update_fields=[
-                "amount_due",
-                "or_number",
-                "payment_date",
-                "request_status",
-                "claim_stub_issued_at",
-                "digital_stub_active",
-                "updated_at",
-            ]
-        )
+        conflict = _log_payment(form_request, serializer.validated_data)
+        if conflict is not None:
+            return conflict
 
         _notify_student(
             form_request,
@@ -1490,6 +1580,105 @@ class RegistrarApproveLogView(APIView):
             ),
         )
         return Response(RegistrarQueueRowSerializer(form_request).data)
+
+
+def _proof_for_review(pk):
+    """The upload, its request locked and read fresh, or the 409 that says there is nothing to review on it."""
+    proof = get_object_or_404(PaymentProof.objects.select_related("form_request"), pk=pk)
+    _lock_request(proof.form_request_id)
+    proof.refresh_from_db()
+    form_request = get_object_or_404(_queue_queryset(), pk=proof.form_request_id)
+
+    if proof.verification_status != PaymentProof.VerificationStatus.PENDING:
+        detail = {
+            PaymentProof.VerificationStatus.ACCEPTED: "This payment proof has already been accepted.",
+            PaymentProof.VerificationStatus.REJECTED: "This payment proof has already been turned down.",
+            PaymentProof.VerificationStatus.SUPERSEDED: (
+                "This payment proof is no longer waiting: the payment for this request was logged another way."
+            ),
+        }[proof.verification_status]
+        return proof, form_request, Response(
+            {"detail": f"{detail} The page has been refreshed.", "request_status": form_request.request_status},
+            status=status.HTTP_409_CONFLICT,
+        )
+    if form_request.request_status != FormRequest.RequestStatus.APPROVED:
+        return proof, form_request, _wrong_state(form_request, "Approved - Ready to Print")
+    if form_request.blocked_by_clearance():
+        return proof, form_request, _blocked_by_clearance_response(form_request)
+    return proof, form_request, None
+
+
+class RegistrarPaymentProofAcceptView(APIView):
+    """POST /api/registrar/payment-proofs/<id>/accept/ - confirm an uploaded receipt, with the same effect as Approve & Log.
+
+    The O.R. number and date are the staff member's to confirm or correct against the photo, not taken as the student typed them.
+    """
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        proof, form_request, refusal = _proof_for_review(pk)
+        if refusal is not None:
+            return refusal
+
+        serializer = AcceptPaymentProofSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        conflict = _log_payment(form_request, serializer.validated_data, keep_proof=proof)
+        if conflict is not None:
+            return conflict
+
+        proof.verification_status = PaymentProof.VerificationStatus.ACCEPTED
+        proof.reviewed_by = getattr(request.user, "staff_profile", None)
+        proof.reviewed_at = timezone.now()
+        proof.save(update_fields=["verification_status", "reviewed_by", "reviewed_at"])
+
+        _notify_student(
+            form_request,
+            Notification.NotificationType.PROCESSING,
+            "Payment confirmed",
+            (
+                f"We checked your receipt for {form_request.request_code} and confirmed your payment "
+                f"(O.R. {form_request.or_number}). Your document is now being processed."
+            ),
+        )
+        return Response(RegistrarQueueRowSerializer(_queue_queryset().get(pk=form_request.pk)).data)
+
+
+class RegistrarPaymentProofRejectView(APIView):
+    """POST /api/registrar/payment-proofs/<id>/reject/ - turn down an uploaded receipt, with a reason the student can act on.
+
+    The request stays at Approved - Ready to Print: the student can upload a clearer photo or bring the receipt in.
+    """
+
+    permission_classes = [IsApprovedRegistrarStaff]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        proof, form_request, refusal = _proof_for_review(pk)
+        if refusal is not None:
+            return refusal
+
+        serializer = RejectPaymentProofSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        proof.verification_status = PaymentProof.VerificationStatus.REJECTED
+        proof.rejection_reason = serializer.validated_data["rejection_reason"]
+        proof.reviewed_by = getattr(request.user, "staff_profile", None)
+        proof.reviewed_at = timezone.now()
+        proof.save(update_fields=["verification_status", "rejection_reason", "reviewed_by", "reviewed_at"])
+
+        _notify_student(
+            form_request,
+            Notification.NotificationType.PAYMENT_PROOF,
+            "Payment proof needs another look",
+            (
+                f"We couldn't confirm your payment for {form_request.request_code}. {proof.rejection_reason} "
+                "You can upload a clearer photo, or bring your printed receipt to Window 6 instead."
+            ),
+        )
+        return Response(RegistrarQueueRowSerializer(_queue_queryset().get(pk=form_request.pk)).data)
 
 
 class RegistrarMarkReadyView(APIView):

@@ -31,6 +31,7 @@ from TrailSync.views import (
     DashboardSummaryView,
     FormRequestListCreateView,
     FormRequestCancelView,
+    FormRequestPaymentProofView,
     FormRequestClaimStubView,
     FormRequestProxyView,
     FormRequestReceiptView,
@@ -38,6 +39,8 @@ from TrailSync.views import (
     MeView,
     RecentFormRequestsView,
     RegistrarApproveLogView,
+    RegistrarPaymentProofAcceptView,
+    RegistrarPaymentProofRejectView,
     RegistrarQueueApproveView,
     RegistrarDashboardSummaryView,
     RegistrarMarkReadyView,
@@ -88,6 +91,7 @@ urlpatterns = [
     path('api/form-requests/<int:pk>/receipt/', FormRequestReceiptView.as_view(), name='form-request-receipt'),
     path('api/form-requests/<int:pk>/claim-stub/', FormRequestClaimStubView.as_view(), name='form-request-claim-stub'),
     path('api/form-requests/<int:pk>/cancel/', FormRequestCancelView.as_view(), name='form-request-cancel'),
+    path('api/form-requests/<int:pk>/payment-proof/', FormRequestPaymentProofView.as_view(), name='form-request-payment-proof'),
     path('api/form-requests/<int:pk>/proxy/', FormRequestProxyView.as_view(), name='form-request-proxy'),
     # Lifecycle transitions: one endpoint per move, each checking the stage it is entered from.
     path('api/form-requests/<int:pk>/approve-log/', RegistrarApproveLogView.as_view(), name='form-request-approve-log'),
@@ -107,6 +111,8 @@ urlpatterns = [
     path('api/registrar/queue/<int:pk>/', RegistrarQueueDetailView.as_view(), name='registrar-queue-detail'),
     path('api/registrar/queue/<int:pk>/verify/', RegistrarQueueVerifyView.as_view(), name='registrar-queue-verify'),
     path('api/registrar/queue/<int:pk>/clear-flag/', RegistrarClearFlagView.as_view(), name='registrar-clear-flag'),
+    path('api/registrar/payment-proofs/<int:pk>/accept/', RegistrarPaymentProofAcceptView.as_view(), name='registrar-payment-proof-accept'),
+    path('api/registrar/payment-proofs/<int:pk>/reject/', RegistrarPaymentProofRejectView.as_view(), name='registrar-payment-proof-reject'),
     path('api/registrar/queue/<int:pk>/approve/', RegistrarQueueApproveView.as_view(), name='registrar-queue-approve'),
     path('api/registrar/queue/<int:pk>/reject/', RegistrarQueueRejectView.as_view(), name='registrar-queue-reject'),
 ]
